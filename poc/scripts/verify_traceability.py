@@ -50,6 +50,7 @@ class Capability:
     cap_type: str = "unknown"
     status: str = "unknown"
     origin: str = ""
+    description: str = ""
     design: str = ""
     verified_by: list[str] = field(default_factory=list)
 
@@ -110,6 +111,8 @@ def parse_capabilities(path: Path) -> dict[str, Capability]:
                 current.status = value
             elif key == "origin":
                 current.origin = value
+            elif key == "description":
+                current.description = value
             elif key == "design":
                 current.design = value
             elif key == "verified by":
@@ -204,6 +207,7 @@ def run(docs: Path, tests: Path) -> int:
             ("type", cap.cap_type),
             ("status", cap.status),
             ("origin", cap.origin),
+            ("description", cap.description),
         ):
             if not value or value == "unknown":
                 errors.append(

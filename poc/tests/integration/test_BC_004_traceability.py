@@ -50,6 +50,7 @@ def test_happy_path_zero_mismatches(tmp_docs_and_tests: tuple[Path, Path]) -> No
 - **type:** business
 - **status:** active
 - **origin:** BC-999
+- **description:** fixture description
 - **verified by:**
   - `tests/test_example.py`
 """,
@@ -112,6 +113,7 @@ def test_missing_test_file_referenced_by_capability_fails(
 - **type:** business
 - **status:** active
 - **origin:** BC-999
+- **description:** fixture description
 - **verified by:**
   - `tests/test_does_not_exist.py`
 """,
@@ -139,6 +141,7 @@ def test_unverified_active_capability_fails(
 - **type:** business
 - **status:** active
 - **origin:** BC-999
+- **description:** fixture description
 - **verified by:**
 """,
     )
@@ -164,12 +167,14 @@ def test_aspirational_and_deprecated_capabilities_do_not_require_tests(
 - **type:** business
 - **status:** aspirational
 - **origin:** BC-999
+- **description:** fixture description
 - **verified by:**
 
 ### CAP-002: Old feature
 - **type:** business
 - **status:** deprecated
 - **origin:** BC-999
+- **description:** fixture description
 - **verified by:**
 """,
     )
@@ -201,14 +206,14 @@ def test_required_fields_enforcement(
     tmp_docs_and_tests: tuple[Path, Path],
     capsys: pytest.CaptureFixture[str],
 ) -> None:
-    """Capability missing type / origin / status is flagged."""
+    """Capability missing type / origin / status / description is flagged."""
     docs, tests = tmp_docs_and_tests
     _write_capabilities(
         docs,
         """
 ## Business capabilities
 
-### CAP-B001: Example without type and origin
+### CAP-B001: Example without type origin status description
 - **verified by:**
   - `tests/test_x.py`
 """,
@@ -216,7 +221,7 @@ def test_required_fields_enforcement(
     _write_test(
         tests,
         "x",
-        '"""Covers:\n    - CAP-B001: Example without type and origin\n"""\n',
+        '"""Covers:\n    - CAP-B001: Example without type origin status description\n"""\n',
     )
 
     from poc.scripts.verify_traceability import run
@@ -227,6 +232,31 @@ def test_required_fields_enforcement(
     assert "missing required field 'type'" in err
     assert "missing required field 'origin'" in err
     assert "missing required field 'status'" in err
+    assert "missing required field 'description'" in err
+
+
+def test_description_present_passes(
+    tmp_docs_and_tests: tuple[Path, Path],
+) -> None:
+    """A cap with all required fields (incl. description) passes."""
+    docs, tests = tmp_docs_and_tests
+    _write_capabilities(
+        docs,
+        """
+### CAP-B001: Example
+- **type:** business
+- **status:** active
+- **origin:** BC-999
+- **description:** A short prose description of what this capability does.
+- **verified by:**
+  - `tests/test_x.py`
+""",
+    )
+    _write_test(tests, "x", '"""Covers:\n    - CAP-B001: Example\n"""\n')
+
+    from poc.scripts.verify_traceability import run
+
+    assert run(docs=docs, tests=tests) == 0
 
 
 def test_origin_story_must_exist(
@@ -269,6 +299,7 @@ def test_design_file_must_exist(
 - **type:** business
 - **status:** active
 - **origin:** BC-999
+- **description:** fixture description
 - **design:** nonexistent.md
 - **verified by:**
   - `tests/test_x.py`
@@ -297,6 +328,7 @@ def test_design_section_must_exist_in_file(
 - **type:** business
 - **status:** active
 - **origin:** BC-999
+- **description:** fixture description
 - **design:** DESIGN.md § Imaginary Section
 - **verified by:**
   - `tests/test_x.py`
@@ -324,6 +356,7 @@ def test_design_section_present_passes(tmp_docs_and_tests: tuple[Path, Path]) ->
 - **type:** business
 - **status:** active
 - **origin:** BC-999
+- **description:** fixture description
 - **design:** DESIGN.md § Real Section
 - **verified by:**
   - `tests/test_x.py`
@@ -349,6 +382,7 @@ def test_design_without_section_only_requires_file_to_exist(
 - **type:** business
 - **status:** active
 - **origin:** BC-999
+- **description:** fixture description
 - **design:** ANOTHER.md
 - **verified by:**
   - `tests/test_x.py`
@@ -374,6 +408,7 @@ def test_design_multiple_refs_comma_separated(tmp_docs_and_tests: tuple[Path, Pa
 - **type:** business
 - **status:** active
 - **origin:** BC-999
+- **description:** fixture description
 - **design:** DESIGN.md § Alpha, memory/x.md § Beta
 - **verified by:**
   - `tests/test_x.py`
@@ -400,6 +435,7 @@ def test_bidirectional_consistency_requires_test_file_in_verified_by(
 - **type:** business
 - **status:** active
 - **origin:** BC-999
+- **description:** fixture description
 - **verified by:**
 """,
     )
