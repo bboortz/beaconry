@@ -44,9 +44,16 @@ Feature: <feature summary>
     Then <outcome>
 ```
 
+## Capabilities delivered
+
+- **CAP-NNN: <human name>** (type: business|technical, status: active|aspirational)
+  *One-line description. Will be moved verbatim to `docs/CAPABILITIES.md` when the story moves `draft → in-progress`.*
+
+Reference existing CAPs this story extends or depends on (just list the ids).
+
 ## Open questions
 
-Captured during the 8-question clarification pass (see `_8-questions.md`).
+Captured during the 9-question clarification pass (see `_8-questions.md`).
 Resolved by moving answers into the sections above.
 
 ## Links

@@ -15,8 +15,9 @@ Per feature (BC-NNN):
                            as they come up (don't let discussion threads evaporate).
 
 1. Operator scenario       docs/stories/BC-NNN-<slug>.md
-                           User gives rough story → Claude asks 8 canonical questions
-                           → final Gherkin acceptance criteria. Status: draft → ready.
+                           User gives rough story → Claude asks 9 canonical questions
+                           → final Gherkin acceptance criteria + capability list.
+                           Status: draft → ready.
 
 2. Branch + plan doc       feat/BC-NNN-<slug> from dev
                            docs/plan/BC-NNN-<slug>-plan.md:
@@ -33,9 +34,16 @@ Per feature (BC-NNN):
 4. Implementation          Smallest change that turns the red test green.
 
 5. Refactor + unit tests   Extract helpers in poc/tests/unit/ where behavior is non-trivial.
+                           Every test file carries a top-of-file `Covers:` docstring
+                           block naming the CAPs it exercises.
+
+5a. Register capabilities  docs/CAPABILITIES.md
+                           Add or extend capability entries so bidirectional links to
+                           tests are complete. verify-traceability enforces this on
+                           every make check.
 
 6. Gates                   make check — lint, type (pyright basic), test, coverage ≥ 60%,
-                           docker build, smoke (bash demo.sh --smoke).
+                           verify-traceability, docker build, smoke (bash demo.sh --smoke).
 
 7. Update DESIGN.md        Only if architecture changed. Final shape only — not the delta.
 
@@ -68,7 +76,7 @@ docs/stories/
 
 Lifecycle: `draft → ready → in-progress → shipped` (stored in frontmatter + INDEX).
 
-**The 8 canonical clarification questions** (asked for every new story):
+**The 9 canonical clarification questions** (asked for every new story):
 1. **Who** is the operator in this moment? (role, mental state, context)
 2. **When** does the story fire? (trigger — event, state, cadence)
 3. **What** does success look like? (observable, not internal state)
@@ -77,6 +85,7 @@ Lifecycle: `draft → ready → in-progress → shipped` (stored in frontmatter 
 6. **Edge cases / failure modes** that matter?
 7. **Out of scope** — what could creep in but shouldn't?
 8. **How do we know it's done?** (acceptance test wording = Gherkin)
+9. **What capabilities does this story deliver or extend?** — Name new CAPs; link to existing ones. Added for BC-004 to make the capabilities matrix explicit from story-time, not retroactively.
 
 ## Branch & PR mechanics
 
@@ -94,6 +103,7 @@ Lifecycle: `draft → ready → in-progress → shipped` (stored in frontmatter 
 | Type check | `pyright` (basic / default) | pre-commit (staged) + CI (full) |
 | Tests | `pytest` | **pre-push** + CI |
 | Coverage | `pytest --cov`, threshold ≥ 60% | CI |
+| Traceability | `make verify-traceability` | CI (part of make check) |
 | Docker build | `docker compose build` | CI |
 | Smoke test | `bash demo.sh --smoke` | CI |
 

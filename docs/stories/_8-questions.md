@@ -1,6 +1,6 @@
-# Canonical story clarification — 8 questions
+# Canonical story clarification — 9 questions
 
-When a rough operator scenario arrives, Claude asks these 8 questions to produce an actionable, Gherkin-ready story file. Each answer maps to a specific section of `_template.md`.
+When a rough operator scenario arrives, Claude asks these 9 questions to produce an actionable, Gherkin-ready story file. Each answer maps to a specific section of `_template.md`.
 
 1. **Who** is the operator in this moment?
    *Role, mental state, what else they are doing.* → **Narrative**
@@ -25,6 +25,9 @@ When a rough operator scenario arrives, Claude asks these 8 questions to produce
 
 8. **How do we know it's done?**
    *Acceptance test wording — becomes Gherkin.* → **Acceptance criteria (Gherkin)**
+
+9. **What capabilities does this story deliver or extend?**
+   *Name new CAP-NNN rows (business or technical) and reference existing ones the story depends on. Capabilities land in `docs/CAPABILITIES.md`; tests link back via `Covers:` blocks.* → **Capabilities delivered**
 
 ## Exit criteria for the clarification pass
 

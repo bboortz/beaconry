@@ -1,6 +1,7 @@
-"""Placeholder sanity test so pytest collects at least one test during BC-000.
+"""Placeholder sanity test — proves the scaffold is wired for pytest.
 
-Replaced by real tests in BC-001. Do not delete without a replacement.
+Covers:
+    - CAP-006: Operator has a clear development process to contribute
 """
 
 

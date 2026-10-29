@@ -1,4 +1,9 @@
-"""Unit tests for urgency tier classification and safe-class detection."""
+"""Unit tests for urgency tier classification and safe-class detection.
+
+Covers:
+    - CAP-T004: Urgency tier classification matches design-decisions.md
+    - CAP-T005: Safe-class auto-fix rule (KEV + container only)
+"""
 
 from __future__ import annotations
 

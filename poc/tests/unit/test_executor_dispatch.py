@@ -1,4 +1,9 @@
-"""Unit tests for executor dispatch logic."""
+"""Unit tests for executor dispatch logic.
+
+Covers:
+    - CAP-T006: Executor dispatcher picks the first matching adapter
+    - CAP-T007: DockerAdapter in MOCK mode spawns no subprocess
+"""
 
 from __future__ import annotations
 

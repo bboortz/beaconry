@@ -1,4 +1,17 @@
-"""Unit tests for BC-002 demo dispatch, prereq checks, self-test flag."""
+"""Unit tests for BC-002 demo dispatch, prereq checks, self-test flag.
+
+Covers:
+    - CAP-002: Operator receives a real Telegram notification for a new CVE finding
+    - CAP-004: Operator is not flooded on noisy scans
+    - CAP-005: Operator can self-test the Telegram wiring without a scan
+    - CAP-T009: Demo dispatcher chooses mock vs real based on env
+    - CAP-T010: Prereq check surfaces missing syft/grype/image
+    - CAP-T011: Real syft errors are surfaced
+    - CAP-T012: Build-findings dedupes CVEs across packages
+    - CAP-T013: Build-findings filters below MIN_CVSS
+    - CAP-T014: Pipeline survives one failing notification
+    - CAP-T015: Per-run cap caps individual sends and triggers a digest
+"""
 
 from __future__ import annotations
 

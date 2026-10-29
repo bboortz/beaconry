@@ -5,6 +5,9 @@ Plan:  docs/plan/BC-001-mocked-e2e-demo-plan.md
 
 Runs the demo orchestrator programmatically with auto_confirm=True (no stdin).
 Captures stdout. Asserts stage ordering, mock labels, and no-network invariants.
+
+Covers:
+    - CAP-001: Operator previews the full pipeline with no external dependencies
 """
 
 from __future__ import annotations

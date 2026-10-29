@@ -72,12 +72,13 @@ Tier 3 — CVSS < 7: 24h batch
 Design-Driven, Test-Guarded Development. Per feature:
 
 0. **Consult `docs/plan/IDEAS.md`** — backlog of ideas we've already discussed. New ideas go in there immediately so threads don't get lost.
-1. Operator scenario → `docs/stories/BC-NNN-<slug>.md` (8 canonical clarification questions, Gherkin acceptance)
+1. Operator scenario → `docs/stories/BC-NNN-<slug>.md` (9 canonical clarification questions, Gherkin acceptance). Question 9 names the capabilities the story delivers.
 2. Branch `feat/BC-NNN-<slug>` + plan doc `docs/plan/BC-NNN-<slug>-plan.md`
-3. Red integration test under `poc/tests/integration/` encoding the Gherkin
+3. Red integration test under `poc/tests/integration/` encoding the Gherkin (top docstring includes a `Covers:` block)
 4. Implementation to turn test green
-5. Refactor + unit tests for non-trivial helpers
-6. `make check` passes (lint, type, test, coverage ≥ 60%, docker build, smoke)
+5. Refactor + unit tests for non-trivial helpers (every test file needs a `Covers:` block)
+5a. **Register capabilities** — add or extend entries in `docs/CAPABILITIES.md`; ensure bidirectional links. `make verify-traceability` must pass.
+6. `make check` passes (lint, type, test, coverage ≥ 60%, verify-traceability, docker build, smoke)
 7. DESIGN.md updated only if architecture changed
 8. PR to `dev` → user runs `/ultrareview` → Claude runs `/code-review` → user merges
 

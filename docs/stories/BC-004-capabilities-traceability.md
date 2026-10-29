@@ -1,7 +1,7 @@
 ---
 id: BC-004
 title: Capabilities documentation + bidirectional test traceability
-status: in-progress
+status: shipped
 created: 2026-10-29
 branch: feat/BC-004-capabilities-traceability
 plan: docs/plan/BC-004-capabilities-traceability-plan.md

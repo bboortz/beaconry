@@ -8,6 +8,9 @@ nginx:1.24 image is present locally. Does not send real Telegram messages
 (Telegram.Bot.send_message is monkey-patched).
 
 Run with:  pytest -m real_tools -v
+
+Covers:
+    - CAP-002: Operator receives a real Telegram notification for a new CVE finding
 """
 
 from __future__ import annotations
