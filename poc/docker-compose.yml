@@ -1,0 +1,54 @@
+---
+services:
+  hub:
+    build: ./hub
+    image: beaconry-hub:latest
+    container_name: beaconry-hub
+    restart: unless-stopped
+    environment:
+      - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
+      - TELEGRAM_CHAT_ID=${TELEGRAM_CHAT_ID}
+      - GRYPE_DB_CACHE_DIR=/data/grype-db
+      - MIN_CVSS=${MIN_CVSS:-7.0}
+    volumes:
+      - beaconry-data:/data
+      - /var/run/docker.sock:/var/run/docker.sock
+    ports:
+      - "127.0.0.1:8000:8000"
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      interval: 60s
+      start_interval: 2s
+      timeout: 10s
+      start_period: 120s
+      retries: 3
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+  scout:
+    build: ./scout
+    image: beaconry-scout:latest
+    container_name: beaconry-scout
+    restart: unless-stopped
+    environment:
+      - HUB_URL=http://hub:8000
+      - HOST_NAME=${HOST_NAME:-server2}
+      - SCAN_INTERVAL=${SCAN_INTERVAL:-300}
+      - PACMAN_DB=/host/var/lib/pacman
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - /var/lib/pacman:/host/var/lib/pacman:ro
+    depends_on:
+      hub:
+        condition: service_healthy
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"
+
+volumes:
+  beaconry-data:
