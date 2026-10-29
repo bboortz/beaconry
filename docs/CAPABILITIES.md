@@ -60,6 +60,25 @@ Enforcement: `poc/scripts/verify_traceability.py` runs as part of `make check`. 
 - **verified by:**
   - `poc/tests/unit/test_demo_dispatch.py`
 
+### CAP-B009: Operator runs the full demo pipeline with Docker only (no Python toolchain)
+- **type:** business
+- **status:** active
+- **origin:** BC-005
+- **design:** DESIGN.md § Architecture, memory/docker-standard.md
+- **description:** `make demo` boots the whole beaconry stack via `docker compose up --build` under `poc/`. Scout + hub run as containers; the host needs only Docker + Docker Compose. The local-Python path remains available via `BEACONRY_MOCK=1 make demo` for the dev inner loop.
+- **verified by:**
+  - `poc/tests/integration/test_BC_005_compose.py`
+  - `poc/tests/unit/test_scout_filter.py`
+
+### CAP-B010: Scout surveys the full Docker inventory with glob allow/deny filtering
+- **type:** business
+- **status:** active
+- **origin:** BC-005
+- **design:** DESIGN.md § Architecture
+- **description:** By default, scout scans images matching `SCOUT_INCLUDE="nginx*,redis*,postgres*"` — a demo-safe allowlist that excludes dev/test clutter. Operators can broaden (`SCOUT_INCLUDE="*"`) or narrow further (`SCOUT_EXCLUDE="*-test,*-dev"`). Scout logs name every tag scanned and skipped so the operator understands scope.
+- **verified by:**
+  - `poc/tests/unit/test_scout_filter.py`
+
 ### CAP-B006: Operator has a clear development process to contribute
 - **type:** business
 - **status:** active
@@ -211,6 +230,26 @@ Enforcement: `poc/scripts/verify_traceability.py` runs as part of `make check`. 
 - **supports:** CAP-B004
 - **verified by:**
   - `poc/tests/unit/test_demo_dispatch.py`
+
+### CAP-T018: Scout filters image tags by include/exclude glob patterns
+- **type:** technical
+- **status:** active
+- **origin:** BC-005
+- **design:** DESIGN.md § Architecture
+- **description:** `filter_image_tags(tags, include_globs, exclude_globs)` uses `fnmatch.fnmatchcase` so include = "any match" and exclude always overrides include. `parse_globs(env)` splits a comma-separated glob list tolerant of whitespace.
+- **supports:** CAP-B010
+- **verified by:**
+  - `poc/tests/unit/test_scout_filter.py`
+
+### CAP-T019: Compose stack brings up hub + scout with :ro socket mount, healthchecks, env propagation
+- **type:** technical
+- **status:** active
+- **origin:** BC-005
+- **design:** memory/docker-standard.md
+- **description:** `poc/docker-compose.yml` declares hub + scout services. Hub owns a healthcheck via `/health`, mounts the Docker socket rw (for pulls), and persists the grype DB in the `beaconry-data` named volume. Scout mounts the Docker socket `:ro` and only reads inventory. BC-005 env vars (`SCOUT_INCLUDE`, `SCOUT_EXCLUDE`, `BEACONRY_MAX_FINDINGS_PER_RUN`, `MIN_CVSS`) propagate via `.env` substitution.
+- **supports:** CAP-B009
+- **verified by:**
+  - `poc/tests/integration/test_BC_005_compose.py`
 
 ### CAP-T016: verify-traceability enforces bidirectional links
 - **type:** technical

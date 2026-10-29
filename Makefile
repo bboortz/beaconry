@@ -13,9 +13,10 @@ help:
 	@echo "  make test          pytest + coverage"
 	@echo "  make verify-traceability   docs/CAPABILITIES.md ↔ tests bidirectional check"
 	@echo "  make check         lint + type + test + verify-traceability (what CI blocks on)"
-	@echo "  make demo          python -m poc.demo (real pipeline if .env set; mock if BEACONRY_MOCK=1)"
-	@echo "  make demo ARGS=--self-test   Telegram canary, no scan"
-	@echo "  make smoke         bash poc/demo.sh --smoke (non-interactive mock, CI)"
+	@echo "  make demo                    docker compose up (real pipeline, host inventory)"
+	@echo "  BEACONRY_MOCK=1 make demo    local Python mock (fast dev loop)"
+	@echo "  make demo ARGS=--self-test   Telegram canary (mock mode only)"
+	@echo "  make smoke                   bash poc/demo.sh --smoke (non-interactive mock, CI)"
 	@echo "  make install-hooks pre-commit install + pre-push"
 	@echo "  make clean         remove caches"
 
@@ -41,7 +42,13 @@ check: lint type test verify-traceability
 	@echo "✓ All local gates passed"
 
 demo:
-	PATH="$(PWD)/.beaconry-cache/bin:$$PATH" $(PYTHON) -m poc.demo $(ARGS)
+	@if [ "$$BEACONRY_MOCK" = "1" ]; then \
+		echo "==> BEACONRY_MOCK=1 — running local Python mock pipeline"; \
+		PATH="$(PWD)/.beaconry-cache/bin:$$PATH" $(PYTHON) -m poc.demo $(ARGS); \
+	else \
+		echo "==> real mode — running Docker Compose stack"; \
+		cd poc && docker compose up --build; \
+	fi
 
 smoke:
 	bash poc/demo.sh --smoke

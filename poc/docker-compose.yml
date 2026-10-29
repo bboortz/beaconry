@@ -9,7 +9,8 @@ services:
       - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
       - TELEGRAM_CHAT_ID=${TELEGRAM_CHAT_ID}
       - GRYPE_DB_CACHE_DIR=/data/grype-db
-      - MIN_CVSS=${MIN_CVSS:-7.0}
+      - MIN_CVSS=${MIN_CVSS:-9.0}
+      - BEACONRY_MAX_FINDINGS_PER_RUN=${BEACONRY_MAX_FINDINGS_PER_RUN:-5}
     volumes:
       - beaconry-data:/data
       - /var/run/docker.sock:/var/run/docker.sock
@@ -37,6 +38,8 @@ services:
       - HUB_URL=http://hub:8000
       - HOST_NAME=${HOST_NAME:-server2}
       - SCAN_INTERVAL=${SCAN_INTERVAL:-300}
+      - SCOUT_INCLUDE=${SCOUT_INCLUDE:-nginx*,redis*,postgres*}
+      - SCOUT_EXCLUDE=${SCOUT_EXCLUDE:-}
       - PACMAN_DB=/host/var/lib/pacman
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro

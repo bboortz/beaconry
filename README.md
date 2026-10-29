@@ -39,9 +39,20 @@ make check           # lint + type + test
 ## POC quickstart
 
 ```bash
-cd poc
-cp .env.example .env         # add TELEGRAM_BOT_TOKEN + TELEGRAM_CHAT_ID
-bash demo.sh                 # seeds nginx:1.24, starts stack, tails hub logs
+# One-time
+cp poc/.env.example poc/.env   # fill TELEGRAM_BOT_TOKEN + TELEGRAM_CHAT_ID
+
+# Each run
+make demo                      # real pipeline via Docker Compose — host inventory
+BEACONRY_MOCK=1 make demo      # local Python mock pipeline (fast dev loop)
+```
+
+`make demo` (real mode) runs `docker compose up --build` under `poc/`. Scout and hub run as containers; the host needs only Docker + Docker Compose. Scout scans images matching `SCOUT_INCLUDE` (default `nginx*,redis*,postgres*` — demo-safe allowlist). Set `SCOUT_INCLUDE=*` in `poc/.env` to scan everything, or narrow with `SCOUT_EXCLUDE=*-test,*-dev`.
+
+First `make demo` builds the container images (installs syft + grype inside; ~5 min cold cache; subsequent runs are fast). Teardown:
+
+```bash
+docker compose -f poc/docker-compose.yml down
 ```
 
 See [`docs/plan/BC-000-repo-scaffold-plan.md`](docs/plan/BC-000-repo-scaffold-plan.md) for the current state of the scaffold, and [`docs/stories/INDEX.md`](docs/stories/INDEX.md) for in-flight stories.

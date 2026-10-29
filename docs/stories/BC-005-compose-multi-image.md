@@ -1,7 +1,7 @@
 ---
 id: BC-005
 title: Multi-image Compose demo — full pipeline containerised
-status: in-progress
+status: shipped
 created: 2026-10-29
 branch: feat/BC-005-compose-multi-image
 plan: docs/plan/BC-005-compose-multi-image-plan.md

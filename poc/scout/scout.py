@@ -10,6 +10,7 @@ Scans:
   - Open TCP ports (via ss -tlnp)
 """
 
+import fnmatch
 import json
 import logging
 import os
@@ -38,8 +39,8 @@ DEFAULT_INCLUDE_GLOBS = "nginx*,redis*,postgres*"
 
 
 def parse_globs(env: str) -> list[str]:
-    """Parse a comma-separated glob list from an env var. Empty → []."""
-    raise NotImplementedError("BC-005: filter not yet implemented")
+    """Parse a comma-separated glob list from an env var. Whitespace tolerated. Empty → []."""
+    return [piece.strip() for piece in env.split(",") if piece.strip()]
 
 
 def filter_image_tags(
@@ -48,8 +49,17 @@ def filter_image_tags(
     include_globs: list[str],
     exclude_globs: list[str],
 ) -> list[str]:
-    """Return tags matching any include glob and no exclude glob."""
-    raise NotImplementedError("BC-005: filter not yet implemented")
+    """Return tags matching any include glob AND no exclude glob.
+
+    If include_globs is empty, nothing passes. If exclude_globs is empty,
+    only include is applied. Exclude always overrides include.
+    """
+    return [
+        tag
+        for tag in tags
+        if any(fnmatch.fnmatchcase(tag, g) for g in include_globs)
+        and not any(fnmatch.fnmatchcase(tag, g) for g in exclude_globs)
+    ]
 
 
 # ── syft ─────────────────────────────────────────────────────────────────────
@@ -82,12 +92,32 @@ def scan_docker_images() -> list[dict]:
         log.warning("Docker socket unavailable: %s", e)
         return []
 
-    results = []
+    include_globs = parse_globs(os.environ.get("SCOUT_INCLUDE", DEFAULT_INCLUDE_GLOBS))
+    exclude_globs = parse_globs(os.environ.get("SCOUT_EXCLUDE", ""))
+
+    all_tags: list[str] = []
     for image in client.images.list():
-        tags = [t for t in image.tags if "<none>" not in t]
-        if not tags:
-            continue
-        tag = tags[0]
+        all_tags.extend(t for t in image.tags if "<none>" not in t)
+    matching = filter_image_tags(all_tags, include_globs=include_globs, exclude_globs=exclude_globs)
+    skipped = sorted(set(all_tags) - set(matching))
+    log.info(
+        "Image inventory: %d total, %d matched (%s), %d skipped",
+        len(all_tags),
+        len(matching),
+        ", ".join(include_globs) or "<none>",
+        len(skipped),
+    )
+    if skipped:
+        log.info("Skipped tags: %s", ", ".join(skipped[:10]) + (" …" if len(skipped) > 10 else ""))
+    if not matching and all_tags:
+        log.warning(
+            "0 image(s) matched SCOUT_INCLUDE=%r — nothing to scan. "
+            'Adjust the glob (e.g. SCOUT_INCLUDE="*" to scan everything).',
+            os.environ.get("SCOUT_INCLUDE", DEFAULT_INCLUDE_GLOBS),
+        )
+
+    results = []
+    for tag in matching:
         log.info("Scanning image: %s", tag)
         sbom = syft_scan(tag)
         if sbom:
