@@ -192,6 +192,38 @@ def test_orphan_error_message_is_copy_pasteable(
     assert "CAP-NNN" in err  # the template placeholder
 
 
+def test_required_fields_enforcement(
+    tmp_docs_and_tests: tuple[Path, Path],
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Capability missing type / origin / status is flagged."""
+    docs, tests = tmp_docs_and_tests
+    _write_capabilities(
+        docs,
+        """
+## Business capabilities
+
+### CAP-B001: Example without type and origin
+- **verified by:**
+  - `tests/test_x.py`
+""",
+    )
+    _write_test(
+        tests,
+        "x",
+        '"""Covers:\n    - CAP-B001: Example without type and origin\n"""\n',
+    )
+
+    from poc.scripts.verify_traceability import run
+
+    rc = run(docs=docs, tests=tests)
+    assert rc != 0
+    err = capsys.readouterr().err
+    assert "missing required field 'type'" in err
+    assert "missing required field 'origin'" in err
+    assert "missing required field 'status'" in err
+
+
 def test_bidirectional_consistency_requires_test_file_in_verified_by(
     tmp_docs_and_tests: tuple[Path, Path],
 ) -> None:

@@ -105,6 +105,14 @@ Feature: Capabilities documentation + bidirectional traceability
         template they can paste
 ```
 
+## Capabilities delivered
+
+- **CAP-B006: Operator has a clear development process to contribute** (business, active) — extended; now includes bidirectional traceability as part of the process definition.
+- **CAP-T016: verify-traceability enforces bidirectional links** (technical, active) — new.
+- **CAP-T017: Orphan tests fail the gate with a copy-pasteable template** (technical, active) — new.
+
+Depends on existing CAPs: CAP-B001..B005 (all prior business caps become scope for the matrix seeding), CAP-T001..T015 (all prior technical caps become reverse-linked).
+
 ## Open questions
 
 - (none — resolved during 2026-10-29 clarification + 3 virtual-user iterations)

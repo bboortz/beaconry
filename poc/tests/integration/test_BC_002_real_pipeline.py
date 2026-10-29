@@ -10,7 +10,7 @@ nginx:1.24 image is present locally. Does not send real Telegram messages
 Run with:  pytest -m real_tools -v
 
 Covers:
-    - CAP-002: Operator receives a real Telegram notification for a new CVE finding
+    - CAP-B002: Operator receives a real Telegram notification for a new CVE finding
 """
 
 from __future__ import annotations

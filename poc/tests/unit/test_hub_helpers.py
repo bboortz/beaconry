@@ -1,7 +1,7 @@
 """Unit tests for hub helper functions.
 
 Covers:
-    - CAP-003: Operator can disable Fix-execution with a feature flag
+    - CAP-B003: Operator can disable Fix-execution with a feature flag
     - CAP-T001: Finding ID is stable across runs
     - CAP-T002: CVSS extraction picks the highest score across entries
     - CAP-T003: Notification message is Telegram-HTML-safe for adversarial descriptions

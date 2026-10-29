@@ -15,7 +15,7 @@ Enforcement: `poc/scripts/verify_traceability.py` runs as part of `make check`. 
 
 ## Business capabilities
 
-### CAP-001: Operator previews the full pipeline with no external dependencies
+### CAP-B001: Operator previews the full pipeline with no external dependencies
 - **type:** business
 - **status:** active
 - **origin:** BC-001
@@ -24,7 +24,7 @@ Enforcement: `poc/scripts/verify_traceability.py` runs as part of `make check`. 
 - **verified by:**
   - `poc/tests/integration/test_BC_001_mocked_e2e.py`
 
-### CAP-002: Operator receives a real Telegram notification for a new CVE finding
+### CAP-B002: Operator receives a real Telegram notification for a new CVE finding
 - **type:** business
 - **status:** active
 - **origin:** BC-002
@@ -34,7 +34,7 @@ Enforcement: `poc/scripts/verify_traceability.py` runs as part of `make check`. 
   - `poc/tests/integration/test_BC_002_real_pipeline.py`
   - `poc/tests/unit/test_demo_dispatch.py`
 
-### CAP-003: Operator can disable Fix-execution with a feature flag
+### CAP-B003: Operator can disable Fix-execution with a feature flag
 - **type:** business
 - **status:** active
 - **origin:** BC-002
@@ -43,7 +43,7 @@ Enforcement: `poc/scripts/verify_traceability.py` runs as part of `make check`. 
 - **verified by:**
   - `poc/tests/unit/test_hub_helpers.py`
 
-### CAP-004: Operator is not flooded on noisy scans
+### CAP-B004: Operator is not flooded on noisy scans
 - **type:** business
 - **status:** active
 - **origin:** BC-002
@@ -52,7 +52,7 @@ Enforcement: `poc/scripts/verify_traceability.py` runs as part of `make check`. 
 - **verified by:**
   - `poc/tests/unit/test_demo_dispatch.py`
 
-### CAP-005: Operator can self-test the Telegram wiring without a scan
+### CAP-B005: Operator can self-test the Telegram wiring without a scan
 - **type:** business
 - **status:** active
 - **origin:** BC-002
@@ -60,7 +60,7 @@ Enforcement: `poc/scripts/verify_traceability.py` runs as part of `make check`. 
 - **verified by:**
   - `poc/tests/unit/test_demo_dispatch.py`
 
-### CAP-006: Operator has a clear development process to contribute
+### CAP-B006: Operator has a clear development process to contribute
 - **type:** business
 - **status:** active
 - **origin:** BC-000
@@ -79,7 +79,7 @@ Enforcement: `poc/scripts/verify_traceability.py` runs as part of `make check`. 
 - **origin:** BC-001
 - **design:** memory/telegram-patterns.md § Finding deduplication
 - **description:** `make_id(host, cve_id, source_ref, package)` returns a stable 16-char sha256 slice. Same inputs → same id. Different inputs → different ids. SQLite `INSERT OR IGNORE` uses this id as PK, so repeat runs don't re-notify.
-- **supports:** CAP-002, CAP-004
+- **supports:** CAP-B002, CAP-B004
 - **verified by:**
   - `poc/tests/unit/test_hub_helpers.py`
 
@@ -88,7 +88,7 @@ Enforcement: `poc/scripts/verify_traceability.py` runs as part of `make check`. 
 - **status:** active
 - **origin:** BC-001
 - **description:** grype can return multiple CVSS entries per vulnerability (NVD + vendor); `extract_cvss` picks the maximum.
-- **supports:** CAP-002, CAP-004
+- **supports:** CAP-B002, CAP-B004
 - **verified by:**
   - `poc/tests/unit/test_hub_helpers.py`
 
@@ -97,7 +97,7 @@ Enforcement: `poc/scripts/verify_traceability.py` runs as part of `make check`. 
 - **status:** active
 - **origin:** BC-002 (fix branch)
 - **description:** `format_notification` renders in `parse_mode="HTML"` and html-escapes every user-controlled field. Raw `<`, `>`, `&` from CVE descriptions become entities; Markdown-ish chars (`[`, `_`, `*`, backtick) pass through unmolested.
-- **supports:** CAP-002
+- **supports:** CAP-B002
 - **verified by:**
   - `poc/tests/unit/test_hub_helpers.py`
 
@@ -107,7 +107,7 @@ Enforcement: `poc/scripts/verify_traceability.py` runs as part of `make check`. 
 - **origin:** BC-001
 - **design:** memory/design-decisions.md § Urgency tiers
 - **description:** `classify_tier(finding, kev, internet_facing)` returns 0 for KEV, 1 for CVSS≥9 + internet-facing, 2 for CVSS 7–8 or LAN-only, 3 for CVSS<7.
-- **supports:** CAP-002
+- **supports:** CAP-B002
 - **verified by:**
   - `poc/tests/unit/test_urgency.py`
 
@@ -117,7 +117,7 @@ Enforcement: `poc/scripts/verify_traceability.py` runs as part of `make check`. 
 - **origin:** BC-001
 - **design:** memory/design-decisions.md § Auto-fix trust model
 - **description:** `is_safe_class(finding, kev)` returns True only when KEV + source_type=="docker" (rollback tag is reversible). Everything else requires operator confirmation.
-- **supports:** CAP-003
+- **supports:** CAP-B003
 - **verified by:**
   - `poc/tests/unit/test_urgency.py`
 
@@ -127,7 +127,7 @@ Enforcement: `poc/scripts/verify_traceability.py` runs as part of `make check`. 
 - **origin:** BC-001
 - **design:** DESIGN.md § Executor plugins
 - **description:** `can_handle(finding)` filters adapters; `next()` picks the first match. DockerAdapter claims `source_type="docker"`; ManualAdapter is the universal fallback.
-- **supports:** CAP-002
+- **supports:** CAP-B002
 - **verified by:**
   - `poc/tests/unit/test_executor_dispatch.py`
 
@@ -136,7 +136,7 @@ Enforcement: `poc/scripts/verify_traceability.py` runs as part of `make check`. 
 - **status:** active
 - **origin:** BC-001
 - **description:** With `BEACONRY_MOCK=1`, `DockerAdapter.execute` prints `[mock]` lines and returns a success result without touching `subprocess.run` or `asyncio.create_subprocess_shell`.
-- **supports:** CAP-001
+- **supports:** CAP-B001
 - **verified by:**
   - `poc/tests/unit/test_executor_dispatch.py`
 
@@ -145,7 +145,7 @@ Enforcement: `poc/scripts/verify_traceability.py` runs as part of `make check`. 
 - **status:** active
 - **origin:** BC-001
 - **description:** `save_finding` uses `INSERT OR IGNORE` keyed by finding id, so duplicate findings return False without raising. `load_finding` and `set_status` round-trip the row.
-- **supports:** CAP-002, CAP-004
+- **supports:** CAP-B002, CAP-B004
 - **verified by:**
   - `poc/tests/unit/test_hub_helpers.py`
 
@@ -154,7 +154,7 @@ Enforcement: `poc/scripts/verify_traceability.py` runs as part of `make check`. 
 - **status:** active
 - **origin:** BC-002
 - **description:** `choose_mode(env)` returns "mock" when `BEACONRY_MOCK=1`, "real" when `TELEGRAM_BOT_TOKEN` + `TELEGRAM_CHAT_ID` are set, and raises `MissingConfigError` otherwise. Error message points to `poc/.env.example` and the `BEACONRY_MOCK=1 make demo` fallback.
-- **supports:** CAP-002, CAP-001
+- **supports:** CAP-B002, CAP-B001
 - **verified by:**
   - `poc/tests/unit/test_demo_dispatch.py`
 
@@ -163,7 +163,7 @@ Enforcement: `poc/scripts/verify_traceability.py` runs as part of `make check`. 
 - **status:** active
 - **origin:** BC-002
 - **description:** `check_prereqs(image)` returns a non-empty list naming each missing dependency; empty list means ready. Called before the pipeline starts in real mode.
-- **supports:** CAP-002
+- **supports:** CAP-B002
 - **verified by:**
   - `poc/tests/unit/test_demo_dispatch.py`
 
@@ -172,7 +172,7 @@ Enforcement: `poc/scripts/verify_traceability.py` runs as part of `make check`. 
 - **status:** active
 - **origin:** BC-002
 - **description:** `_run_syft` raises `RuntimeError("syft failed: ...")` on non-zero exit, carrying up to 200 chars of stderr. Caller aborts the pipeline instead of silently continuing.
-- **supports:** CAP-002
+- **supports:** CAP-B002
 - **verified by:**
   - `poc/tests/unit/test_demo_dispatch.py`
 
@@ -181,7 +181,7 @@ Enforcement: `poc/scripts/verify_traceability.py` runs as part of `make check`. 
 - **status:** active
 - **origin:** BC-002 (fix branch)
 - **description:** `_build_findings_from_matches` groups by cve_id and keeps the highest-CVSS variant. openssl + libssl1.1 sharing CVE-X produce one Finding, not two.
-- **supports:** CAP-004
+- **supports:** CAP-B004
 - **verified by:**
   - `poc/tests/unit/test_demo_dispatch.py`
 
@@ -190,7 +190,7 @@ Enforcement: `poc/scripts/verify_traceability.py` runs as part of `make check`. 
 - **status:** active
 - **origin:** BC-002
 - **description:** Any grype match whose CVSS falls below `MIN_CVSS` (default 7.0; real-mode demo default 9.0) is excluded from the Finding list before dedup.
-- **supports:** CAP-004
+- **supports:** CAP-B004
 - **verified by:**
   - `poc/tests/unit/test_demo_dispatch.py`
 
@@ -199,7 +199,7 @@ Enforcement: `poc/scripts/verify_traceability.py` runs as part of `make check`. 
 - **status:** active
 - **origin:** BC-002 (fix branch)
 - **description:** `run_real_pipeline_once` wraps each `hub.notify` call in try/except. A failing notify is logged with CVE id + package and the loop continues with the next finding.
-- **supports:** CAP-002
+- **supports:** CAP-B002
 - **verified by:**
   - `poc/tests/unit/test_demo_dispatch.py`
 
@@ -208,7 +208,7 @@ Enforcement: `poc/scripts/verify_traceability.py` runs as part of `make check`. 
 - **status:** active
 - **origin:** BC-002 (fix branch)
 - **description:** With `BEACONRY_MAX_FINDINGS_PER_RUN=5`, 20 unique CVEs → 5 individual messages + 1 HTML digest message naming the remaining 15 (first 10 as bullets, plus "N more" if any).
-- **supports:** CAP-004
+- **supports:** CAP-B004
 - **verified by:**
   - `poc/tests/unit/test_demo_dispatch.py`
 
@@ -217,7 +217,7 @@ Enforcement: `poc/scripts/verify_traceability.py` runs as part of `make check`. 
 - **status:** active
 - **origin:** BC-004
 - **description:** `poc/scripts/verify_traceability.py` parses `docs/CAPABILITIES.md` and `poc/tests/**/test_*.py` and errors on: missing Covers block, dangling CAP id, missing test file, unverified active CAP, bidirectional inconsistency. Exits 0 only when the matrix is clean.
-- **supports:** CAP-006
+- **supports:** CAP-B006
 - **verified by:**
   - `poc/tests/integration/test_BC_004_traceability.py`
 
@@ -226,6 +226,6 @@ Enforcement: `poc/scripts/verify_traceability.py` runs as part of `make check`. 
 - **status:** active
 - **origin:** BC-004
 - **description:** When a test file lacks a `Covers:` block, verify-traceability emits a stderr message naming the file and a copy-pasteable `"""... Covers: - CAP-NNN: <name> """` template the developer can paste.
-- **supports:** CAP-006
+- **supports:** CAP-B006
 - **verified by:**
   - `poc/tests/integration/test_BC_004_traceability.py`

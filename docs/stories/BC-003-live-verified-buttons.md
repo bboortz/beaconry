@@ -109,6 +109,17 @@ Live scenarios (Snooze / Accept / Fix / double-tap) require a manual run with us
 
 The non-live scenarios (callback validation, pytest -m real_tools, README, DB-filename reconciliation) are standard automated/review work.
 
+## Capabilities delivered
+
+*To be finalised when BC-003 moves `draft → ready`. Preliminary list:*
+
+- **CAP-B007: Operator snoozes/accepts findings and the system respects the decision across runs** (business, aspirational → active on ship) — new.
+- **CAP-B008: Fix-now button is honest about its status (stub until BC-004-successor)** (business, aspirational → active on ship) — new.
+- **CAP-T018: Callback_data validation rejects malformed input** (technical, aspirational) — new.
+- **CAP-T019: Button handlers are idempotent on double-tap** (technical, aspirational) — new.
+
+Depends on CAP-B002 (notifications arrive — prerequisite), CAP-T003 (HTML escape in edited messages).
+
 ## Open questions
 
 - Should Fix-now now point to BC-004 or stay at BC-003 if we re-scope? → Settle in the plan doc when BC-003 moves `draft → ready`.

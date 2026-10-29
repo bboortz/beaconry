@@ -169,6 +169,19 @@ def run(docs: Path, tests: Path) -> int:
                 f"CAPABILITIES.md § {cap.cap_id}: status=active but no Verified by entries "
                 f"(use status=aspirational for in-flight capabilities)"
             )
+        for field_name, value in (
+            ("type", cap.cap_type),
+            ("status", cap.status),
+            ("origin", cap.origin),
+        ):
+            if not value or value == "unknown":
+                errors.append(
+                    f"CAPABILITIES.md § {cap.cap_id}: missing required field '{field_name}'"
+                )
+        if not cap.name.strip():
+            errors.append(
+                f"CAPABILITIES.md § {cap.cap_id}: missing human-readable name after the id"
+            )
 
     for test_path, cap_ids in test_covers.items():
         rel = _rel(test_path, tests.parent)

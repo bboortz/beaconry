@@ -7,7 +7,7 @@ Runs the demo orchestrator programmatically with auto_confirm=True (no stdin).
 Captures stdout. Asserts stage ordering, mock labels, and no-network invariants.
 
 Covers:
-    - CAP-001: Operator previews the full pipeline with no external dependencies
+    - CAP-B001: Operator previews the full pipeline with no external dependencies
 """
 
 from __future__ import annotations

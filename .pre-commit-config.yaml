@@ -25,3 +25,9 @@ repos:
         language: system
         pass_filenames: false
         stages: [pre-push]
+      - id: verify-traceability-pre-push
+        name: verify-traceability (pre-push)
+        entry: python -m poc.scripts.verify_traceability
+        language: system
+        pass_filenames: false
+        stages: [pre-push]

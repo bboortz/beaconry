@@ -1,7 +1,7 @@
 """Placeholder sanity test — proves the scaffold is wired for pytest.
 
 Covers:
-    - CAP-006: Operator has a clear development process to contribute
+    - CAP-B006: Operator has a clear development process to contribute
 """
 
 
