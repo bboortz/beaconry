@@ -18,13 +18,12 @@ from contextlib import asynccontextmanager
 from pathlib import Path
 
 import uvicorn
-from fastapi import FastAPI
-from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
-from telegram.ext import Application, CallbackQueryHandler, ContextTypes
-
 from executor.base import ExecutorPlugin, Finding
 from executor.docker_adapter import DockerAdapter
 from executor.manual_adapter import ManualAdapter
+from fastapi import FastAPI
+from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
+from telegram.ext import Application, CallbackQueryHandler, ContextTypes
 
 logging.basicConfig(
     level=logging.INFO,
@@ -46,6 +45,7 @@ tg_app: Application | None = None
 
 
 # ── Database ──────────────────────────────────────────────────────────────────
+
 
 def init_db() -> None:
     con = sqlite3.connect(DB_PATH)
@@ -79,9 +79,20 @@ def save_finding(f: Finding) -> bool:
                (id, host, cve_id, package, version, fixed_version, severity,
                 cvss, source_type, source_ref, description, found_at)
                VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
-            (f.id, f.host, f.cve_id, f.package, f.version, f.fixed_version,
-             f.severity, f.cvss, f.source_type, f.source_ref, f.description,
-             int(time.time())),
+            (
+                f.id,
+                f.host,
+                f.cve_id,
+                f.package,
+                f.version,
+                f.fixed_version,
+                f.severity,
+                f.cvss,
+                f.source_type,
+                f.source_ref,
+                f.description,
+                int(time.time()),
+            ),
         )
         new_row = con.execute("SELECT changes()").fetchone()[0] > 0
         con.commit()
@@ -110,13 +121,18 @@ def set_status(finding_id: str, status: str) -> None:
 
 # ── CVE matching ──────────────────────────────────────────────────────────────
 
+
 async def run_grype(sbom: dict) -> list[dict]:
     with tempfile.NamedTemporaryFile(suffix=".json", mode="w", delete=False) as f:
         json.dump(sbom, f)
         path = f.name
     try:
         proc = await asyncio.create_subprocess_exec(
-            "grype", f"sbom:{path}", "-o", "json", "--quiet",
+            "grype",
+            f"sbom:{path}",
+            "-o",
+            "json",
+            "--quiet",
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )
@@ -164,24 +180,27 @@ async def process_sbom_entry(entry: dict, host: str) -> list[Finding]:
         source_ref = source_meta.get("image") or artifact.get("name", "")
         fix_versions = vuln.get("fix", {}).get("versions") or []
 
-        findings.append(Finding(
-            id=make_id(host, vuln["id"], source_ref, artifact.get("name", "")),
-            host=host,
-            cve_id=vuln["id"],
-            package=artifact.get("name", ""),
-            version=artifact.get("version", ""),
-            fixed_version=fix_versions[0] if fix_versions else "not available",
-            severity=vuln.get("severity", "Unknown"),
-            cvss=cvss,
-            source_type=source_type,
-            source_ref=source_ref,
-            description=(vuln.get("description") or "")[:200],
-        ))
+        findings.append(
+            Finding(
+                id=make_id(host, vuln["id"], source_ref, artifact.get("name", "")),
+                host=host,
+                cve_id=vuln["id"],
+                package=artifact.get("name", ""),
+                version=artifact.get("version", ""),
+                fixed_version=fix_versions[0] if fix_versions else "not available",
+                severity=vuln.get("severity", "Unknown"),
+                cvss=cvss,
+                source_type=source_type,
+                source_ref=source_ref,
+                description=(vuln.get("description") or "")[:200],
+            )
+        )
 
     return findings
 
 
 # ── Verification ──────────────────────────────────────────────────────────────
+
 
 async def verify_fix(finding: Finding) -> bool:
     """Re-scan after fix. Returns True if the CVE is no longer present."""
@@ -192,7 +211,11 @@ async def verify_fix(finding: Finding) -> bool:
     new_image = f"{base}:latest"
 
     proc = await asyncio.create_subprocess_exec(
-        "syft", new_image, "-o", "syft-json", "--quiet",
+        "syft",
+        new_image,
+        "-o",
+        "syft-json",
+        "--quiet",
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
     )
@@ -208,14 +231,17 @@ async def verify_fix(finding: Finding) -> bool:
 
     matches = await run_grype(sbom)
     for match in matches:
-        if (match.get("vulnerability", {}).get("id") == finding.cve_id
-                and match.get("artifact", {}).get("name") == finding.package):
+        if (
+            match.get("vulnerability", {}).get("id") == finding.cve_id
+            and match.get("artifact", {}).get("name") == finding.package
+        ):
             return False  # still present
 
     return True
 
 
 # ── Telegram ──────────────────────────────────────────────────────────────────
+
 
 def format_notification(finding: Finding) -> str:
     emoji = {"Critical": "🔴", "High": "🟠", "Medium": "🟡"}.get(finding.severity, "⚪")
@@ -241,13 +267,15 @@ async def notify(finding: Finding) -> None:
         return
 
     text = format_notification(finding)
-    keyboard = InlineKeyboardMarkup([
+    keyboard = InlineKeyboardMarkup(
         [
-            InlineKeyboardButton("🔧 Fix now", callback_data=f"fix:{finding.id}"),
-            InlineKeyboardButton("⏰ Snooze 4h", callback_data=f"snooze:{finding.id}:4"),
-        ],
-        [InlineKeyboardButton("✅ Accept risk", callback_data=f"ack:{finding.id}")],
-    ])
+            [
+                InlineKeyboardButton("🔧 Fix now", callback_data=f"fix:{finding.id}"),
+                InlineKeyboardButton("⏰ Snooze 4h", callback_data=f"snooze:{finding.id}:4"),
+            ],
+            [InlineKeyboardButton("✅ Accept risk", callback_data=f"ack:{finding.id}")],
+        ]
+    )
     await tg_app.bot.send_message(
         chat_id=TELEGRAM_CHAT_ID,
         text=text,
@@ -258,6 +286,8 @@ async def notify(finding: Finding) -> None:
 
 async def on_button_click(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     query = update.callback_query
+    if query is None or query.data is None:
+        return
     await query.answer()
 
     parts = query.data.split(":")
@@ -325,6 +355,7 @@ async def on_button_click(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 
 # ── FastAPI + lifespan ────────────────────────────────────────────────────────
 
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     global tg_app
@@ -333,7 +364,9 @@ async def lifespan(app: FastAPI):
 
     log.info("Updating grype vulnerability database (first run: ~200MB download)…")
     proc = await asyncio.create_subprocess_exec(
-        "grype", "db", "update",
+        "grype",
+        "db",
+        "update",
         stdout=asyncio.subprocess.PIPE,
         stderr=asyncio.subprocess.PIPE,
     )
@@ -343,15 +376,19 @@ async def lifespan(app: FastAPI):
     else:
         log.info("Grype vulnerability database ready")
 
-    tg_app = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
-    tg_app.add_handler(CallbackQueryHandler(on_button_click))
-    await tg_app.initialize()
-    await tg_app.start()
-    await tg_app.updater.start_polling()
+    _app = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
+    _app.add_handler(CallbackQueryHandler(on_button_click))
+    await _app.initialize()
+    await _app.start()
+    assert _app.updater is not None
+    await _app.updater.start_polling()
+    tg_app = _app
     log.info("Telegram bot polling started")
 
     yield
 
+    assert tg_app is not None
+    assert tg_app.updater is not None
     await tg_app.updater.stop()
     await tg_app.stop()
     await tg_app.shutdown()
@@ -377,8 +414,13 @@ async def receive_scan(payload: dict) -> dict:
             findings = await process_sbom_entry(entry, host)
             for f in findings:
                 if save_finding(f):
-                    log.info("New finding: %s (%s CVSS %.1f) in %s",
-                             f.cve_id, f.severity, f.cvss, f.source_ref)
+                    log.info(
+                        "New finding: %s (%s CVSS %.1f) in %s",
+                        f.cve_id,
+                        f.severity,
+                        f.cvss,
+                        f.source_ref,
+                    )
                     await notify(f)
                     new_findings += 1
         except Exception as e:

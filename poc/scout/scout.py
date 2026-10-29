@@ -19,6 +19,7 @@ import time
 from pathlib import Path
 
 import docker
+import docker.errors
 import requests
 
 logging.basicConfig(
@@ -34,6 +35,7 @@ PACMAN_DB = os.environ.get("PACMAN_DB", "/host/var/lib/pacman")
 
 
 # ── syft ─────────────────────────────────────────────────────────────────────
+
 
 def syft_scan(target: str) -> dict | None:
     result = subprocess.run(
@@ -54,6 +56,7 @@ def syft_scan(target: str) -> dict | None:
 
 # ── Docker images ─────────────────────────────────────────────────────────────
 
+
 def scan_docker_images() -> list[dict]:
     try:
         client = docker.from_env()
@@ -70,14 +73,17 @@ def scan_docker_images() -> list[dict]:
         log.info("Scanning image: %s", tag)
         sbom = syft_scan(tag)
         if sbom:
-            results.append({
-                "source_meta": {"type": "docker", "image": tag},
-                "sbom": sbom,
-            })
+            results.append(
+                {
+                    "source_meta": {"type": "docker", "image": tag},
+                    "sbom": sbom,
+                }
+            )
     return results
 
 
 # ── Arch Linux packages ───────────────────────────────────────────────────────
+
 
 def parse_pacman_desc(text: str) -> dict:
     fields: dict[str, str] = {}
@@ -113,17 +119,19 @@ def scan_pacman(db_path: str) -> dict | None:
         if not name or not version:
             continue
 
-        artifacts.append({
-            "id": f"alpm-{name}",
-            "name": name,
-            "version": version,
-            "type": "alpm",
-            "language": "",
-            "cpes": [],
-            "purl": f"pkg:alpm/arch/{name}@{version}",
-            "metadataType": "AlpmPackage",
-            "metadata": {"basePackage": name},
-        })
+        artifacts.append(
+            {
+                "id": f"alpm-{name}",
+                "name": name,
+                "version": version,
+                "type": "alpm",
+                "language": "",
+                "cpes": [],
+                "purl": f"pkg:alpm/arch/{name}@{version}",
+                "metadataType": "AlpmPackage",
+                "metadata": {"basePackage": name},
+            }
+        )
 
     if not artifacts:
         return None
@@ -144,6 +152,7 @@ def scan_pacman(db_path: str) -> dict | None:
 
 # ── Open ports ────────────────────────────────────────────────────────────────
 
+
 def scan_open_ports() -> list[dict]:
     result = subprocess.run(["ss", "-tlnp"], capture_output=True, text=True)
     ports = []
@@ -160,6 +169,7 @@ def scan_open_ports() -> list[dict]:
 
 # ── Main loop ─────────────────────────────────────────────────────────────────
 
+
 def collect_and_post(once: bool = False):
     log.info("Scan starting — host: %s", HOST_NAME)
     sboms: list[dict] = []
@@ -174,10 +184,12 @@ def collect_and_post(once: bool = False):
     try:
         pacman_sbom = scan_pacman(PACMAN_DB)
         if pacman_sbom:
-            sboms.append({
-                "source_meta": {"type": "alpm", "host": HOST_NAME},
-                "sbom": pacman_sbom,
-            })
+            sboms.append(
+                {
+                    "source_meta": {"type": "alpm", "host": HOST_NAME},
+                    "sbom": pacman_sbom,
+                }
+            )
     except Exception as e:
         log.error("Pacman scan error: %s", e)
 

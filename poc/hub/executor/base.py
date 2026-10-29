@@ -14,8 +14,8 @@ class Finding:
     fixed_version: str
     severity: str
     cvss: float
-    source_type: str   # "docker" | "alpm" | "python"
-    source_ref: str    # image name ("nginx:1.24") or package name ("openssl")
+    source_type: str  # "docker" | "alpm" | "python"
+    source_ref: str  # image name ("nginx:1.24") or package name ("openssl")
     description: str
 
 
