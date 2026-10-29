@@ -1,7 +1,7 @@
 ---
 id: BC-000
 title: Repo + development process scaffold
-status: in-progress
+status: shipped
 created: 2026-10-29
 branch: feat/BC-000-repo-scaffold
 plan: docs/plan/BC-000-repo-scaffold-plan.md
