@@ -31,6 +31,12 @@ logging.basicConfig(
 )
 log = logging.getLogger("hub")
 
+# Suppress HTTP client logs — python-telegram-bot's httpx logs include the
+# bot token in request URLs, which would leak secrets to stdout / docker logs.
+# This mirrors poc/demo.py's suppression so the container runtime is covered too.
+for _noisy in ("httpx", "httpcore", "telegram", "telegram.ext"):
+    logging.getLogger(_noisy).setLevel(logging.WARNING)
+
 MOCK = os.environ.get("BEACONRY_MOCK") == "1"
 # Env is read with defaults so importing hub never crashes; functions that
 # need real values (notify, lifespan) raise with a named error when invoked.
@@ -464,29 +470,94 @@ async def health() -> dict:
     return {"status": "ok"}
 
 
+def dedup_and_cap(findings: list[Finding], cap: int) -> tuple[list[Finding], list[Finding]]:
+    """Deduplicate by cve_id (keep highest-CVSS variant), rank by (tier,-cvss),
+    return (top_cap, suppressed_rest)."""
+    best: dict[str, Finding] = {}
+    for f in findings:
+        existing = best.get(f.cve_id)
+        if existing is None or f.cvss > existing.cvss:
+            best[f.cve_id] = f
+    unique = sorted(best.values(), key=lambda f: (f.tier, -f.cvss))
+    return unique[:cap], unique[cap:]
+
+
+async def send_digest(suppressed: list[Finding]) -> None:
+    """Send a single HTML digest message summarising suppressed findings."""
+    import html
+
+    if not suppressed or tg_app is None:
+        return
+    lines = [f"📋 <b>{len(suppressed)} additional finding(s) suppressed this run</b>"]
+    for f in suppressed[:10]:
+        lines.append(
+            f"• <code>{html.escape(f.cve_id)}</code> {f.severity} "
+            f"CVSS {f.cvss:.1f} — <code>{html.escape(f.package)}</code>"
+        )
+    if len(suppressed) > 10:
+        lines.append(f"… and {len(suppressed) - 10} more")
+    lines.append("\n<i>Raise MIN_CVSS or lower BEACONRY_MAX_FINDINGS_PER_RUN to tune.</i>")
+    try:
+        await tg_app.bot.send_message(
+            chat_id=int(TELEGRAM_CHAT_ID), text="\n".join(lines), parse_mode="HTML"
+        )
+    except Exception as e:  # noqa: BLE001
+        log.warning("digest message failed: %s", e)
+
+
 @api.post("/scan")
 async def receive_scan(payload: dict) -> dict:
+    """BC-005: apply CVE dedup + per-run cap across the whole inventory before notifying.
+
+    Previously each SBOM's findings were notified independently, flooding the
+    operator (10 images × 15 CVEs = 150 messages). Now the handler collects
+    candidates across every SBOM, deduplicates by CVE id (keeping the highest
+    CVSS variant), ranks by (tier, -cvss), notifies the top
+    BEACONRY_MAX_FINDINGS_PER_RUN (default 5), and sends a single digest for
+    the rest.
+    """
     host = payload.get("host", "unknown")
     sboms: list[dict] = payload.get("sboms", [])
     log.info("Scan from %s: %d SBOM(s)", host, len(sboms))
 
-    new_findings = 0
+    candidates: list[Finding] = []
     for entry in sboms:
         try:
-            findings = await process_sbom_entry(entry, host)
-            for f in findings:
-                if save_finding(f):
-                    log.info(
-                        "New finding: %s (%s CVSS %.1f) in %s",
-                        f.cve_id,
-                        f.severity,
-                        f.cvss,
-                        f.source_ref,
-                    )
-                    await notify(f)
-                    new_findings += 1
-        except Exception as e:
+            candidates.extend(await process_sbom_entry(entry, host))
+        except Exception as e:  # noqa: BLE001
             log.error("Error processing SBOM entry: %s", e)
+
+    cap = int(os.environ.get("BEACONRY_MAX_FINDINGS_PER_RUN", "5"))
+    to_notify, suppressed = dedup_and_cap(candidates, cap)
+    log.info(
+        "Scan summary: %d candidate(s), %d unique CVE(s), notifying top %d, suppressing %d",
+        len(candidates),
+        len(to_notify) + len(suppressed),
+        len(to_notify),
+        len(suppressed),
+    )
+
+    new_findings = 0
+    for f in to_notify:
+        if not save_finding(f):
+            continue
+        log.info(
+            "New finding: %s (%s CVSS %.1f) in %s",
+            f.cve_id,
+            f.severity,
+            f.cvss,
+            f.source_ref,
+        )
+        try:
+            await notify(f)
+        except Exception as e:  # noqa: BLE001 — one bad notify must not kill the loop
+            log.warning("notify failed for %s: %s", f.cve_id, e)
+            continue
+        new_findings += 1
+        await asyncio.sleep(0.3)  # mild rate-limiting vs. Telegram flood control
+
+    if suppressed:
+        await send_digest(suppressed)
 
     return {"status": "ok", "findings": new_findings}
 

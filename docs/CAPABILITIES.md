@@ -48,9 +48,10 @@ Enforcement: `poc/scripts/verify_traceability.py` runs as part of `make check`. 
 - **status:** active
 - **origin:** BC-002
 - **design:** docs/plan/IDEAS.md § Interactive behavior / UX
-- **description:** The per-run cap `BEACONRY_MAX_FINDINGS_PER_RUN` (default 5) ranks findings by (tier, -cvss) and sends only the top-N individually; the remainder is summarised in a single digest message. CVE ids shared across packages are deduplicated, keeping the highest-CVSS variant.
+- **description:** The per-run cap `BEACONRY_MAX_FINDINGS_PER_RUN` (default 5) ranks findings by (tier, -cvss) and sends only the top-N individually; the remainder is summarised in a single digest message. CVE ids shared across packages are deduplicated, keeping the highest-CVSS variant. Applies to both the local-Python path (`run_real_pipeline_once`) and the Compose/HTTP path (`receive_scan`).
 - **verified by:**
   - `poc/tests/unit/test_demo_dispatch.py`
+  - `poc/tests/unit/test_hub_helpers.py`
 
 ### CAP-B005: Operator can self-test the Telegram wiring without a scan
 - **type:** business
@@ -226,10 +227,11 @@ Enforcement: `poc/scripts/verify_traceability.py` runs as part of `make check`. 
 - **type:** technical
 - **status:** active
 - **origin:** BC-002 (fix branch)
-- **description:** With `BEACONRY_MAX_FINDINGS_PER_RUN=5`, 20 unique CVEs → 5 individual messages + 1 HTML digest message naming the remaining 15 (first 10 as bullets, plus "N more" if any).
+- **description:** With `BEACONRY_MAX_FINDINGS_PER_RUN=5`, 20 unique CVEs → 5 individual messages + 1 HTML digest message naming the remaining 15 (first 10 as bullets, plus "N more" if any). Shared helper (`dedup_and_cap`) now used by both demo and HTTP /scan paths.
 - **supports:** CAP-B004
 - **verified by:**
   - `poc/tests/unit/test_demo_dispatch.py`
+  - `poc/tests/unit/test_hub_helpers.py`
 
 ### CAP-T018: Scout filters image tags by include/exclude glob patterns
 - **type:** technical
@@ -240,6 +242,16 @@ Enforcement: `poc/scripts/verify_traceability.py` runs as part of `make check`. 
 - **supports:** CAP-B010
 - **verified by:**
   - `poc/tests/unit/test_scout_filter.py`
+
+### CAP-T021: Hub /scan endpoint applies dedup + cap across the full inventory
+- **type:** technical
+- **status:** active
+- **origin:** BC-005 (fix branch)
+- **design:** memory/workflow.md
+- **description:** `receive_scan` collects candidate Findings across all SBOMs in the request, then calls `dedup_and_cap(candidates, BEACONRY_MAX_FINDINGS_PER_RUN)` to drop duplicates (by CVE id, keep highest CVSS) and keep only the top-N by (tier, -cvss). Suppressed Findings go to `send_digest`. Previously each SBOM's findings were notified independently, flooding the operator with ~100 messages on a multi-image Compose run.
+- **supports:** CAP-B004, CAP-B009
+- **verified by:**
+  - `poc/tests/unit/test_hub_helpers.py`
 
 ### CAP-T019: Compose stack brings up hub + scout with :ro socket mount, healthchecks, env propagation
 - **type:** technical
@@ -259,6 +271,15 @@ Enforcement: `poc/scripts/verify_traceability.py` runs as part of `make check`. 
 - **supports:** CAP-B006
 - **verified by:**
   - `poc/tests/integration/test_BC_004_traceability.py`
+
+### CAP-T020: Hub import suppresses noisy HTTP client loggers so bot tokens don't leak
+- **type:** technical
+- **status:** active
+- **origin:** BC-005 (fix branch)
+- **description:** On module import, `poc/hub/hub.py` raises `httpx`, `httpcore`, `telegram`, and `telegram.ext` loggers to WARNING. python-telegram-bot's httpx client otherwise logs full request URLs — including the bot token path — at INFO. Covers both the local-Python demo path (poc/demo.py also sets this) and the container runtime path (`docker compose up`) where hub.py is the entry point.
+- **supports:** CAP-B002, CAP-B009
+- **verified by:**
+  - `poc/tests/unit/test_hub_helpers.py`
 
 ### CAP-T017: Orphan tests fail the gate with a copy-pasteable template
 - **type:** technical

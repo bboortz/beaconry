@@ -2,15 +2,20 @@
 
 Covers:
     - CAP-B003: Operator can disable Fix-execution with a feature flag
+    - CAP-B004: Operator is not flooded on noisy scans
     - CAP-T001: Finding ID is stable across runs
     - CAP-T002: CVSS extraction picks the highest score across entries
     - CAP-T003: Notification message is Telegram-HTML-safe for adversarial descriptions
     - CAP-T008: Hub persists findings to SQLite with idempotent inserts
+    - CAP-T015: Per-run cap caps individual sends and triggers a digest
+    - CAP-T020: Hub import suppresses noisy HTTP client loggers so bot tokens don't leak
+    - CAP-T021: Hub /scan endpoint applies dedup + cap across the full inventory
 """
 
 from __future__ import annotations
 
 import hub
+import pytest
 
 from poc.hub.executor.base import Finding
 
@@ -93,6 +98,17 @@ def test_format_notification_truncates_description_to_160_chars() -> None:
     assert len(inner) == 160
 
 
+def test_hub_import_silences_noisy_http_loggers() -> None:
+    """Regression: importing hub must raise httpx/telegram log level >= WARNING
+    so request URLs (which contain the bot token) never leak to docker logs."""
+    import logging
+
+    for name in ("httpx", "httpcore", "telegram", "telegram.ext"):
+        assert logging.getLogger(name).level >= logging.WARNING, (
+            f"logger {name!r} is below WARNING — bot token would leak via httpx logs"
+        )
+
+
 def test_save_finding_is_idempotent_on_duplicate_ids() -> None:
     hub.init_db()
     unique = _finding(id="unit-dup-key")
@@ -120,6 +136,93 @@ def test_load_finding_round_trips_fields() -> None:
 def test_load_finding_returns_none_for_missing_id() -> None:
     hub.init_db()
     assert hub.load_finding("does-not-exist") is None
+
+
+def test_dedup_and_cap_dedupes_by_cve_id_and_ranks_by_tier_cvss() -> None:
+    """Across multiple SBOMs, same CVE on different packages collapses to one;
+    results are ranked (tier asc, cvss desc), top N returned, rest suppressed."""
+    findings = [
+        _finding(id="a", cve_id="CVE-X", cvss=7.5, package="libssl1.1", source_ref="img:a"),
+        _finding(id="b", cve_id="CVE-X", cvss=9.1, package="openssl", source_ref="img:b"),
+        _finding(id="c", cve_id="CVE-Y", cvss=8.0, package="zlib", source_ref="img:a"),
+        _finding(id="d", cve_id="CVE-Z", cvss=9.9, package="curl", source_ref="img:a"),
+    ]
+    # Simulate tier classification: higher CVSS → lower tier number
+    for f, tier in zip(findings, [2, 1, 2, 1], strict=True):
+        f.tier = tier
+
+    top, suppressed = hub.dedup_and_cap(findings, cap=2)
+
+    # CVE-X dedup → keep 9.1 (openssl variant), not 7.5
+    cve_ids = [f.cve_id for f in top]
+    assert "CVE-X" in cve_ids
+    assert "CVE-Z" in cve_ids
+    assert len(top) == 2
+    assert len(suppressed) == 1
+    assert suppressed[0].cve_id == "CVE-Y"
+
+
+def test_dedup_and_cap_empty_input() -> None:
+    top, suppressed = hub.dedup_and_cap([], cap=5)
+    assert top == [] and suppressed == []
+
+
+async def test_receive_scan_applies_dedup_and_cap(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """BC-005 regression: receive_scan must apply cap + dedup across all SBOMs
+    before notifying. Previously it notified per-SBOM, flooding the operator."""
+    hub.init_db()
+
+    async def _fake_process(entry: object, host: str) -> list[Finding]:
+        # Each SBOM "returns" 3 findings; same CVE ids across SBOMs so dedup matters.
+        source = entry.get("source_meta", {}).get("image", "img")  # type: ignore[union-attr]
+        return [
+            _finding(id=f"{source}-A", cve_id="CVE-A", cvss=9.5, source_ref=source),
+            _finding(id=f"{source}-B", cve_id="CVE-B", cvss=8.0, source_ref=source),
+            _finding(id=f"{source}-C", cve_id="CVE-C", cvss=7.0, source_ref=source),
+        ]
+
+    notified: list[Finding] = []
+
+    async def _fake_notify(f: Finding) -> None:
+        notified.append(f)
+
+    digests: list[list[Finding]] = []
+
+    async def _fake_digest(suppressed: list[Finding]) -> None:
+        digests.append(list(suppressed))
+
+    monkeypatch.setattr(hub, "process_sbom_entry", _fake_process)
+    monkeypatch.setattr(hub, "notify", _fake_notify)
+    monkeypatch.setattr(hub, "send_digest", _fake_digest)
+    monkeypatch.setenv("BEACONRY_MAX_FINDINGS_PER_RUN", "2")
+
+    payload = {
+        "host": "test-host",
+        "sboms": [
+            {"source_meta": {"type": "docker", "image": "img-1"}, "sbom": {}},
+            {"source_meta": {"type": "docker", "image": "img-2"}, "sbom": {}},
+            {"source_meta": {"type": "docker", "image": "img-3"}, "sbom": {}},
+        ],
+    }
+
+    result = await hub.receive_scan(payload)
+
+    # 3 SBOMs × 3 findings = 9 candidates → dedup to 3 unique CVEs (CVE-A, B, C)
+    # Cap=2 → notify top 2 by (tier, -cvss), suppress 1
+    assert result["status"] == "ok"
+    assert len(notified) == 2
+    assert len(digests) == 1 and len(digests[0]) == 1
+
+
+def test_dedup_and_cap_fewer_than_cap() -> None:
+    findings = [
+        _finding(id="a", cve_id="CVE-A", cvss=9.0),
+        _finding(id="b", cve_id="CVE-B", cvss=8.0),
+    ]
+    top, suppressed = hub.dedup_and_cap(findings, cap=5)
+    assert len(top) == 2 and suppressed == []
 
 
 def test_set_status_updates_the_row() -> None:
