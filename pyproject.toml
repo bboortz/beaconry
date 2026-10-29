@@ -1,0 +1,70 @@
+[project]
+name = "beaconry"
+version = "0.1.0"
+description = "CVE scanning + auto-remediation for self-hosted operators"
+requires-python = ">=3.12"
+
+[tool.ruff]
+line-length = 100
+target-version = "py312"
+extend-exclude = ["OLD"]
+
+[tool.ruff.lint]
+select = [
+    "E",      # pycodestyle errors
+    "W",      # pycodestyle warnings
+    "F",      # pyflakes
+    "I",      # isort
+    "B",      # flake8-bugbear
+    "UP",     # pyupgrade
+    "SIM",    # flake8-simplify
+]
+ignore = [
+    "E501",   # line length handled by ruff format
+]
+
+[tool.ruff.format]
+quote-style = "double"
+indent-style = "space"
+
+[tool.pyright]
+include = ["poc"]
+exclude = [
+    "**/__pycache__",
+    "**/.venv",
+    "OLD",
+]
+pythonVersion = "3.12"
+typeCheckingMode = "basic"
+reportMissingImports = "warning"
+reportMissingTypeStubs = "none"
+
+[tool.pytest.ini_options]
+testpaths = ["poc/tests"]
+python_files = ["test_*.py"]
+python_classes = ["Test*"]
+python_functions = ["test_*"]
+addopts = [
+    "-ra",
+    "--strict-markers",
+    "--cov=poc",
+    "--cov-report=term-missing",
+    "--cov-config=pyproject.toml",
+]
+
+[tool.coverage.run]
+source = ["poc"]
+omit = [
+    "poc/tests/*",
+    "poc/*/Dockerfile",
+]
+
+[tool.coverage.report]
+exclude_lines = [
+    "pragma: no cover",
+    "raise NotImplementedError",
+    "if __name__ == .__main__.:",
+    "if TYPE_CHECKING:",
+]
+# Baseline bar during POC. Review 2026-11-28.
+fail_under = 60

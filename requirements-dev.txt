@@ -1,0 +1,20 @@
+# Development & testing dependencies (host venv).
+# Runtime deps for scout/hub are in poc/scout/requirements.txt and poc/hub/requirements.txt.
+
+# Linting + formatting
+ruff==0.14.1
+
+# Type checking
+pyright==1.1.408
+
+# Testing
+pytest==8.3.3
+pytest-cov==6.0.0
+pytest-asyncio==0.24.0
+pytest-mock==3.14.0
+
+# Pre-commit framework
+pre-commit==4.0.1
+
+# For writing tests that touch FastAPI/httpx (hub integration tests)
+httpx==0.28.1
