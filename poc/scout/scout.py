@@ -33,6 +33,24 @@ SCAN_INTERVAL = int(os.environ.get("SCAN_INTERVAL", "300"))
 HOST_NAME = os.environ.get("HOST_NAME", os.uname().nodename)
 PACMAN_DB = os.environ.get("PACMAN_DB", "/host/var/lib/pacman")
 
+# BC-005 defaults — demo-safe allowlist, no excludes by default.
+DEFAULT_INCLUDE_GLOBS = "nginx*,redis*,postgres*"
+
+
+def parse_globs(env: str) -> list[str]:
+    """Parse a comma-separated glob list from an env var. Empty → []."""
+    raise NotImplementedError("BC-005: filter not yet implemented")
+
+
+def filter_image_tags(
+    tags: list[str],
+    *,
+    include_globs: list[str],
+    exclude_globs: list[str],
+) -> list[str]:
+    """Return tags matching any include glob and no exclude glob."""
+    raise NotImplementedError("BC-005: filter not yet implemented")
+
 
 # ── syft ─────────────────────────────────────────────────────────────────────
 
