@@ -14,9 +14,14 @@ import pytest
 
 @pytest.fixture
 def tmp_docs_and_tests(tmp_path: Path) -> tuple[Path, Path]:
-    """Return (docs_dir, tests_dir) in a tmp sandbox."""
+    """Return (docs_dir, tests_dir) in a tmp sandbox.
+
+    Also seeds docs/stories/ with a sentinel BC-999-fake.md so tests that
+    use `origin: BC-999` without caring about origin-validation pass.
+    """
     docs = tmp_path / "docs"
-    docs.mkdir()
+    (docs / "stories").mkdir(parents=True)
+    (docs / "stories" / "BC-999-fake.md").write_text("# BC-999\n")
     tests = tmp_path / "tests"
     tests.mkdir()
     return docs, tests
@@ -164,7 +169,7 @@ def test_aspirational_and_deprecated_capabilities_do_not_require_tests(
 ### CAP-002: Old feature
 - **type:** business
 - **status:** deprecated
-- **origin:** BC-998
+- **origin:** BC-999
 - **verified by:**
 """,
     )
@@ -222,6 +227,163 @@ def test_required_fields_enforcement(
     assert "missing required field 'type'" in err
     assert "missing required field 'origin'" in err
     assert "missing required field 'status'" in err
+
+
+def test_origin_story_must_exist(
+    tmp_docs_and_tests: tuple[Path, Path],
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """origin: BC-NNN must point to a real docs/stories/BC-NNN-*.md file."""
+    docs, tests = tmp_docs_and_tests
+    _write_capabilities(
+        docs,
+        """
+### CAP-B001: Example
+- **type:** business
+- **status:** active
+- **origin:** BC-404
+- **verified by:**
+  - `tests/test_x.py`
+""",
+    )
+    _write_test(tests, "x", '"""Covers:\n    - CAP-B001: Example\n"""\n')
+
+    from poc.scripts.verify_traceability import run
+
+    rc = run(docs=docs, tests=tests)
+    assert rc != 0
+    err = capsys.readouterr().err
+    assert "BC-404" in err
+    assert "CAP-B001" in err
+
+
+def test_design_file_must_exist(
+    tmp_docs_and_tests: tuple[Path, Path],
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    docs, tests = tmp_docs_and_tests
+    _write_capabilities(
+        docs,
+        """
+### CAP-B001: Example
+- **type:** business
+- **status:** active
+- **origin:** BC-999
+- **design:** nonexistent.md
+- **verified by:**
+  - `tests/test_x.py`
+""",
+    )
+    _write_test(tests, "x", '"""Covers:\n    - CAP-B001: Example\n"""\n')
+
+    from poc.scripts.verify_traceability import run
+
+    rc = run(docs=docs, tests=tests)
+    assert rc != 0
+    assert "nonexistent.md" in capsys.readouterr().err
+
+
+def test_design_section_must_exist_in_file(
+    tmp_docs_and_tests: tuple[Path, Path],
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    docs, tests = tmp_docs_and_tests
+    (tests.parent / "DESIGN.md").write_text("# Title\n\n## Real Section\nBody.\n")
+
+    _write_capabilities(
+        docs,
+        """
+### CAP-B001: Example
+- **type:** business
+- **status:** active
+- **origin:** BC-999
+- **design:** DESIGN.md § Imaginary Section
+- **verified by:**
+  - `tests/test_x.py`
+""",
+    )
+    _write_test(tests, "x", '"""Covers:\n    - CAP-B001: Example\n"""\n')
+
+    from poc.scripts.verify_traceability import run
+
+    rc = run(docs=docs, tests=tests)
+    assert rc != 0
+    err = capsys.readouterr().err
+    assert "Imaginary Section" in err
+    assert "DESIGN.md" in err
+
+
+def test_design_section_present_passes(tmp_docs_and_tests: tuple[Path, Path]) -> None:
+    docs, tests = tmp_docs_and_tests
+    (tests.parent / "DESIGN.md").write_text("# Title\n\n## Real Section\nBody.\n")
+
+    _write_capabilities(
+        docs,
+        """
+### CAP-B001: Example
+- **type:** business
+- **status:** active
+- **origin:** BC-999
+- **design:** DESIGN.md § Real Section
+- **verified by:**
+  - `tests/test_x.py`
+""",
+    )
+    _write_test(tests, "x", '"""Covers:\n    - CAP-B001: Example\n"""\n')
+
+    from poc.scripts.verify_traceability import run
+
+    assert run(docs=docs, tests=tests) == 0
+
+
+def test_design_without_section_only_requires_file_to_exist(
+    tmp_docs_and_tests: tuple[Path, Path],
+) -> None:
+    docs, tests = tmp_docs_and_tests
+    (tests.parent / "ANOTHER.md").write_text("# whatever\n")
+
+    _write_capabilities(
+        docs,
+        """
+### CAP-B001: Example
+- **type:** business
+- **status:** active
+- **origin:** BC-999
+- **design:** ANOTHER.md
+- **verified by:**
+  - `tests/test_x.py`
+""",
+    )
+    _write_test(tests, "x", '"""Covers:\n    - CAP-B001: Example\n"""\n')
+
+    from poc.scripts.verify_traceability import run
+
+    assert run(docs=docs, tests=tests) == 0
+
+
+def test_design_multiple_refs_comma_separated(tmp_docs_and_tests: tuple[Path, Path]) -> None:
+    docs, tests = tmp_docs_and_tests
+    (tests.parent / "DESIGN.md").write_text("## Alpha\n")
+    (tests.parent / "memory").mkdir()
+    (tests.parent / "memory" / "x.md").write_text("## Beta\n")
+
+    _write_capabilities(
+        docs,
+        """
+### CAP-B001: Example
+- **type:** business
+- **status:** active
+- **origin:** BC-999
+- **design:** DESIGN.md § Alpha, memory/x.md § Beta
+- **verified by:**
+  - `tests/test_x.py`
+""",
+    )
+    _write_test(tests, "x", '"""Covers:\n    - CAP-B001: Example\n"""\n')
+
+    from poc.scripts.verify_traceability import run
+
+    assert run(docs=docs, tests=tests) == 0
 
 
 def test_bidirectional_consistency_requires_test_file_in_verified_by(

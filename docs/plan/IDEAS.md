@@ -12,15 +12,6 @@ Running list of ideas and discussions that may become future BC-NNN stories.
 
 ---
 
-## BC-004 open gaps (not covered by fix/BC-004-close-gaps)
-
-- **Design-doc section anchor validation**
-  trigger: BC-004 audit 2026-10-29
-  priority: later
-  Capability `origin:` fields name sections of DESIGN.md / memory/*.md (e.g. "DESIGN.md § Pipeline") but nothing verifies those sections exist. If DESIGN.md is renamed or restructured, capability origin references silently rot. Candidates: parse markdown headings in referenced files and ensure matches; or move to anchor syntax (`DESIGN.md#pipeline`).
-
----
-
 ## BC-002 open gaps (not covered by BC-003 draft)
 
 - **Terminal does not mirror the full notification content**

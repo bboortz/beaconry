@@ -19,7 +19,7 @@ Enforcement: `poc/scripts/verify_traceability.py` runs as part of `make check`. 
 - **type:** business
 - **status:** active
 - **origin:** BC-001
-- **design:** DESIGN.md § Pipeline, memory/workflow.md § Testing strategy
+- **design:** DESIGN.md § Solving strategy, memory/workflow.md § Testing strategy
 - **description:** Running `BEACONRY_MOCK=1 make demo` (or `make smoke`) walks the whole pipeline — scan, deliver, urgency decision, auto-fix path, operator-confirm path, verify — against fixture data. No network, no Docker daemon, no Telegram token required. Operator sees a 90-second narrated run that proves the design in-the-small.
 - **verified by:**
   - `poc/tests/integration/test_BC_001_mocked_e2e.py`
@@ -28,7 +28,7 @@ Enforcement: `poc/scripts/verify_traceability.py` runs as part of `make check`. 
 - **type:** business
 - **status:** active
 - **origin:** BC-002
-- **design:** DESIGN.md § Pipeline, memory/telegram-patterns.md
+- **design:** DESIGN.md § Solving strategy, memory/telegram-patterns.md
 - **description:** When `make demo` runs with Telegram credentials in `poc/.env`, scout generates an SBOM via real syft, hub runs real grype against the latest DB, and findings above `MIN_CVSS` are rendered as HTML Telegram messages. Each message carries CVE id, severity, CVSS, host, tier, and three inline buttons (Fix now, Snooze 4h, Accept risk). Deduplicated across runs and across packages that share a CVE id.
 - **verified by:**
   - `poc/tests/integration/test_BC_002_real_pipeline.py`
@@ -47,7 +47,7 @@ Enforcement: `poc/scripts/verify_traceability.py` runs as part of `make check`. 
 - **type:** business
 - **status:** active
 - **origin:** BC-002
-- **design:** docs/plan/IDEAS.md § Per-run finding cap
+- **design:** docs/plan/IDEAS.md § Interactive behavior / UX
 - **description:** The per-run cap `BEACONRY_MAX_FINDINGS_PER_RUN` (default 5) ranks findings by (tier, -cvss) and sends only the top-N individually; the remainder is summarised in a single digest message. CVE ids shared across packages are deduplicated, keeping the highest-CVSS variant.
 - **verified by:**
   - `poc/tests/unit/test_demo_dispatch.py`
@@ -125,7 +125,7 @@ Enforcement: `poc/scripts/verify_traceability.py` runs as part of `make check`. 
 - **type:** technical
 - **status:** active
 - **origin:** BC-001
-- **design:** DESIGN.md § Executor plugins
+- **design:** DESIGN.md § Remediation as a first-class citizen
 - **description:** `can_handle(finding)` filters adapters; `next()` picks the first match. DockerAdapter claims `source_type="docker"`; ManualAdapter is the universal fallback.
 - **supports:** CAP-B002
 - **verified by:**

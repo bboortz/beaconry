@@ -29,6 +29,8 @@ CAP_ID_RE = re.compile(r"\bCAP-[A-Za-z0-9]+\b")
 CAP_HEADING_RE = re.compile(r"^###\s+(CAP-[A-Za-z0-9]+)\s*:\s*(.+?)\s*$")
 FIELD_RE = re.compile(r"^-\s+\*\*(?P<key>[a-zA-Z_ ]+):\*\*\s*(?P<value>.*?)\s*$")
 VERIFIED_BY_ITEM_RE = re.compile(r"^\s*-\s+`([^`]+)`\s*$")
+STORY_ID_RE = re.compile(r"\bBC-\d+\b")
+MARKDOWN_HEADING_RE = re.compile(r"^#{1,6}\s+(.+?)\s*$")
 
 ORPHAN_TEMPLATE = (
     "{path}: missing Covers block.\n"
@@ -48,7 +50,34 @@ class Capability:
     cap_type: str = "unknown"
     status: str = "unknown"
     origin: str = ""
+    design: str = ""
     verified_by: list[str] = field(default_factory=list)
+
+
+def parse_design_refs(design_field: str) -> list[tuple[str, str | None]]:
+    """Parse 'DESIGN.md § Pipeline, memory/foo.md' → [('DESIGN.md', 'Pipeline'),
+    ('memory/foo.md', None)]."""
+    refs: list[tuple[str, str | None]] = []
+    for piece in design_field.split(","):
+        piece = piece.strip()
+        if not piece:
+            continue
+        if "§" in piece:
+            file_part, section_part = piece.split("§", 1)
+            refs.append((file_part.strip(), section_part.strip()))
+        else:
+            refs.append((piece, None))
+    return refs
+
+
+def extract_headings(path: Path) -> set[str]:
+    """Return the set of heading texts (any level) from a markdown file."""
+    headings: set[str] = set()
+    for line in path.read_text().splitlines():
+        m = MARKDOWN_HEADING_RE.match(line)
+        if m:
+            headings.add(m.group(1).strip())
+    return headings
 
 
 def parse_capabilities(path: Path) -> dict[str, Capability]:
@@ -81,6 +110,8 @@ def parse_capabilities(path: Path) -> dict[str, Capability]:
                 current.status = value
             elif key == "origin":
                 current.origin = value
+            elif key == "design":
+                current.design = value
             elif key == "verified by":
                 in_verified_by = True
             continue
@@ -194,6 +225,42 @@ def run(docs: Path, tests: Path) -> int:
                 errors.append(
                     f"CAPABILITIES.md § {cap_id}: test {rel} claims to cover this "
                     f"capability but is not listed in Verified by"
+                )
+
+    # Origin story resolution: each BC-NNN in origin must point to a real story file.
+    stories_dir = docs / "stories"
+    if stories_dir.is_dir():
+        story_files = {p.name: p for p in stories_dir.glob("BC-*.md")}
+
+        def _story_exists(bc_id: str) -> bool:
+            prefix = f"{bc_id}-"
+            return any(name.startswith(prefix) for name in story_files)
+
+        for cap in caps.values():
+            for bc_id in STORY_ID_RE.findall(cap.origin):
+                if not _story_exists(bc_id):
+                    errors.append(
+                        f"CAPABILITIES.md § {cap.cap_id}: origin references {bc_id} "
+                        f"but no docs/stories/{bc_id}-*.md was found"
+                    )
+
+    # Design link resolution: file must exist; section (if given) must be a heading.
+    repo_root = docs.parent
+    for cap in caps.values():
+        if not cap.design:
+            continue
+        for file_ref, section in parse_design_refs(cap.design):
+            target = repo_root / file_ref
+            if not target.exists():
+                errors.append(
+                    f"CAPABILITIES.md § {cap.cap_id}: design references '{file_ref}' "
+                    f"but the file does not exist (resolved to {target})"
+                )
+                continue
+            if section is not None and section not in extract_headings(target):
+                errors.append(
+                    f"CAPABILITIES.md § {cap.cap_id}: design references "
+                    f"'{file_ref} § {section}' but no such heading exists in that file"
                 )
 
     if errors:
