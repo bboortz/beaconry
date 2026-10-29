@@ -13,10 +13,13 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 cd "$SCRIPT_DIR"
 
 if [[ "${1:-}" == "--smoke" ]]; then
-    echo "==> Smoke mode stub (BC-000)."
-    echo "    Full smoke implementation is scheduled for BC-001."
-    echo "    Current behaviour: no-op success so CI can wire the gate."
-    exit 0
+    REPO_ROOT="$(cd "$SCRIPT_DIR/.." && pwd)"
+    cd "$REPO_ROOT"
+    PY="${PYTHON:-python3}"
+    if [[ -x "$REPO_ROOT/.venv/bin/python" ]]; then
+        PY="$REPO_ROOT/.venv/bin/python"
+    fi
+    exec "$PY" -m poc.demo --non-interactive
 fi
 
 if [[ ! -f .env ]]; then

@@ -1,4 +1,4 @@
-.PHONY: help lint format type test check smoke clean install-hooks
+.PHONY: help lint format type test check demo smoke clean install-hooks
 
 PYTHON ?= python3
 PYTEST_ARGS ?=
@@ -11,7 +11,8 @@ help:
 	@echo "  make type          pyright (basic mode)"
 	@echo "  make test          pytest + coverage"
 	@echo "  make check         lint + type + test (what CI blocks on)"
-	@echo "  make smoke         bash poc/demo.sh --smoke"
+	@echo "  make demo          python -m poc.demo (interactive mocked pipeline)"
+	@echo "  make smoke         bash poc/demo.sh --smoke (non-interactive)"
 	@echo "  make install-hooks pre-commit install + pre-push"
 	@echo "  make clean         remove caches"
 
@@ -32,6 +33,9 @@ test:
 check: lint type test
 	@echo ""
 	@echo "✓ All local gates passed"
+
+demo:
+	$(PYTHON) -m poc.demo
 
 smoke:
 	bash poc/demo.sh --smoke

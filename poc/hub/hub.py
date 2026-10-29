@@ -31,6 +31,7 @@ logging.basicConfig(
 )
 log = logging.getLogger("hub")
 
+MOCK = os.environ.get("BEACONRY_MOCK") == "1"
 TELEGRAM_BOT_TOKEN = os.environ["TELEGRAM_BOT_TOKEN"]
 TELEGRAM_CHAT_ID = os.environ["TELEGRAM_CHAT_ID"]
 DATA_DIR = Path(os.environ.get("DATA_DIR", "/data"))
@@ -123,6 +124,11 @@ def set_status(finding_id: str, status: str) -> None:
 
 
 async def run_grype(sbom: dict) -> list[dict]:
+    if MOCK:
+        from poc.mock_data import fixture_grype_matches
+
+        return fixture_grype_matches()
+
     with tempfile.NamedTemporaryFile(suffix=".json", mode="w", delete=False) as f:
         json.dump(sbom, f)
         path = f.name
@@ -204,6 +210,9 @@ async def process_sbom_entry(entry: dict, host: str) -> list[Finding]:
 
 async def verify_fix(finding: Finding) -> bool:
     """Re-scan after fix. Returns True if the CVE is no longer present."""
+    if MOCK:
+        return True
+
     if finding.source_type != "docker":
         return True  # can't auto-verify non-docker in POC
 
@@ -261,12 +270,30 @@ def format_notification(finding: Finding) -> str:
     return "\n".join(lines)
 
 
+def _render_mock_telegram(text: str) -> str:
+    """Render a Telegram message as a boxed stdout notification."""
+    width = max((len(line) for line in text.splitlines()), default=0) + 2
+    width = max(width, 60)
+    top = "    ╭" + "─" * width + "╮"
+    bot = "    ╰" + "─" * width + "╯"
+    body = "\n".join(f"    │ {line.ljust(width - 1)}│" for line in text.splitlines())
+    buttons = "      Inline keyboard: [🔧 Fix now] [⏰ Snooze 4h] [✅ Accept risk]"
+    return "\n".join([top, body, bot, buttons])
+
+
 async def notify(finding: Finding) -> None:
+    text = format_notification(finding)
+
+    if MOCK:
+        print("    [mock] telegram send: notification dispatched")
+        print("    ==> Notification")
+        print(_render_mock_telegram(text))
+        return
+
     if tg_app is None:
         log.warning("Telegram app not ready — skipping notification")
         return
 
-    text = format_notification(finding)
     keyboard = InlineKeyboardMarkup(
         [
             [
@@ -361,6 +388,11 @@ async def lifespan(app: FastAPI):
     global tg_app
 
     init_db()
+
+    if MOCK:
+        log.info("MOCK mode — skipping grype DB update and Telegram startup")
+        yield
+        return
 
     log.info("Updating grype vulnerability database (first run: ~200MB download)…")
     proc = await asyncio.create_subprocess_exec(

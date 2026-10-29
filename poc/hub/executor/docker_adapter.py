@@ -2,10 +2,13 @@
 
 import asyncio
 import logging
+import os
 
 from .base import ExecutionResult, ExecutorPlugin, Finding
 
 log = logging.getLogger("executor.docker")
+
+MOCK = os.environ.get("BEACONRY_MOCK") == "1"
 
 
 class DockerAdapter(ExecutorPlugin):
@@ -19,9 +22,19 @@ class DockerAdapter(ExecutorPlugin):
     async def execute(self, finding: Finding) -> ExecutionResult:
         base = finding.source_ref.split(":")[0]
         new_image = f"{base}:latest"
+        rollback_cmd = f"docker tag {finding.source_ref} {base}:rollback"
+        pull_cmd = f"docker pull {new_image}"
+
+        if MOCK:
+            print(f"    [mock] {rollback_cmd}")
+            print(f"    [mock] {pull_cmd}")
+            return ExecutionResult(
+                success=True,
+                message=f"[mock] pulled {new_image}",
+                command=pull_cmd,
+            )
 
         # Tag current image as :rollback before pulling (safety net)
-        rollback_cmd = f"docker tag {finding.source_ref} {base}:rollback"
         proc = await asyncio.create_subprocess_shell(
             rollback_cmd,
             stdout=asyncio.subprocess.DEVNULL,
@@ -32,7 +45,6 @@ class DockerAdapter(ExecutorPlugin):
             log.warning("Rollback tag failed (non-fatal): %s", err.decode()[:100])
 
         # Pull latest
-        pull_cmd = f"docker pull {new_image}"
         log.info("Executing: %s", pull_cmd)
         proc = await asyncio.create_subprocess_shell(
             pull_cmd,

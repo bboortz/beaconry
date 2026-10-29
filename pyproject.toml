@@ -34,6 +34,9 @@ exclude = [
     "**/.venv",
     "OLD",
 ]
+# poc/hub is on sys.path at runtime (hub.py uses `from executor.base import ...`
+# and demo.py adds it via sys.path.insert); mirror that for static analysis.
+extraPaths = ["poc/hub"]
 venvPath = "."
 venv = ".venv"
 pythonVersion = "3.12"
@@ -44,15 +47,20 @@ reportMissingModuleSource = "none"
 
 [tool.pytest.ini_options]
 testpaths = ["poc/tests"]
+pythonpath = [".", "poc/hub"]
 python_files = ["test_*.py"]
 python_classes = ["Test*"]
 python_functions = ["test_*"]
+asyncio_mode = "auto"
 addopts = [
     "-ra",
     "--strict-markers",
     "--cov=poc",
     "--cov-report=term-missing",
     "--cov-config=pyproject.toml",
+]
+filterwarnings = [
+    "ignore::DeprecationWarning:pytest_asyncio.*",
 ]
 
 [tool.coverage.run]
@@ -69,6 +77,5 @@ exclude_lines = [
     "if __name__ == .__main__.:",
     "if TYPE_CHECKING:",
 ]
-# Baseline bar during POC — raised to 60 once BC-001 lands real tests.
-# Review 2026-11-28.
-fail_under = 0
+# Baseline bar during POC. Review 2026-11-28.
+fail_under = 60

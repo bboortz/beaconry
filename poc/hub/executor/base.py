@@ -17,6 +17,7 @@ class Finding:
     source_type: str  # "docker" | "alpm" | "python"
     source_ref: str  # image name ("nginx:1.24") or package name ("openssl")
     description: str
+    tier: int = 3  # urgency tier (0 highest, 3 lowest) — see poc/hub/urgency.py
 
 
 @dataclass
