@@ -71,6 +71,7 @@ Tier 3 — CVSS < 7: 24h batch
 
 Design-Driven, Test-Guarded Development. Per feature:
 
+0. **Consult `docs/plan/IDEAS.md`** — backlog of ideas we've already discussed. New ideas go in there immediately so threads don't get lost.
 1. Operator scenario → `docs/stories/BC-NNN-<slug>.md` (8 canonical clarification questions, Gherkin acceptance)
 2. Branch `feat/BC-NNN-<slug>` + plan doc `docs/plan/BC-NNN-<slug>-plan.md`
 3. Red integration test under `poc/tests/integration/` encoding the Gherkin

@@ -9,6 +9,11 @@ POC bar: **baseline library quality** — unit tests per module, ruff clean, typ
 ```
 Per feature (BC-NNN):
 
+0. Consult IDEAS backlog   docs/plan/IDEAS.md
+                           Running list of ideas Claude + user have discussed.
+                           Check before proposing a new story; append new ideas
+                           as they come up (don't let discussion threads evaporate).
+
 1. Operator scenario       docs/stories/BC-NNN-<slug>.md
                            User gives rough story → Claude asks 8 canonical questions
                            → final Gherkin acceptance criteria. Status: draft → ready.
