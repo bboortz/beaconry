@@ -12,6 +12,34 @@ Running list of ideas and discussions that may become future BC-NNN stories.
 
 ---
 
+## BC-002 open gaps (not covered by BC-003 draft)
+
+- **Terminal does not mirror the full notification content**
+  trigger: BC-002 audit 2026-10-29
+  priority: later
+  Real-mode terminal prints a one-line "→ New finding …" summary. Gherkin says "terminal mirrors the notification content" — ambiguous but weak. Options: render the HTML to a stdout box like the mock path does, or re-word the Gherkin to "terminal summarizes."
+
+- **Grype DB cold-vs-warm cache not explicitly verified**
+  trigger: BC-002 audit 2026-10-29
+  priority: later
+  `.beaconry-cache/grype-db/` exists after a run; nothing proves second runs skip the ~200 MB download. Add either a bash smoke script that stats the dir before/after, or a verify step in the real_tools integration test.
+
+- **MIN_CVSS=9.0 default (real mode) not unit-tested**
+  trigger: BC-002 audit 2026-10-29
+  priority: later
+  demo.py sets `os.environ.setdefault("MIN_CVSS", "9.0")` for real mode. No test asserts this. Low-risk but a one-line regression could silently un-raise the floor.
+
+- **Group-by-package UX redundancy**
+  trigger: BC-002 real-pipeline test 2026-10-29 — libexpat1 appeared in two consecutive messages for CVE-2024-45492 + CVE-2024-45491
+  priority: later
+  Correct behavior (two different CVEs → two notifications) but the operator reads the same package name twice in a row. Candidate: secondary sort to interleave packages, or a "group by package" digest flavor.
+
+- **Integration test with `real_tools` marker never actually run**
+  trigger: BC-002 audit 2026-10-29
+  priority: moved to BC-003 (covered there)
+
+---
+
 ## Interactive behavior / UX
 
 - ~~**Per-run finding cap + digest mode**~~ **Landed in BC-002 fix branch 2026-10-29**
