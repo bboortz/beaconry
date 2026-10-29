@@ -2,6 +2,7 @@
 
 PYTHON ?= python3
 PYTEST_ARGS ?=
+ARGS ?=
 
 help:
 	@echo "Beaconry — local gates (what CI runs)"
@@ -11,8 +12,9 @@ help:
 	@echo "  make type          pyright (basic mode)"
 	@echo "  make test          pytest + coverage"
 	@echo "  make check         lint + type + test (what CI blocks on)"
-	@echo "  make demo          python -m poc.demo (interactive mocked pipeline)"
-	@echo "  make smoke         bash poc/demo.sh --smoke (non-interactive)"
+	@echo "  make demo          python -m poc.demo (real pipeline if .env set; mock if BEACONRY_MOCK=1)"
+	@echo "  make demo ARGS=--self-test   Telegram canary, no scan"
+	@echo "  make smoke         bash poc/demo.sh --smoke (non-interactive mock, CI)"
 	@echo "  make install-hooks pre-commit install + pre-push"
 	@echo "  make clean         remove caches"
 
@@ -35,7 +37,7 @@ check: lint type test
 	@echo "✓ All local gates passed"
 
 demo:
-	$(PYTHON) -m poc.demo
+	PATH="$(PWD)/.beaconry-cache/bin:$$PATH" $(PYTHON) -m poc.demo $(ARGS)
 
 smoke:
 	bash poc/demo.sh --smoke

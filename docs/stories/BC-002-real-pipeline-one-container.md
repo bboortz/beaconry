@@ -1,7 +1,7 @@
 ---
 id: BC-002
 title: Real pipeline on one container (no auto-fix)
-status: in-progress
+status: shipped
 created: 2026-10-29
 branch: feat/BC-002-real-pipeline-one-container
 plan: docs/plan/BC-002-real-pipeline-one-container-plan.md

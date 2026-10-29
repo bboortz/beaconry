@@ -330,6 +330,13 @@ async def on_button_click(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         return
 
     if action == "fix":
+        if not FIX_ENABLED:
+            await query.edit_message_text(
+                f"⚙️ Fix execution coming in BC-003 — `{finding.cve_id}` left as `open`",
+                parse_mode="Markdown",
+            )
+            return
+
         await query.edit_message_text(
             f"⏳ Fixing `{finding.cve_id}` on `{finding.host}`…",
             parse_mode="Markdown",
