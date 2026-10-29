@@ -104,6 +104,40 @@ Feature: Real pipeline against one container, same `make demo` command
     Then it skips unless syft and grype are on $PATH
     And when run, it executes real syft + real grype on nginx:1.24, mocks only Telegram,
         and asserts findings are produced
+
+  Scenario: Findings with adversarial descriptions still send
+    Given grype returns a finding whose description contains markdown-sensitive
+          characters ([ ] _ * ` \ and emojis)
+    When run_real_pipeline_once processes it
+    Then Telegram accepts the message (no BadRequest from the parser)
+    And the finding is saved to the dev DB
+
+  Scenario: One bad notification does not crash the pipeline
+    Given hub.notify raises for one of three findings
+    When run_real_pipeline_once processes all three
+    Then the failing finding is logged with its CVE id
+    And the other two findings are still saved + notified
+    And the function returns the successfully-notified findings
+
+  Scenario: Per-run cap limits findings sent to Telegram
+    Given 20 unique CVEs match above MIN_CVSS
+    And BEACONRY_MAX_FINDINGS_PER_RUN=5
+    When run_real_pipeline_once runs
+    Then exactly 5 individual Telegram messages are sent
+    And one additional digest message summarises "15 additional finding(s) suppressed"
+    And the 5 sent are the highest-priority by (tier, -cvss)
+
+  Scenario: CVEs shared across packages are deduplicated
+    Given grype returns the same CVE id for both openssl and libssl1.1
+    When run_real_pipeline_once runs
+    Then only one Telegram message is sent for that CVE
+    And the finding retained is the one with the highest CVSS
+
+  Scenario: Real mode defaults MIN_CVSS to 9.0
+    Given no explicit MIN_CVSS env is set
+    When "make demo" is run in real mode
+    Then MIN_CVSS is 9.0 (demo doesn't flood on base-image CVSS-7-8 noise)
+    And mock mode continues to use MIN_CVSS=0 so fixtures still trigger
 ```
 
 ## Open questions

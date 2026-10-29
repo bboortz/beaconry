@@ -14,10 +14,8 @@ Running list of ideas and discussions that may become future BC-NNN stories.
 
 ## Interactive behavior / UX
 
-- **Per-run finding cap + digest mode**
-  trigger: BC-002 shipped 2026-10-29, nginx:1.24 produced 14+ Telegram messages at once
-  priority: soon
-  Operators with 10+ containers would get flooded. Add `BEACONRY_MAX_FINDINGS_PER_RUN=<n>` or roll remaining into a single "N more findings" digest message. Tier 3 should probably always batch.
+- ~~**Per-run finding cap + digest mode**~~ **Landed in BC-002 fix branch 2026-10-29**
+  `BEACONRY_MAX_FINDINGS_PER_RUN=5` default, top-N by (tier, -cvss), one HTML digest for the rest, CVE-id dedup across packages. Keep as a parked follow-up: *group by package too* (two different CVEs on libexpat1 both surface — reasonable but produces repeat-package UX).
 
 - **Button taps actually work live during the demo**
   trigger: user asked 2026-10-29 "which buttons work?" after tapping Fix-now outside the demo window

@@ -53,21 +53,36 @@ def test_extract_cvss_defaults_to_zero_when_empty() -> None:
     assert hub.extract_cvss({"cvss": []}) == 0.0
 
 
-def test_format_notification_escapes_markdown_specials() -> None:
-    f = _finding(description="back`tick asterisk*star underscore_pop")
+def test_format_notification_uses_html_tags() -> None:
+    f = _finding(description="plain desc")
     text = hub.format_notification(f)
-    # Inside the italic description line, specials must be backslash-escaped.
-    assert "\\`" in text
-    assert "\\*" in text
-    assert "\\_" in text
+    assert "<b>" in text and "</b>" in text  # severity + CVE id
+    assert "<code>" in text and "</code>" in text  # cvss, host, target, package, fix cmd
+    assert "<i>" in text and "</i>" in text  # description
 
 
-def test_format_notification_truncates_long_description() -> None:
+def test_format_notification_html_escapes_angle_brackets_and_ampersand() -> None:
+    """Regression for BC-002: switched Markdown -> HTML; must html-escape user data."""
+    f = _finding(
+        description="See <script>alert(1)</script> & [refs]_with*weirdness`",
+        package="pkg<xml>",
+    )
+    text = hub.format_notification(f)
+    # The raw strings must not appear — they've been html-escaped.
+    assert "<script>" not in text  # replaced with &lt;script&gt;
+    assert "&lt;script&gt;" in text
+    # Markdown-ish chars like [ _ * ` are not special in HTML, so they survive.
+    assert "[refs]_with*weirdness`" in text
+    # And the ampersand is escaped to &amp; (not left as a bare &).
+    assert "&amp;" in text
+
+
+def test_format_notification_truncates_description_to_160_chars() -> None:
     f = _finding(description="A" * 500)
     text = hub.format_notification(f)
-    # Description is sliced to 160 chars inside the italic line.
-    italic_line = next(line for line in text.splitlines() if line.startswith("_"))
-    assert len(italic_line) <= 165  # 160 chars + underscores + maybe escape
+    italic_line = next(line for line in text.splitlines() if line.startswith("<i>"))
+    inner = italic_line[len("<i>") : -len("</i>")]
+    assert len(inner) == 160
 
 
 def test_save_finding_is_idempotent_on_duplicate_ids() -> None:

@@ -100,7 +100,13 @@ if _IS_MOCK:
     os.environ.setdefault("TELEGRAM_BOT_TOKEN", "mock-token")
     os.environ.setdefault("TELEGRAM_CHAT_ID", "0")
 
-os.environ.setdefault("MIN_CVSS", "0")
+# Mode-dependent defaults: mock mode shows the pipeline on fixture CVSS 8.1
+# findings so MIN_CVSS must be low; real mode defaults to 9.0 so operators
+# don't get flooded with every Tier-2 Debian base-image CVE.
+if _IS_MOCK:
+    os.environ.setdefault("MIN_CVSS", "0")
+else:
+    os.environ.setdefault("MIN_CVSS", "9.0")
 
 _REPO_ROOT = Path(__file__).resolve().parents[1]
 if _IS_MOCK:
@@ -144,11 +150,77 @@ async def _run_syft(image: str) -> dict:
     return json.loads(stdout)
 
 
+def _build_findings_from_matches(
+    matches: list[dict], image: str, host: str, min_cvss: float
+) -> list[hub.Finding]:
+    """Pure helper: build Finding objects from grype matches above MIN_CVSS,
+    deduplicating across packages that share a CVE id (keep highest-CVSS variant)."""
+    best: dict[str, hub.Finding] = {}
+    for match in matches:
+        vuln = match.get("vulnerability", {})
+        artifact = match.get("artifact", {})
+        cvss = hub.extract_cvss(vuln)
+        if cvss < min_cvss:
+            continue
+        fix_versions = vuln.get("fix", {}).get("versions") or ["n/a"]
+        finding = hub.Finding(
+            id=hub.make_id(host, vuln["id"], image, artifact.get("name", "")),
+            host=host,
+            cve_id=vuln["id"],
+            package=artifact.get("name", ""),
+            version=artifact.get("version", ""),
+            fixed_version=fix_versions[0],
+            severity=vuln.get("severity", "Unknown"),
+            cvss=cvss,
+            source_type="docker",
+            source_ref=image,
+            description=(vuln.get("description") or "")[:200],
+        )
+        finding.tier = urgency.classify_tier(finding, kev=False, internet_facing=False)
+        existing = best.get(finding.cve_id)
+        if existing is None or finding.cvss > existing.cvss:
+            best[finding.cve_id] = finding
+    return list(best.values())
+
+
+async def _send_digest(remaining: list[hub.Finding]) -> None:
+    """Send one summary message when the per-run cap suppresses findings."""
+    import html
+
+    if not remaining or hub.tg_app is None:
+        return
+    lines = [f"📋 <b>{len(remaining)} additional finding(s) suppressed this run</b>"]
+    for f in remaining[:10]:  # at most 10 lines in the digest
+        lines.append(
+            f"• <code>{html.escape(f.cve_id)}</code> {f.severity} "
+            f"CVSS {f.cvss:.1f} — <code>{html.escape(f.package)}</code>"
+        )
+    if len(remaining) > 10:
+        lines.append(f"… and {len(remaining) - 10} more")
+    lines.append("\n<i>Raise MIN_CVSS or lower BEACONRY_MAX_FINDINGS_PER_RUN to tune.</i>")
+
+    try:
+        await hub.tg_app.bot.send_message(
+            chat_id=int(os.environ["TELEGRAM_CHAT_ID"]),
+            text="\n".join(lines),
+            parse_mode="HTML",
+        )
+    except Exception as e:  # noqa: BLE001 — digest failure must not propagate
+        logging.getLogger(__name__).warning("digest message failed: %s", e)
+
+
 async def run_real_pipeline_once(image: str = "nginx:1.24") -> list[hub.Finding]:
     """Run the real pipeline once against a locally-pulled image.
 
     BC-002: scope limited to one image, no auto-fix. Telegram caller sets up
     the Application and assigns it to hub.tg_app before invoking.
+
+    Dedup rule: when multiple grype matches share a CVE id across packages
+    (e.g. openssl + libssl1.1 both carry CVE-X), only the highest-CVSS
+    variant is notified. Keeps the demo from spamming one CVE 10 times.
+
+    Cap: BEACONRY_MAX_FINDINGS_PER_RUN (default 5) ranks by (tier, -cvss)
+    and sends only the top-N; a single digest message summarises the rest.
     """
     hub.DATA_DIR = Path(os.environ["DATA_DIR"])
     hub.DB_PATH = hub.DATA_DIR / "beaconry.db"
@@ -164,42 +236,42 @@ async def run_real_pipeline_once(image: str = "nginx:1.24") -> list[hub.Finding]
 
     host = os.environ.get("HOST_NAME", "homelab-dev")
     min_cvss = float(os.environ.get("MIN_CVSS", "7.0"))
+    cap = int(os.environ.get("BEACONRY_MAX_FINDINGS_PER_RUN", "5"))
 
-    new_findings: list[hub.Finding] = []
-    for match in matches:
-        vuln = match.get("vulnerability", {})
-        artifact = match.get("artifact", {})
-        cvss = hub.extract_cvss(vuln)
-        if cvss < min_cvss:
-            continue
+    candidates = _build_findings_from_matches(matches, image=image, host=host, min_cvss=min_cvss)
+    candidates.sort(key=lambda f: (f.tier, -f.cvss))  # most urgent first
 
-        fix_versions = vuln.get("fix", {}).get("versions") or ["n/a"]
-        finding = hub.Finding(
-            id=hub.make_id(host, vuln["id"], image, artifact.get("name", "")),
-            host=host,
-            cve_id=vuln["id"],
-            package=artifact.get("name", ""),
-            version=artifact.get("version", ""),
-            fixed_version=fix_versions[0],
-            severity=vuln.get("severity", "Unknown"),
-            cvss=cvss,
-            source_type="docker",
-            source_ref=image,
-            description=(vuln.get("description") or "")[:200],
+    to_notify = candidates[:cap]
+    suppressed = candidates[cap:]
+    print(
+        f"    {len(candidates)} unique CVE(s) above MIN_CVSS={min_cvss}; "
+        f"notifying top {len(to_notify)}, suppressing {len(suppressed)} as digest"
+    )
+
+    notified: list[hub.Finding] = []
+    for finding in to_notify:
+        if not hub.save_finding(finding):
+            continue  # already in DB from a previous run
+        print(
+            f"\n→ New finding {finding.cve_id} ({finding.severity} "
+            f"CVSS {finding.cvss:.1f}) tier={finding.tier}  pkg={finding.package} "
+            f"{finding.version} → {finding.fixed_version}"
         )
-        # No KEV feed and no exposure scoring in BC-002 — assume LAN-only, non-KEV.
-        finding.tier = urgency.classify_tier(finding, kev=False, internet_facing=False)
-
-        if hub.save_finding(finding):
-            new_findings.append(finding)
-            print(
-                f"\n→ New finding {finding.cve_id} ({finding.severity} "
-                f"CVSS {finding.cvss:.1f}) tier={finding.tier}  pkg={finding.package} "
-                f"{finding.version} → {finding.fixed_version}"
-            )
+        try:
             await hub.notify(finding)
+        except Exception as e:  # noqa: BLE001 — one bad notification must not kill the loop
+            logging.getLogger(__name__).warning(
+                "notify failed for %s (%s): %s", finding.cve_id, finding.package, e
+            )
+            print(f"    ⚠ notify failed: {e!s}")
+            continue
+        notified.append(finding)
+        await asyncio.sleep(0.3)  # mild rate-limiting
 
-    return new_findings
+    if suppressed:
+        await _send_digest(suppressed)
+
+    return notified
 
 
 RULE = "-" * 70

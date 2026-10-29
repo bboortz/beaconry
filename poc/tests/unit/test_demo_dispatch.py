@@ -166,3 +166,123 @@ async def test_run_syft_raises_on_nonzero_exit(monkeypatch: pytest.MonkeyPatch) 
 
     with pytest.raises(RuntimeError, match="syft failed"):
         await demo._run_syft("nginx:1.24")
+
+
+def test_build_findings_dedupes_cve_across_packages() -> None:
+    """Same CVE on openssl + libssl1.1 → one Finding (highest-CVSS variant kept)."""
+    matches = [
+        {
+            "vulnerability": {"id": "CVE-X", "cvss": [{"metrics": {"baseScore": 7.5}}]},
+            "artifact": {"name": "libssl1.1", "version": "1"},
+        },
+        {
+            "vulnerability": {"id": "CVE-X", "cvss": [{"metrics": {"baseScore": 9.1}}]},
+            "artifact": {"name": "openssl", "version": "1"},
+        },
+        {
+            "vulnerability": {"id": "CVE-Y", "cvss": [{"metrics": {"baseScore": 8.0}}]},
+            "artifact": {"name": "curl", "version": "7"},
+        },
+    ]
+    findings = demo._build_findings_from_matches(
+        matches, image="nginx:1.24", host="h", min_cvss=7.0
+    )
+    assert len(findings) == 2
+    cves = {f.cve_id: f for f in findings}
+    assert cves["CVE-X"].cvss == 9.1  # highest-CVSS variant kept
+    assert cves["CVE-X"].package == "openssl"
+
+
+def test_build_findings_filters_below_min_cvss() -> None:
+    matches = [
+        {
+            "vulnerability": {"id": "CVE-LOW", "cvss": [{"metrics": {"baseScore": 3.0}}]},
+            "artifact": {"name": "x", "version": "1"},
+        },
+    ]
+    findings = demo._build_findings_from_matches(matches, image="img:1", host="h", min_cvss=7.0)
+    assert findings == []
+
+
+async def test_pipeline_cap_sends_top_n_and_a_digest(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """BEACONRY_MAX_FINDINGS_PER_RUN caps individual notifications; digest fires."""
+    import hub
+
+    async def _fake_syft(image: str) -> dict:
+        return {"artifacts": []}
+
+    async def _fake_grype(sbom: dict) -> list[dict]:
+        return [
+            {
+                "vulnerability": {"id": f"CVE-{i:03d}", "cvss": [{"metrics": {"baseScore": 9.9}}]},
+                "artifact": {"name": f"pkg-{i}", "version": "1"},
+            }
+            for i in range(20)
+        ]
+
+    notify_calls: list[str] = []
+
+    async def _fake_notify(f: object) -> None:
+        notify_calls.append(f.cve_id)  # type: ignore[attr-defined]
+
+    digest_calls: list[list[object]] = []
+
+    async def _fake_digest(remaining: list[object]) -> None:
+        digest_calls.append(list(remaining))
+
+    monkeypatch.setattr(demo, "_run_syft", _fake_syft)
+    monkeypatch.setattr(demo, "_send_digest", _fake_digest)
+    monkeypatch.setattr(hub, "run_grype", _fake_grype)
+    monkeypatch.setattr(hub, "notify", _fake_notify)
+    monkeypatch.setenv("BEACONRY_MAX_FINDINGS_PER_RUN", "5")
+    monkeypatch.setenv("MIN_CVSS", "0")
+
+    hub.init_db()
+    findings = await demo.run_real_pipeline_once(image="nginx:1.24")
+
+    assert len(findings) == 5
+    assert len(notify_calls) == 5
+    assert len(digest_calls) == 1 and len(digest_calls[0]) == 15
+
+
+async def test_one_bad_notification_does_not_crash_pipeline(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Regression for BC-002: one notify failure must not kill the whole loop."""
+    import hub
+
+    async def _fake_syft(image: str) -> dict:
+        return {"artifacts": []}
+
+    async def _fake_grype(sbom: dict) -> list[dict]:
+        return [
+            {
+                "vulnerability": {"id": f"CVE-X-{i}", "cvss": [{"metrics": {"baseScore": 9.0}}]},
+                "artifact": {"name": f"pkg{i}", "version": "1"},
+            }
+            for i in range(3)
+        ]
+
+    call_log: list[str] = []
+
+    async def _flaky_notify(f: object) -> None:
+        call_log.append(f.cve_id)  # type: ignore[attr-defined]
+        if f.cve_id == "CVE-X-1":  # type: ignore[attr-defined]
+            from telegram.error import BadRequest
+
+            raise BadRequest("Can't parse entities (fixture)")
+
+    monkeypatch.setattr(demo, "_run_syft", _fake_syft)
+    monkeypatch.setattr(hub, "run_grype", _fake_grype)
+    monkeypatch.setattr(hub, "notify", _flaky_notify)
+    monkeypatch.setenv("MIN_CVSS", "0")
+
+    hub.init_db()
+    findings = await demo.run_real_pipeline_once(image="nginx:1.24")
+
+    # All 3 were tried, 1 failed. Returned findings exclude the failed one.
+    assert len(call_log) == 3
+    assert len(findings) == 2
+    assert "CVE-X-1" not in [f.cve_id for f in findings]

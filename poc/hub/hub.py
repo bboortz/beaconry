@@ -257,20 +257,32 @@ async def verify_fix(finding: Finding) -> bool:
 
 
 def format_notification(finding: Finding) -> str:
+    """Build the message body in Telegram HTML (parse_mode='HTML').
+
+    HTML is used instead of legacy Markdown because Markdown v1 has no escape
+    syntax — any raw `*`, `_`, backtick, or `[` in a CVE description would
+    break parsing. HTML needs only `<`, `>`, `&` escaped via html.escape.
+    """
+    import html
+
     emoji = {"Critical": "🔴", "High": "🟠", "Medium": "🟡"}.get(finding.severity, "⚪")
     executor = next((e for e in EXECUTORS if e.can_handle(finding)), ManualAdapter())
     fix_cmd = executor.describe(finding)
 
+    def esc(s: str) -> str:
+        return html.escape(s, quote=False)
+
     lines = [
-        f"{emoji} *{finding.severity} — {finding.cve_id}*",
-        f"CVSS: `{finding.cvss:.1f}` · Host: `{finding.host}`",
-        f"Target: `{finding.source_ref}` ({finding.source_type})",
-        f"Package: `{finding.package} {finding.version}` → fixed in `{finding.fixed_version}`",
+        f"{emoji} <b>{esc(finding.severity)} — {esc(finding.cve_id)}</b>",
+        f"CVSS: <code>{finding.cvss:.1f}</code> · Host: <code>{esc(finding.host)}</code>",
+        f"Target: <code>{esc(finding.source_ref)}</code> ({esc(finding.source_type)})",
+        f"Package: <code>{esc(finding.package)} {esc(finding.version)}</code> "
+        f"→ fixed in <code>{esc(finding.fixed_version)}</code>",
     ]
     if finding.description:
-        desc = finding.description.replace("*", "\\*").replace("`", "\\`").replace("_", "\\_")
-        lines.append(f"\n_{desc[:160]}_")
-    lines.append(f"\n`{fix_cmd}`")
+        desc = esc(finding.description[:160])
+        lines.append(f"\n<i>{desc}</i>")
+    lines.append(f"\n<code>{esc(fix_cmd)}</code>")
     return "\n".join(lines)
 
 
@@ -310,7 +322,7 @@ async def notify(finding: Finding) -> None:
     await tg_app.bot.send_message(
         chat_id=TELEGRAM_CHAT_ID,
         text=text,
-        parse_mode="Markdown",
+        parse_mode="HTML",
         reply_markup=keyboard,
     )
 
@@ -329,65 +341,72 @@ async def on_button_click(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         await query.edit_message_text("⚠️ Finding not found or already resolved.")
         return
 
+    import html
+
+    def _esc(s: str) -> str:
+        return html.escape(s, quote=False)
+
     if action == "fix":
         if not FIX_ENABLED:
             await query.edit_message_text(
-                f"⚙️ Fix execution coming in BC-003 — `{finding.cve_id}` left as `open`",
-                parse_mode="Markdown",
+                f"⚙️ Fix execution coming in BC-003 — <code>{_esc(finding.cve_id)}</code> "
+                f"left as <code>open</code>",
+                parse_mode="HTML",
             )
             return
 
         await query.edit_message_text(
-            f"⏳ Fixing `{finding.cve_id}` on `{finding.host}`…",
-            parse_mode="Markdown",
+            f"⏳ Fixing <code>{_esc(finding.cve_id)}</code> on <code>{_esc(finding.host)}</code>…",
+            parse_mode="HTML",
         )
         executor = next((e for e in EXECUTORS if e.can_handle(finding)), ManualAdapter())
         result = await executor.execute(finding)
 
         if not result.success:
             await query.edit_message_text(
-                f"❌ *Fix failed*\n`{result.message}`",
-                parse_mode="Markdown",
+                f"❌ <b>Fix failed</b>\n<code>{_esc(result.message)}</code>",
+                parse_mode="HTML",
             )
             return
 
         await query.edit_message_text(
-            f"🔍 Fix applied — verifying…\n`{result.command}`",
-            parse_mode="Markdown",
+            f"🔍 Fix applied — verifying…\n<code>{_esc(result.command)}</code>",
+            parse_mode="HTML",
         )
         clean = await verify_fix(finding)
 
         if clean:
             set_status(finding_id, "fixed")
             await query.edit_message_text(
-                f"✅ *Fixed and verified*\n"
-                f"CVE: `{finding.cve_id}` on `{finding.host}`\n"
-                f"Command: `{result.command}`\n"
+                f"✅ <b>Fixed and verified</b>\n"
+                f"CVE: <code>{_esc(finding.cve_id)}</code> on "
+                f"<code>{_esc(finding.host)}</code>\n"
+                f"Command: <code>{_esc(result.command)}</code>\n"
                 f"Re-scan: clean ✓",
-                parse_mode="Markdown",
+                parse_mode="HTML",
             )
         else:
             await query.edit_message_text(
-                f"⚠️ *Fix applied — CVE still detected*\n"
-                f"CVE: `{finding.cve_id}`\n"
-                f"Command: `{result.command}`\n"
+                f"⚠️ <b>Fix applied — CVE still detected</b>\n"
+                f"CVE: <code>{_esc(finding.cve_id)}</code>\n"
+                f"Command: <code>{_esc(result.command)}</code>\n"
                 f"Manual review required.",
-                parse_mode="Markdown",
+                parse_mode="HTML",
             )
 
     elif action == "snooze":
         hours = int(parts[2]) if len(parts) > 2 else 4
         set_status(finding_id, "snoozed")
         await query.edit_message_text(
-            f"⏰ Snoozed {hours}h — `{finding.cve_id}`",
-            parse_mode="Markdown",
+            f"⏰ Snoozed {hours}h — <code>{_esc(finding.cve_id)}</code>",
+            parse_mode="HTML",
         )
 
     elif action == "ack":
         set_status(finding_id, "accepted")
         await query.edit_message_text(
-            f"✅ Risk accepted — `{finding.cve_id}`",
-            parse_mode="Markdown",
+            f"✅ Risk accepted — <code>{_esc(finding.cve_id)}</code>",
+            parse_mode="HTML",
         )
 
 
