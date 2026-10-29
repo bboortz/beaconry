@@ -4,6 +4,9 @@ OLD/
 # Personal session helpers (dev-local, not shipped)
 resume.sh
 
+# Local caches (grype DB, dev SQLite)
+.beaconry-cache/
+
 # Python
 __pycache__/
 *.py[cod]

@@ -1,38 +1,131 @@
-"""End-to-end mocked POC demo (BC-001).
-
-Runs scout → hub → urgency decision → executor → notification → verify in-process
-with BEACONRY_MOCK=1. No Docker daemon, no network, no Telegram.
+"""End-to-end POC demo (BC-001 mock + BC-002 real).
 
 Usage:
-    python -m poc.demo                       # interactive (prompts Enter for Tier 1)
-    python -m poc.demo --non-interactive     # CI / smoke mode
+    make demo                            # real pipeline (requires Telegram creds)
+    BEACONRY_MOCK=1 make demo            # mocked (no network/Docker/Telegram)
+    make demo ARGS=--self-test           # Telegram canary, no scan
+    make demo ARGS=--non-interactive     # mock, auto-confirm (CI smoke mode)
 """
 
 from __future__ import annotations
 
+import argparse
 import asyncio
 import os
+import shutil
 import sys
 import tempfile
+from dataclasses import dataclass
 from pathlib import Path
 
-# Set env BEFORE importing hub — hub reads env at module scope.
-os.environ["BEACONRY_MOCK"] = "1"
-os.environ.setdefault("TELEGRAM_BOT_TOKEN", "mock-token")
-os.environ.setdefault("TELEGRAM_CHAT_ID", "0")
+# BC-002: auto-load poc/.env before any mode decision.
+try:
+    from dotenv import load_dotenv
+
+    load_dotenv(Path(__file__).resolve().parent / ".env")
+except ImportError:  # dotenv is a dev dep; absent in minimal installs
+    pass
+
+
+class MissingConfigError(RuntimeError):
+    """Raised when neither BEACONRY_MOCK nor Telegram creds are set."""
+
+
+def choose_mode(env: dict[str, str]) -> str:
+    """Return 'mock' or 'real' based on env. Raise MissingConfigError if neither works."""
+    if env.get("BEACONRY_MOCK") == "1":
+        return "mock"
+    if env.get("TELEGRAM_BOT_TOKEN") and env.get("TELEGRAM_CHAT_ID"):
+        return "real"
+    raise MissingConfigError(
+        "Missing TELEGRAM_BOT_TOKEN (and/or TELEGRAM_CHAT_ID).\n"
+        "Fill poc/.env — see poc/.env.example for the template.\n"
+        "To preview the pipeline without Telegram, run: BEACONRY_MOCK=1 make demo"
+    )
+
+
+def check_prereqs(image: str, image_present: object = None) -> list[str]:
+    """Return a list of missing-prereq descriptions; empty list means OK."""
+    import subprocess
+
+    def _image_present_default(ref: str) -> bool:
+        try:
+            return (
+                subprocess.run(
+                    ["docker", "image", "inspect", ref],
+                    capture_output=True,
+                    check=False,
+                    timeout=10,
+                ).returncode
+                == 0
+            )
+        except (FileNotFoundError, subprocess.TimeoutExpired):
+            return False
+
+    presence = image_present if callable(image_present) else _image_present_default
+    missing: list[str] = []
+    for tool in ("syft", "grype"):
+        if shutil.which(tool) is None:
+            missing.append(f"{tool} not found on $PATH")
+    if not presence(image):
+        missing.append(f"{image} not pulled locally (run: docker pull {image})")
+    return missing
+
+
+@dataclass
+class Args:
+    self_test: bool = False
+    non_interactive: bool = False
+
+
+def parse_args(argv: list[str]) -> Args:
+    p = argparse.ArgumentParser(prog="poc.demo", add_help=True)
+    p.add_argument("--self-test", action="store_true")
+    p.add_argument("--non-interactive", action="store_true")
+    ns = p.parse_args(argv)
+    return Args(self_test=ns.self_test, non_interactive=ns.non_interactive)
+
+
+# ── Mode setup — must happen BEFORE importing hub ───────────────────────────
+
+_IS_MOCK = os.environ.get("BEACONRY_MOCK") == "1"
+if _IS_MOCK:
+    os.environ.setdefault("TELEGRAM_BOT_TOKEN", "mock-token")
+    os.environ.setdefault("TELEGRAM_CHAT_ID", "0")
+
 os.environ.setdefault("MIN_CVSS", "0")
-_tmp = tempfile.mkdtemp(prefix="beaconry-demo-")
-os.environ["DATA_DIR"] = _tmp
+
+_REPO_ROOT = Path(__file__).resolve().parents[1]
+if _IS_MOCK:
+    _data_dir = tempfile.mkdtemp(prefix="beaconry-demo-")
+else:
+    _cache = _REPO_ROOT / ".beaconry-cache"
+    _cache.mkdir(exist_ok=True)
+    _data_dir = str(_cache)
+    os.environ.setdefault("GRYPE_DB_CACHE_DIR", str(_cache / "grype-db"))
+os.environ["DATA_DIR"] = _data_dir
+_tmp = _data_dir  # legacy name used by _print_header
 
 # Make poc/hub/ importable so hub.py's `from executor.base import ...` resolves.
-_HUB_DIR = Path(__file__).resolve().parent / "hub"
+_HUB_DIR = _REPO_ROOT / "poc" / "hub"
 if str(_HUB_DIR) not in sys.path:
     sys.path.insert(0, str(_HUB_DIR))
 
-import hub  # noqa: E402  — poc/hub/hub.py loaded as top-level 'hub'
-import urgency  # noqa: E402  — poc/hub/urgency.py
+
+import hub  # noqa: E402 — poc/hub/hub.py loaded as top-level 'hub'
+import urgency  # noqa: E402 — poc/hub/urgency.py
 
 from poc.mock_data import FIXTURE_HOST, fixture_scan_payload  # noqa: E402
+
+
+async def run_real_pipeline_once(image: str = "nginx:1.24") -> list[hub.Finding]:
+    """Run the real pipeline once against a locally-pulled image.
+
+    BC-002: scope limited to one image, no auto-fix, Telegram caller sets up
+    the Application and injects it into hub.tg_app before invoking.
+    """
+    raise NotImplementedError("BC-002 real pipeline not yet implemented")
+
 
 RULE = "-" * 70
 HEAVY = "=" * 70
@@ -152,9 +245,22 @@ async def run_demo(*, auto_confirm: bool = False) -> int:
     return 0 if verified == len(findings) else 1
 
 
+async def run_real_demo(*, self_test: bool = False) -> int:
+    """BC-002 orchestrator: real syft/grype/Telegram pipeline on nginx:1.24."""
+    raise NotImplementedError("BC-002 real demo not yet implemented")
+
+
 def main() -> int:
-    auto = "--non-interactive" in sys.argv
-    return asyncio.run(run_demo(auto_confirm=auto))
+    args = parse_args(sys.argv[1:])
+    try:
+        mode = choose_mode(dict(os.environ))
+    except MissingConfigError as e:
+        print(f"ERROR: {e}", file=sys.stderr)
+        return 2
+
+    if mode == "mock":
+        return asyncio.run(run_demo(auto_confirm=args.non_interactive))
+    return asyncio.run(run_real_demo(self_test=args.self_test))
 
 
 if __name__ == "__main__":

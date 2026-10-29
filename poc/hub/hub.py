@@ -32,10 +32,14 @@ logging.basicConfig(
 log = logging.getLogger("hub")
 
 MOCK = os.environ.get("BEACONRY_MOCK") == "1"
-TELEGRAM_BOT_TOKEN = os.environ["TELEGRAM_BOT_TOKEN"]
-TELEGRAM_CHAT_ID = os.environ["TELEGRAM_CHAT_ID"]
+# Env is read with defaults so importing hub never crashes; functions that
+# need real values (notify, lifespan) raise with a named error when invoked.
+TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "")
+TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "")
 DATA_DIR = Path(os.environ.get("DATA_DIR", "/data"))
 MIN_CVSS = float(os.environ.get("MIN_CVSS", "7.0"))
+# BC-002: feature flag so Fix-now shows a stub until BC-003 wires the executor.
+FIX_ENABLED = os.environ.get("BEACONRY_FIX_ENABLED") == "1"
 
 DATA_DIR.mkdir(parents=True, exist_ok=True)
 DB_PATH = DATA_DIR / "beaconry.db"

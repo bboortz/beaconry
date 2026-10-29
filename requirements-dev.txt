@@ -18,3 +18,6 @@ pre-commit==4.0.1
 
 # For writing tests that touch FastAPI/httpx (hub integration tests)
 httpx==0.28.1
+
+# BC-002: auto-load poc/.env for `make demo`
+python-dotenv==1.0.1
