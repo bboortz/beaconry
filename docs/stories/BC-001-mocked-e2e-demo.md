@@ -1,7 +1,7 @@
 ---
 id: BC-001
 title: End-to-end mocked POC demo (first key-user proof)
-status: in-progress
+status: shipped
 created: 2026-10-29
 branch: feat/BC-001-mocked-e2e-demo
 plan: docs/plan/BC-001-mocked-e2e-demo-plan.md
