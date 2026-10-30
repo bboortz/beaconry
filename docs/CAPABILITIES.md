@@ -665,6 +665,16 @@ Enforcement: `poc/scripts/verify_traceability.py` runs as part of `make check`. 
 - **verified by:**
   - `poc/tests/unit/test_hub_helpers.py`
 
+### CAP-T051: Compose env propagation lint catches env vars read by code but missing from docker-compose.yml
+- **type:** technical
+- **status:** active
+- **origin:** BC-011 (fix branch BC-011-env-propagation)
+- **design:** memory/workflow.md § Blocking gates (must pass to merge to `dev`)
+- **description:** `poc/scripts/verify_compose_env_propagation.py` scans every `.py` file under `poc/hub/` and `poc/scout/` for `os.environ.get("BEACONRY_X")` reads, then checks that `BEACONRY_X` appears in that service's `environment:` block of `poc/docker-compose.yml`. Fails the gate with a named error + a copy-pasteable `- BEACONRY_X=${BEACONRY_X:-}` hint. Closes the class of bug where BC-009 shipped `BEACONRY_FIX_ENABLED` and BC-011 shipped `BEACONRY_HEALTH_PROBES` but neither added the corresponding compose propagation entry — hub booted silently with empty policies, operator saw no effect from `.env` changes, nothing failed until live tap session. Hooked into `make check` fast tier.
+- **supports:** CAP-B011, CAP-B018
+- **verified by:**
+  - `poc/tests/unit/test_compose_env_propagation.py`
+
 ### CAP-T017: Orphan tests fail the gate with a copy-pasteable template
 - **type:** technical
 - **status:** active

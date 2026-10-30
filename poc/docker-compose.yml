@@ -13,6 +13,12 @@ services:
       - GRYPE_DB_CACHE_DIR=/data/grype-db
       - MIN_CVSS=${MIN_CVSS:-9.0}
       - BEACONRY_MAX_FINDINGS_PER_RUN=${BEACONRY_MAX_FINDINGS_PER_RUN:-5}
+      # BC-009: fix execution opt-in flag; default on
+      - BEACONRY_FIX_ENABLED=${BEACONRY_FIX_ENABLED:-1}
+      # BC-011: policy-driven probe resolver
+      - BEACONRY_HEALTH_PROBES=${BEACONRY_HEALTH_PROBES:-}
+      # BEACONRY_MOCK is dev-mode; opt-in via explicit env
+      - BEACONRY_MOCK=${BEACONRY_MOCK:-}
     volumes:
       - beaconry-data:/data
       - /var/run/docker.sock:/var/run/docker.sock

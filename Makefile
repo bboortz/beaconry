@@ -1,4 +1,4 @@
-.PHONY: help lint format type test check check-full demo smoke clean install-hooks verify-traceability verify-dockerfile-health-copy verify-memory-drift findings status
+.PHONY: help lint format type test check check-full demo smoke clean install-hooks verify-traceability verify-dockerfile-health-copy verify-memory-drift verify-compose-env-propagation findings status
 
 PYTHON ?= python3
 PYTEST_ARGS ?=
@@ -57,7 +57,10 @@ verify-dockerfile-health-copy:
 verify-memory-drift:
 	$(PYTHON) -m poc.scripts.verify_memory_drift
 
-check: lint type test verify-traceability verify-dockerfile-health-copy verify-memory-drift smoke
+verify-compose-env-propagation:
+	$(PYTHON) -m poc.scripts.verify_compose_env_propagation
+
+check: lint type test verify-traceability verify-dockerfile-health-copy verify-memory-drift verify-compose-env-propagation smoke
 	@echo ""
 	@echo "✓ Fast tier (make check) passed"
 
