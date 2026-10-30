@@ -2,6 +2,7 @@
 
 Covers:
     - CAP-T019: Compose stack brings up hub + scout with correct :ro socket mount, healthchecks, env propagation
+    - CAP-T034: Hub image includes docker CLI so DockerAdapter.execute can run on the Compose path
 """
 
 from __future__ import annotations
@@ -123,3 +124,32 @@ def test_beaconry_data_volume_declared() -> None:
     """Grype DB cache lives in a named volume so it survives docker compose down."""
     config = _compose_config()
     assert "beaconry-data" in config.get("volumes", {})
+
+
+def test_hub_image_bundles_docker_cli() -> None:
+    """BC-009: DockerAdapter runs `docker tag` + `docker pull` as subprocesses from inside the
+    hub container, so the image must ship a docker CLI. The live Phase-3 tap session caught
+    the original miss; this test guards against regression if the Dockerfile is refactored.
+    """
+    project_root = Path(__file__).resolve().parents[3]
+    hub_context = project_root / "poc" / "hub"
+    build = subprocess.run(
+        ["docker", "build", "-q", "-t", "beaconry-hub:ci-test", str(hub_context)],
+        capture_output=True,
+        check=False,
+        timeout=600,
+    )
+    assert build.returncode == 0, f"hub image build failed: {build.stderr.decode()[:400]}"
+    run = subprocess.run(
+        ["docker", "run", "--rm", "beaconry-hub:ci-test", "docker", "--version"],
+        capture_output=True,
+        check=False,
+        timeout=30,
+    )
+    assert run.returncode == 0, (
+        f"`docker --version` in hub image failed (exit {run.returncode}): "
+        f"{run.stderr.decode()[:200]}"
+    )
+    assert run.stdout.startswith(b"Docker version "), (
+        f"unexpected `docker --version` output: {run.stdout!r}"
+    )

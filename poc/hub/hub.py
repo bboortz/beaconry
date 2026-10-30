@@ -45,8 +45,9 @@ TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "")
 TELEGRAM_CHAT_ID = os.environ.get("TELEGRAM_CHAT_ID", "")
 DATA_DIR = Path(os.environ.get("DATA_DIR", "/data"))
 MIN_CVSS = float(os.environ.get("MIN_CVSS", "7.0"))
-# BC-002: feature flag so Fix-now shows a stub until BC-003 wires the executor.
-FIX_ENABLED = os.environ.get("BEACONRY_FIX_ENABLED") == "1"
+# BC-009: real fix execution is on by default; operator can opt out with
+# BEACONRY_FIX_ENABLED=0 (e.g. for demos or safety-conscious exploration).
+FIX_ENABLED = os.environ.get("BEACONRY_FIX_ENABLED", "1") != "0"
 
 DATA_DIR.mkdir(parents=True, exist_ok=True)
 DB_PATH = DATA_DIR / "beaconry.db"
@@ -391,8 +392,8 @@ async def on_button_click(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     if action == "fix":
         if not FIX_ENABLED:
             await query.edit_message_text(
-                f"⚙️ Fix execution coming in a later story — <code>{_esc(finding.cve_id)}</code> "
-                f"left as <code>open</code>",
+                f"⚙️ Fix execution disabled (BEACONRY_FIX_ENABLED=0) — "
+                f"<code>{_esc(finding.cve_id)}</code> left as <code>open</code>",
                 parse_mode="HTML",
             )
             return
@@ -406,7 +407,20 @@ async def on_button_click(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 
         if not result.success:
             await query.edit_message_text(
-                f"❌ <b>Fix failed</b>\n<code>{_esc(result.message)}</code>",
+                f"❌ <b>Fix failed</b>: <code>{_esc(result.message)}</code>\n"
+                f"Image unchanged. Rollback tag still exists if you need to inspect.",
+                parse_mode="HTML",
+            )
+            return
+
+        # Non-docker findings: ManualAdapter printed the command; operator runs it,
+        # not beaconry. Status stays open (manual action required).
+        if finding.source_type != "docker":
+            await query.edit_message_text(
+                f"⚙️ <b>Manual action required</b>\n"
+                f"CVE: <code>{_esc(finding.cve_id)}</code>\n"
+                f"Run: <code>{_esc(result.command)}</code>\n"
+                f"<i>Status stays open until you confirm externally.</i>",
                 parse_mode="HTML",
             )
             return
@@ -429,10 +443,11 @@ async def on_button_click(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             )
         else:
             await query.edit_message_text(
-                f"⚠️ <b>Fix applied — CVE still detected</b>\n"
-                f"CVE: <code>{_esc(finding.cve_id)}</code>\n"
+                f"⚠️ <b>Pulled, but CVE still present upstream</b>\n"
+                f"CVE: <code>{_esc(finding.cve_id)}</code> in "
+                f"<code>{_esc(finding.package)}</code>\n"
                 f"Command: <code>{_esc(result.command)}</code>\n"
-                f"Manual review required.",
+                f"<i>Upstream hasn't patched yet — status stays open.</i>",
                 parse_mode="HTML",
             )
 

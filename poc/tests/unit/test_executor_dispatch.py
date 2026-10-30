@@ -3,6 +3,7 @@
 Covers:
     - CAP-T006: Executor dispatcher picks the first matching adapter
     - CAP-T007: DockerAdapter in MOCK mode spawns no subprocess
+    - CAP-T030: DockerAdapter.execute pulls :latest with a :rollback safety tag before pulling
 """
 
 from __future__ import annotations
@@ -79,3 +80,35 @@ async def test_docker_adapter_execute_mock_no_subprocess() -> None:
 
     assert result.success is True
     assert "nginx:latest" in result.command
+
+
+@pytest.mark.asyncio
+async def test_docker_adapter_sets_rollback_tag_before_pull(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Non-MOCK path: rollback tag command runs before docker pull."""
+    from poc.hub.executor import docker_adapter as da_mod
+
+    monkeypatch.setattr(da_mod, "MOCK", False, raising=True)
+
+    cmds: list[str] = []
+
+    class _FakeProc:
+        returncode = 0
+
+        async def communicate(self) -> tuple[bytes, bytes]:
+            return (b"", b"")
+
+    async def _fake_shell(cmd: str, **_kw: object) -> _FakeProc:
+        cmds.append(cmd)
+        return _FakeProc()
+
+    monkeypatch.setattr(da_mod.asyncio, "create_subprocess_shell", _fake_shell)
+
+    result = await DockerAdapter().execute(_finding("docker", "nginx:1.24"))
+
+    assert result.success is True
+    assert len(cmds) == 2, f"expected tag + pull, got {cmds}"
+    assert cmds[0].startswith("docker tag"), f"first command should tag :rollback, got {cmds[0]}"
+    assert ":rollback" in cmds[0]
+    assert cmds[1] == "docker pull nginx:latest"

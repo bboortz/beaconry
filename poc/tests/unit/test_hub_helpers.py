@@ -13,6 +13,10 @@ Covers:
     - CAP-T021: Hub /scan endpoint applies dedup + cap across the full inventory
     - CAP-T028: Callback_data validation rejects malformed input
     - CAP-T029: Button handlers are idempotent on double-tap
+    - CAP-B014: Operator closes a CVE from Telegram — tap Fix, pulled, re-scanned, verified
+    - CAP-T031: verify_fix re-runs syft + grype on the new image
+    - CAP-T032: Fix flow distinguishes pull-failed from pull-OK-but-upstream-still-vulnerable
+    - CAP-T033: Operator can opt out of fix execution via BEACONRY_FIX_ENABLED=0
 """
 
 from __future__ import annotations
@@ -202,6 +206,141 @@ async def test_double_tap_accept_is_idempotent(
 
     assert set_status_calls == []
     assert "already" in str(update.callback_query.edits[0]["text"]).lower()
+
+
+async def _run_fix_tap(finding_id: str) -> _FakeUpdate:
+    update = _FakeUpdate(f"fix:{finding_id}")
+    await hub.on_button_click(update, context=None)  # type: ignore[arg-type]
+    return update
+
+
+async def test_fix_now_pull_clean_sets_status_fixed(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Happy path: DockerAdapter pulls, verify_fix clean → status=fixed, '✅ Fixed and verified'."""
+    hub.init_db()
+    hub.save_finding(_finding(id="bc9fcafebabe0001", cve_id="CVE-FIX-1", source_type="docker"))
+    monkeypatch.setattr(hub, "FIX_ENABLED", True, raising=True)
+
+    from poc.hub.executor.base import ExecutionResult
+
+    async def _fake_execute(self: object, f: object) -> ExecutionResult:
+        return ExecutionResult(success=True, message="pulled", command="docker pull x:latest")
+
+    async def _fake_verify(f: object) -> bool:
+        return True
+
+    monkeypatch.setattr(
+        hub.EXECUTORS[0].__class__, "execute", _fake_execute, raising=True
+    )  # DockerAdapter
+    monkeypatch.setattr(hub, "verify_fix", _fake_verify)
+
+    update = await _run_fix_tap("bc9fcafebabe0001")
+
+    assert hub.get_status("bc9fcafebabe0001") == "fixed"
+    final_edit = str(update.callback_query.edits[-1]["text"])
+    assert "Fixed and verified" in final_edit
+
+
+async def test_fix_now_pull_upstream_still_present(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Pull succeeded but verify_fix still finds the CVE → status stays open, honest message."""
+    hub.init_db()
+    hub.save_finding(_finding(id="bc9fcafebabe0002", cve_id="CVE-FIX-2", source_type="docker"))
+    monkeypatch.setattr(hub, "FIX_ENABLED", True, raising=True)
+
+    from poc.hub.executor.base import ExecutionResult
+
+    async def _fake_execute(self: object, f: object) -> ExecutionResult:
+        return ExecutionResult(success=True, message="pulled", command="docker pull x:latest")
+
+    async def _fake_verify_still(f: object) -> bool:
+        return False
+
+    monkeypatch.setattr(hub.EXECUTORS[0].__class__, "execute", _fake_execute, raising=True)
+    monkeypatch.setattr(hub, "verify_fix", _fake_verify_still)
+
+    update = await _run_fix_tap("bc9fcafebabe0002")
+
+    assert hub.get_status("bc9fcafebabe0002") == "open"
+    final_edit = str(update.callback_query.edits[-1]["text"])
+    assert "still present upstream" in final_edit.lower() or "upstream" in final_edit.lower()
+
+
+async def test_fix_now_pull_fails_message(monkeypatch: pytest.MonkeyPatch) -> None:
+    """DockerAdapter returns success=False → '❌ Fix failed', no verify_fix call, status stays open."""
+    hub.init_db()
+    hub.save_finding(_finding(id="bc9fcafebabe0003", cve_id="CVE-FIX-3", source_type="docker"))
+    monkeypatch.setattr(hub, "FIX_ENABLED", True, raising=True)
+
+    from poc.hub.executor.base import ExecutionResult
+
+    async def _fake_execute_fail(self: object, f: object) -> ExecutionResult:
+        return ExecutionResult(
+            success=False, message="docker pull failed: 500", command="docker pull x:latest"
+        )
+
+    verify_called: list[bool] = []
+
+    async def _tracked_verify(f: object) -> bool:
+        verify_called.append(True)
+        return True
+
+    monkeypatch.setattr(hub.EXECUTORS[0].__class__, "execute", _fake_execute_fail, raising=True)
+    monkeypatch.setattr(hub, "verify_fix", _tracked_verify)
+
+    update = await _run_fix_tap("bc9fcafebabe0003")
+
+    assert hub.get_status("bc9fcafebabe0003") == "open"
+    assert verify_called == [], "verify_fix must not run if pull failed"
+    final_edit = str(update.callback_query.edits[-1]["text"])
+    assert "fix failed" in final_edit.lower()
+
+
+async def test_fix_now_disabled_shows_stub(monkeypatch: pytest.MonkeyPatch) -> None:
+    """BEACONRY_FIX_ENABLED=0 → stub message, no DockerAdapter.execute call."""
+    hub.init_db()
+    hub.save_finding(_finding(id="bc9fcafebabe0004", cve_id="CVE-FIX-4", source_type="docker"))
+    monkeypatch.setattr(hub, "FIX_ENABLED", False, raising=True)
+
+    execute_calls: list[bool] = []
+
+    async def _tracked_execute(self: object, f: object) -> object:
+        execute_calls.append(True)
+        return None
+
+    monkeypatch.setattr(hub.EXECUTORS[0].__class__, "execute", _tracked_execute, raising=True)
+
+    update = await _run_fix_tap("bc9fcafebabe0004")
+
+    assert execute_calls == [], "disabled flag must prevent DockerAdapter.execute"
+    assert hub.get_status("bc9fcafebabe0004") == "open"
+    final_edit = str(update.callback_query.edits[-1]["text"])
+    assert "disabled" in final_edit.lower() or "beaconry_fix_enabled" in final_edit.lower()
+
+
+async def test_fix_now_non_docker_runs_manual_adapter(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Non-docker (alpm) finding → ManualAdapter path, status stays open, 'manual action required'."""
+    hub.init_db()
+    hub.save_finding(
+        _finding(id="bc9fcafebabe0005", cve_id="CVE-FIX-5", source_type="alpm", package="openssl")
+    )
+    monkeypatch.setattr(hub, "FIX_ENABLED", True, raising=True)
+
+    # Spy on DockerAdapter.execute — must NOT run for an alpm finding
+    docker_execute_calls: list[bool] = []
+
+    async def _tracked_docker_execute(self: object, f: object) -> object:
+        docker_execute_calls.append(True)
+        return None
+
+    monkeypatch.setattr(
+        hub.EXECUTORS[0].__class__, "execute", _tracked_docker_execute, raising=True
+    )
+
+    update = await _run_fix_tap("bc9fcafebabe0005")
+
+    assert docker_execute_calls == [], "DockerAdapter must not run for alpm"
+    assert hub.get_status("bc9fcafebabe0005") == "open"
+    final_edit = str(update.callback_query.edits[-1]["text"])
+    assert "manual action" in final_edit.lower() or "pacman" in final_edit.lower()
 
 
 def test_hub_import_silences_noisy_http_loggers() -> None:

@@ -8,6 +8,15 @@ RUN curl -sSfL https://raw.githubusercontent.com/anchore/syft/main/install.sh \
 RUN curl -sSfL https://raw.githubusercontent.com/anchore/grype/main/install.sh \
     | sh -s -- -b /usr/local/bin
 
+# BC-009: install docker CLI so DockerAdapter.execute can run `docker tag` + `docker pull`
+# against the host daemon via the mounted socket. Static binary; pinned for reproducibility.
+ARG DOCKER_CLI_VERSION=27.5.1
+RUN curl -fsSL "https://download.docker.com/linux/static/stable/x86_64/docker-${DOCKER_CLI_VERSION}.tgz" \
+    | tar -xz -C /tmp && \
+    mv /tmp/docker/docker /usr/local/bin/docker && \
+    rm -rf /tmp/docker && \
+    docker --version
+
 WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt

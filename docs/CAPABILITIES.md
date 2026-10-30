@@ -37,9 +37,9 @@ Enforcement: `poc/scripts/verify_traceability.py` runs as part of `make check`. 
 ### CAP-B003: Operator can disable Fix-execution with a feature flag
 - **type:** business
 - **status:** active
-- **origin:** BC-002
+- **origin:** BC-002 (default on in BC-009)
 - **design:** memory/workflow.md
-- **description:** When `BEACONRY_FIX_ENABLED` is unset (default), tapping [🔧 Fix now] shows "⚙️ Fix execution coming in a later story — <cve> left as `open`" and does not run any Docker action. A future BC-NNN flips the default to enable real fix execution.
+- **description:** `BEACONRY_FIX_ENABLED` controls whether tapping [🔧 Fix now] runs the real executor. Since BC-009 the default is `on`; operators can opt out with `BEACONRY_FIX_ENABLED=0`, in which case the button edits to "⚙️ Fix execution disabled (BEACONRY_FIX_ENABLED=0) — <cve> left as `open`" without touching Docker. Used for demos, dry-runs, and safety-conscious exploration.
 - **verified by:**
   - `poc/tests/unit/test_hub_helpers.py`
 
@@ -116,12 +116,21 @@ Enforcement: `poc/scripts/verify_traceability.py` runs as part of `make check`. 
 - **verified by:**
   - `poc/tests/unit/test_hub_helpers.py`
 
-### CAP-B008: Fix-now button is honest about its stub state until BC-004
+### CAP-B008: Fix-now button is honest about its disabled state
 - **type:** business
 - **status:** active
-- **origin:** BC-003
+- **origin:** BC-003 (superseded by CAP-B014 in BC-009)
 - **design:** memory/telegram-patterns.md
-- **description:** With `BEACONRY_FIX_ENABLED` unset (default), tapping [🔧 Fix now] edits the message to "⚙️ Fix execution coming in a later story — <cve> left as `open`". DB status unchanged. Operator never sees a silent no-op. Live-verified via the Phase 3 tap session in BC-003.
+- **description:** With `BEACONRY_FIX_ENABLED=0` (opt-out), tapping [🔧 Fix now] edits the message to "⚙️ Fix execution disabled (BEACONRY_FIX_ENABLED=0) — <cve> left as `open`". DB status unchanged. Operator never sees a silent no-op. Live-verified via the Phase 3 tap session in BC-003 (then as the default stub); still live by `BEACONRY_FIX_ENABLED=0 make demo`.
+- **verified by:**
+  - `poc/tests/unit/test_hub_helpers.py`
+
+### CAP-B014: Operator closes a CVE from Telegram — tap Fix, image pulled, re-scanned, verified
+- **type:** business
+- **status:** active
+- **origin:** BC-009
+- **design:** DESIGN.md § Remediation as a first-class citizen, memory/design-decisions.md § Auto-fix trust model
+- **description:** Tapping [🔧 Fix now] on a Telegram notification runs the DockerAdapter end-to-end: tags `<base>:rollback` for safety, `docker pull <base>:latest`, re-scans the new image with syft + grype. Three terminal states, each a distinct message: `✅ Fixed and verified` (DB → `fixed`), `⚠️ Pulled, but CVE still present upstream` (DB stays `open`), `❌ Fix failed: <reason>` (DB stays `open`, rollback tag intact). Non-docker findings fall through to ManualAdapter and show "⚙️ Manual action required — <command>". Live-verified via Phase 3 tap session in BC-009 against nginx:1.24.
 - **verified by:**
   - `poc/tests/unit/test_hub_helpers.py`
 
@@ -407,6 +416,56 @@ Enforcement: `poc/scripts/verify_traceability.py` runs as part of `make check`. 
 - **supports:** CAP-B006
 - **verified by:**
   - `poc/tests/integration/test_BC_004_traceability.py`
+
+### CAP-T030: DockerAdapter.execute pulls :latest with a :rollback safety tag before pulling
+- **type:** technical
+- **status:** active
+- **origin:** BC-001 (registered in BC-009)
+- **design:** memory/design-decisions.md § Auto-fix trust model
+- **description:** `DockerAdapter.execute` runs `docker tag <source_ref> <base>:rollback` immediately before `docker pull <base>:latest`. Tag is zero-cost (it's a label on the existing image id). Operator can restore manually via `docker tag <base>:rollback <base>:latest` if the new image misbehaves. Tag-failure is logged non-fatal so the pull still proceeds; pull-failure returns `success=False` and leaves the image unchanged.
+- **supports:** CAP-B014
+- **verified by:**
+  - `poc/tests/unit/test_executor_dispatch.py`
+
+### CAP-T031: verify_fix re-runs syft + grype on the new image and detects CVE persistence
+- **type:** technical
+- **status:** active
+- **origin:** BC-001 (registered in BC-009)
+- **design:** DESIGN.md § Solving strategy
+- **description:** After a successful DockerAdapter pull, `verify_fix(finding)` runs real `syft <base>:latest -o syft-json` on the newly pulled image and pipes the SBOM to `run_grype`. If grype still returns a match for the same (CVE id, package) pair the function returns `False` (upstream not patched); if the match is absent it returns `True`. Non-docker findings and MOCK mode short-circuit to `True`. The handler maps False → "⚠️ Pulled, but CVE still present upstream" (DB stays open), True → "✅ Fixed and verified" (DB → fixed).
+- **supports:** CAP-B014
+- **verified by:**
+  - `poc/tests/unit/test_hub_helpers.py`
+
+### CAP-T032: Fix flow distinguishes pull-failed from pull-OK-but-upstream-still-vulnerable
+- **type:** technical
+- **status:** active
+- **origin:** BC-009
+- **design:** memory/design-decisions.md § Auto-fix trust model
+- **description:** `on_button_click`'s fix branch emits three distinct terminal messages for three distinct outcomes: `❌ Fix failed: <reason>` when the DockerAdapter returns `success=False` (pull errored, image unchanged, verify_fix is NOT called); `⚠️ Pulled, but CVE still present upstream` when pull succeeded but `verify_fix` returned False (DB status stays `open`); `✅ Fixed and verified` when pull succeeded and verify_fix returned True (DB status flips to `fixed`). Operator can tell beaconry-bug from upstream-not-patched at a glance.
+- **supports:** CAP-B014
+- **verified by:**
+  - `poc/tests/unit/test_hub_helpers.py`
+
+### CAP-T034: Hub container image ships a docker CLI so DockerAdapter.execute works on the Compose path
+- **type:** technical
+- **status:** active
+- **origin:** BC-009 (Phase 3 live gap)
+- **design:** memory/docker-standard.md
+- **description:** `poc/hub/Dockerfile` installs a pinned static `docker` CLI (currently 27.5.1) at `/usr/local/bin/docker` so `DockerAdapter.execute` can run `docker tag` / `docker pull` shell subprocesses against the host daemon via the mounted socket. Without this, taps on 🔧 Fix now in the Compose path would always fail with "docker: not found". Guarded by `test_hub_image_bundles_docker_cli` (compose-marker tier).
+- **supports:** CAP-B014, CAP-B009
+- **verified by:**
+  - `poc/tests/integration/test_BC_005_compose.py`
+
+### CAP-T033: Operator can opt out of fix execution via BEACONRY_FIX_ENABLED=0
+- **type:** technical
+- **status:** active
+- **origin:** BC-009
+- **design:** memory/workflow.md
+- **description:** `hub.py` reads `BEACONRY_FIX_ENABLED` with default `"1"`; only an explicit `"0"` turns it off. When off, the fix branch short-circuits to "⚙️ Fix execution disabled (BEACONRY_FIX_ENABLED=0)" without invoking any executor. Preserves the pre-BC-009 stub behavior for demo and safety-conscious operators, and gives developers a quick toggle for local experiments.
+- **supports:** CAP-B003, CAP-B014
+- **verified by:**
+  - `poc/tests/unit/test_hub_helpers.py`
 
 ### CAP-T017: Orphan tests fail the gate with a copy-pasteable template
 - **type:** technical

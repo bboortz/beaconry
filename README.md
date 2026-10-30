@@ -94,11 +94,32 @@ Each notification carries three buttons:
 
 | Button | Action |
 |---|---|
-| 🔧 Fix now | Stub: edits message to "⚙️ Fix execution coming in a later story". No DB write. (Enabled via `BEACONRY_FIX_ENABLED=1` when the fix path lands.) |
+| 🔧 Fix now | Runs the real executor (BC-009). For docker findings: tags `<base>:rollback`, `docker pull <base>:latest`, re-scans with syft + grype, and reports one of three terminal states (see below). For non-docker: shows a "Manual action required" message with the exact command. Opt-out: `BEACONRY_FIX_ENABLED=0`. |
 | ⏰ Snooze 4h | Marks finding `snoozed`; next `make demo` won't re-notify. |
 | ✅ Accept risk | Marks finding `accepted`; next `make demo` won't re-notify. |
 
 Double-tapping Snooze/Accept is safe — the handler notices the finding is already in that state, re-shows the current status, and skips the DB write. Malformed callback payloads are rejected with a warning.
+
+### Fix now behavior (BC-009)
+
+Tapping [🔧 Fix now] on a `source_type=docker` finding walks `⏳ Fixing…` → `🔍 Verifying…` → one of three honest terminal states:
+
+| Message | Meaning | DB status |
+|---|---|---|
+| `✅ Fixed and verified` | Pull succeeded; re-scan can no longer match the CVE in that package. | `fixed` |
+| `⚠️ Pulled, but CVE still present upstream` | Pull succeeded, but upstream hasn't patched this CVE yet. Not a beaconry bug. | stays `open` |
+| `❌ Fix failed: <reason>` | `docker pull` errored. Image unchanged. `<base>:rollback` tag still exists for inspection. | stays `open` |
+
+Beaconry pulls the image. **Your running containers continue with the old image until you restart them yourself** (`docker compose up -d` or equivalent). Beaconry does not touch the compose state.
+
+A safety tag `<base>:rollback` is set before every pull. Restore with:
+```bash
+docker tag nginx:rollback nginx:latest
+```
+
+Opt-out: `BEACONRY_FIX_ENABLED=0 make demo` restores the pre-BC-009 stub ("⚙️ Fix execution disabled") — useful for demos, dry-runs, and safety-conscious exploration.
+
+Non-docker findings (pacman/pip) route to ManualAdapter: the message shows the exact command (`sudo pacman -Syu <package>`) and the DB status stays `open` until the operator runs it externally.
 
 ### Pre-ship audit
 
