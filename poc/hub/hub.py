@@ -123,7 +123,7 @@ def load_finding(finding_id: str) -> Finding | None:
     con = sqlite3.connect(DB_PATH)
     row = con.execute(
         "SELECT id,host,cve_id,package,version,fixed_version,severity,"
-        "cvss,source_type,source_ref,description FROM findings WHERE id=?",
+        "cvss,source_type,source_ref,description,tier FROM findings WHERE id=?",
         (finding_id,),
     ).fetchone()
     con.close()

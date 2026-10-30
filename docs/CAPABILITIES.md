@@ -325,10 +325,11 @@ Enforcement: `poc/scripts/verify_traceability.py` runs as part of `make check`. 
 - **status:** active
 - **origin:** BC-007
 - **design:** DESIGN.md § Architecture
-- **description:** `poc/scripts/findings.py` opens the dev DB in read-only mode (`?mode=ro` SQLite URI), queries findings (optionally filtered by `--status`), sorts by (status rank, -cvss), and prints via `format_table` — a pure helper that pads/truncates each column with "…". No side effects on the DB file (mtime unchanged after invocation). Exit always 0.
+- **description:** `poc/scripts/findings.py` opens the dev DB in read-only mode (`?mode=ro` SQLite URI), introspects the schema (`PRAGMA table_info`) to decide whether the `tier` column is present, queries findings (optionally filtered by `--status`), sorts by (status rank, tier, -cvss) when tier is available or falls back to (status rank, -cvss) on legacy DBs, and prints via `format_table` — a pure helper that pads/truncates each column with "…". No side effects on the DB file (mtime unchanged after invocation). Exit always 0. Migration to the tier column is handled by `hub.init_db` (idempotent `ALTER TABLE`) the next time the hub starts.
 - **supports:** CAP-B012
 - **verified by:**
   - `poc/tests/integration/test_BC_007_findings_cli.py`
+  - `poc/tests/unit/test_hub_helpers.py`
 
 ### CAP-T022: Fix/feat branches without a plan doc fail the gate
 - **type:** technical

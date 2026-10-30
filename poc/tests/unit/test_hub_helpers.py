@@ -139,6 +139,62 @@ def test_load_finding_returns_none_for_missing_id() -> None:
     assert hub.load_finding("does-not-exist") is None
 
 
+def test_save_and_load_round_trip_preserves_tier(tmp_path: pytest.TempdirFactory) -> None:
+    """BC-007 close-gaps-2: tier must survive save → load (previously defaulted to 3)."""
+    db = tmp_path / "tier-roundtrip.db"  # type: ignore[operator]
+    original_db = hub.DB_PATH
+    hub.DB_PATH = db
+    try:
+        hub.init_db()
+        hub.save_finding(_finding(id="tier-0-roundtrip", cve_id="CVE-KEV", tier=0))
+        loaded = hub.load_finding("tier-0-roundtrip")
+        assert loaded is not None
+        assert loaded.tier == 0
+    finally:
+        hub.DB_PATH = original_db
+
+
+def test_init_db_migrates_legacy_schema_in_place(tmp_path: pytest.TempdirFactory) -> None:
+    """BC-007 close-gaps-2: legacy DB without tier column gets ALTER'd on init_db."""
+    import sqlite3
+
+    db = tmp_path / "legacy.db"  # type: ignore[operator]
+    con = sqlite3.connect(db)
+    con.execute("""
+        CREATE TABLE findings (
+            id           TEXT PRIMARY KEY,
+            host         TEXT,
+            cve_id       TEXT,
+            package      TEXT,
+            version      TEXT,
+            fixed_version TEXT,
+            severity     TEXT,
+            cvss         REAL,
+            source_type  TEXT,
+            source_ref   TEXT,
+            description  TEXT,
+            found_at     INTEGER,
+            status       TEXT DEFAULT 'open'
+        )
+    """)
+    con.commit()
+    con.close()
+
+    original_db = hub.DB_PATH
+    hub.DB_PATH = db
+    try:
+        hub.init_db()
+    finally:
+        hub.DB_PATH = original_db
+
+    con = sqlite3.connect(db)
+    schema_cols = {row[1] for row in con.execute("PRAGMA table_info(findings)")}
+    con.close()
+    assert "tier" in schema_cols, (
+        "init_db must idempotently ALTER TABLE to add 'tier' on legacy DBs"
+    )
+
+
 def test_dedup_and_cap_dedupes_by_cve_id_and_ranks_by_tier_cvss() -> None:
     """Across multiple SBOMs, same CVE on different packages collapses to one;
     results are ranked (tier asc, cvss desc), top N returned, rest suppressed."""
