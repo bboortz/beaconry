@@ -128,9 +128,9 @@ Enforcement: `poc/scripts/verify_traceability.py` runs as part of `make check`. 
 ### CAP-B014: Operator closes a CVE from Telegram — tap Fix, image pulled, re-scanned, verified
 - **type:** business
 - **status:** active
-- **origin:** BC-009
+- **origin:** BC-009 (same-track pull refinement landed in BC-014)
 - **design:** DESIGN.md § Remediation as a first-class citizen, memory/design-decisions.md § Auto-fix trust model
-- **description:** Tapping [🔧 Fix now] on a Telegram notification runs the DockerAdapter end-to-end: tags `<base>:rollback` for safety, `docker pull <base>:latest`, re-scans the new image with syft + grype. Three terminal states, each a distinct message: `✅ Fixed and verified` (DB → `fixed`), `⚠️ Pulled, but CVE still present upstream` (DB stays `open`), `❌ Fix failed: <reason>` (DB stays `open`, rollback tag intact). Non-docker findings fall through to ManualAdapter and show "⚙️ Manual action required — <command>". Live-verified via Phase 3 tap session in BC-009 against nginx:1.24.
+- **description:** Tapping [🔧 Fix now] on a Telegram notification runs the DockerAdapter end-to-end: tags `<base>:rollback` for safety, `docker pull <source_ref>` (same track as the running image — BC-014 preserves tag like `postgres:16-alpine` instead of silently jumping to `:latest`), re-scans the new image with syft + grype. Three terminal states, each a distinct message: `✅ Fixed and verified` (DB → `fixed`), `⚠️ Pulled, but CVE still present upstream` (DB stays `open`), `❌ Fix failed: <reason>` (DB stays `open`, rollback tag intact). Non-docker findings fall through to ManualAdapter and show "⚙️ Manual action required — <command>". Live-verified via Phase 3 tap session in BC-009 against nginx:1.24; BC-014 live-verified against postgres:16-alpine.
 - **verified by:**
   - `poc/tests/unit/test_hub_helpers.py`
 
@@ -444,12 +444,12 @@ Enforcement: `poc/scripts/verify_traceability.py` runs as part of `make check`. 
 - **verified by:**
   - `poc/tests/integration/test_BC_004_traceability.py`
 
-### CAP-T030: DockerAdapter.execute pulls :latest with a :rollback safety tag before pulling
+### CAP-T030: DockerAdapter.execute pulls same-track tag with a :rollback safety tag before pulling
 - **type:** technical
 - **status:** active
-- **origin:** BC-001 (registered in BC-009)
+- **origin:** BC-001 (registered in BC-009, same-track behavior landed in BC-014)
 - **design:** memory/design-decisions.md § Auto-fix trust model
-- **description:** `DockerAdapter.execute` runs `docker tag <source_ref> <base>:rollback` immediately before `docker pull <base>:latest`. Tag is zero-cost (it's a label on the existing image id). Operator can restore manually via `docker tag <base>:rollback <base>:latest` if the new image misbehaves. Tag-failure is logged non-fatal so the pull still proceeds; pull-failure returns `success=False` and leaves the image unchanged.
+- **description:** `DockerAdapter.execute` runs `docker tag <source_ref> <base>:rollback` immediately before `docker pull <source_ref>` (same tag — BC-014 preserves the operator's track). Rollback tag is zero-cost (label on existing image id). Operator can restore manually via `docker tag <base>:rollback <source_ref>` if the new image misbehaves. Tag-failure is logged non-fatal so the pull still proceeds; pull-failure returns `success=False` and leaves the image unchanged. Pre-BC-014 behavior hardcoded `:latest` — see CAP-T046 for the migration.
 - **supports:** CAP-B014
 - **verified by:**
   - `poc/tests/unit/test_executor_dispatch.py`
@@ -606,6 +606,16 @@ Enforcement: `poc/scripts/verify_traceability.py` runs as part of `make check`. 
 - **supports:** CAP-B017
 - **verified by:**
   - `poc/tests/unit/test_status_cli.py`
+
+### CAP-T046: DockerAdapter preserves the source_ref tag on pull (no silent :latest jump)
+- **type:** technical
+- **status:** active
+- **origin:** BC-014
+- **design:** memory/design-decisions.md § Auto-fix trust model
+- **description:** `DockerAdapter.describe` and `DockerAdapter.execute` resolve the pull target to the exact `source_ref` the operator runs: `postgres:16-alpine` → `docker pull postgres:16-alpine` (not `postgres:latest`). Fluid tags still pick up upstream patch updates via Docker Hub tag-mutability (upstream mutates `:16-alpine` → new image id, local re-pull picks it up). Pinned tags stay pinned (`postgres:16.1.3-alpine` doesn't change on tap-Fix) — operator decides when to bump majors. Edge case: `source_ref` without a tag at all (`nginx`) falls back to `:latest` to match Docker's own default. Rollback-tag mechanism unchanged (`<base>:rollback`). Replaces BC-009's hardcoded `:latest` which could silently jump a postgres from 16 → 18.
+- **supports:** CAP-B014, CAP-T030
+- **verified by:**
+  - `poc/tests/unit/test_executor_dispatch.py`
 
 ### CAP-T017: Orphan tests fail the gate with a copy-pasteable template
 - **type:** technical

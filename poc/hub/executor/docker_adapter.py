@@ -1,4 +1,11 @@
-"""DockerAdapter — pulls the latest image tag to remediate container CVEs."""
+"""DockerAdapter — re-pulls the image's existing tag (same track) to remediate container CVEs.
+
+BC-014: preserves `source_ref` tag verbatim. Fluid tags (`:alpine`, `:16-alpine`,
+`:stable`) pick up upstream patch updates via Docker Hub tag-mutability; pinned
+tags (`:16.1.3-alpine`) stay pinned so operators can't be silently moved across
+major versions. If source_ref has no tag at all (`nginx`), falls back to `:latest`
+which matches Docker's own default.
+"""
 
 import asyncio
 import logging
@@ -11,26 +18,37 @@ log = logging.getLogger("executor.docker")
 MOCK = os.environ.get("BEACONRY_MOCK") == "1"
 
 
+def _resolve_pull_target(source_ref: str) -> tuple[str, str]:
+    """Return (base_name, pull_target). pull_target is the full `name:tag` to pull.
+
+    `source_ref="postgres:16-alpine"` → ("postgres", "postgres:16-alpine")
+    `source_ref="nginx"` → ("nginx", "nginx:latest")  — Docker's own fallback.
+    """
+    if ":" in source_ref:
+        base_name = source_ref.split(":")[0]
+        return base_name, source_ref
+    return source_ref, f"{source_ref}:latest"
+
+
 class DockerAdapter(ExecutorPlugin):
     def can_handle(self, finding: Finding) -> bool:
         return finding.source_type == "docker"
 
     def describe(self, finding: Finding) -> str:
-        base = finding.source_ref.split(":")[0]
-        return f"docker pull {base}:latest"
+        _, pull_target = _resolve_pull_target(finding.source_ref)
+        return f"docker pull {pull_target}"
 
     async def execute(self, finding: Finding) -> ExecutionResult:
-        base = finding.source_ref.split(":")[0]
-        new_image = f"{base}:latest"
-        rollback_cmd = f"docker tag {finding.source_ref} {base}:rollback"
-        pull_cmd = f"docker pull {new_image}"
+        base_name, pull_target = _resolve_pull_target(finding.source_ref)
+        rollback_cmd = f"docker tag {finding.source_ref} {base_name}:rollback"
+        pull_cmd = f"docker pull {pull_target}"
 
         if MOCK:
             print(f"    [mock] {rollback_cmd}")
             print(f"    [mock] {pull_cmd}")
             return ExecutionResult(
                 success=True,
-                message=f"[mock] pulled {new_image}",
+                message=f"[mock] pulled {pull_target}",
                 command=pull_cmd,
             )
 
@@ -44,7 +62,7 @@ class DockerAdapter(ExecutorPlugin):
         if proc.returncode != 0:
             log.warning("Rollback tag failed (non-fatal): %s", err.decode()[:100])
 
-        # Pull latest
+        # Pull same-track tag
         log.info("Executing: %s", pull_cmd)
         proc = await asyncio.create_subprocess_shell(
             pull_cmd,
@@ -60,9 +78,9 @@ class DockerAdapter(ExecutorPlugin):
                 command=pull_cmd,
             )
 
-        log.info("Pulled %s successfully", new_image)
+        log.info("Pulled %s successfully", pull_target)
         return ExecutionResult(
             success=True,
-            message=f"Pulled {new_image}",
+            message=f"Pulled {pull_target}",
             command=pull_cmd,
         )

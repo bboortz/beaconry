@@ -82,7 +82,9 @@ Running list of ideas and discussions that may become future BC-NNN stories.
 
 ## Trust / safety / security
 
-- **DockerAdapter hardcodes `:latest` — potential major-version jump foot-gun**
+- ~~**DockerAdapter hardcodes `:latest` — potential major-version jump foot-gun**~~ **Landed in BC-014 2026-10-30 as "same-track pull" (strategy 1 from this entry).** Preserved for history below; strategies 2–4 remain future refinements if operators ask.
+
+- **DockerAdapter hardcodes `:latest` — potential major-version jump foot-gun (historical, pre-BC-014)**
   trigger: user 2026-10-30 during BC-009 Phase 3 tap session. For `postgres:16-alpine` tapping Fix would pull `postgres:latest` = currently postgres 18 (two major jumps, risks DB-engine incompatibility + data corruption). Got lucky on nginx-proxy where `:latest` was a benign patch bump.
   priority: now
   Current code: `new_image = f"{base}:latest"` in `poc/hub/executor/docker_adapter.py`. Candidate approaches: (1) **same-track pull** — preserve the suffix (`postgres:16-alpine` → next `:16.X-alpine` tag), likely by querying Docker Hub registry API for tags matching a pattern; (2) **operator-approved diff** — show "16.3-alpine → 16.9-alpine, these packages change: …" in Telegram before pulling; (3) **grype-fixed-version mapping** — grype returns `fixed_version`, map it back to image tag (not 1:1 for base images); (4) **operator-configured tag policy** per image (`BEACONRY_TAG_POLICY=postgres:16-alpine,nginx:1.24-alpine`). Default pick: #1 (minimal surprise, preserves variant). Interacts with "KEV auto-fix is scary" (digest pinning) and "Rollback as a first-class ExecutorPlugin method".

@@ -100,7 +100,7 @@ Each notification carries three buttons:
 
 Double-tapping Snooze/Accept is safe — the handler notices the finding is already in that state, re-shows the current status, and skips the DB write. Malformed callback payloads are rejected with a warning.
 
-### Fix now behavior (BC-009)
+### Fix now behavior (BC-009 + BC-014)
 
 Tapping [🔧 Fix now] on a `source_type=docker` finding walks `⏳ Fixing…` → `🔍 Verifying…` → one of three honest terminal states:
 
@@ -110,11 +110,13 @@ Tapping [🔧 Fix now] on a `source_type=docker` finding walks `⏳ Fixing…` �
 | `⚠️ Pulled, but CVE still present upstream` | Pull succeeded, but upstream hasn't patched this CVE yet. Not a beaconry bug. | stays `open` |
 | `❌ Fix failed: <reason>` | `docker pull` errored. Image unchanged. `<base>:rollback` tag still exists for inspection. | stays `open` |
 
+**Pull preserves the source tag (BC-014).** For `postgres:16-alpine`, beaconry runs `docker pull postgres:16-alpine` — not `postgres:latest`. Fluid tags still pick up upstream security updates via Docker Hub tag-mutability; pinned tags (`postgres:16.1.3-alpine`) stay pinned so operators can't be silently moved across major versions. Trade-off: for pinned tags, `verify_fix` may surface "upstream still present" more often — operator decides when to manually bump the tag.
+
 Beaconry pulls the image. **Your running containers continue with the old image until you restart them yourself** (`docker compose up -d` or equivalent). Beaconry does not touch the compose state.
 
 A safety tag `<base>:rollback` is set before every pull. Restore with:
 ```bash
-docker tag nginx:rollback nginx:latest
+docker tag postgres:rollback postgres:16-alpine
 ```
 
 Opt-out: `BEACONRY_FIX_ENABLED=0 make demo` restores the pre-BC-009 stub ("⚙️ Fix execution disabled") — useful for demos, dry-runs, and safety-conscious exploration.

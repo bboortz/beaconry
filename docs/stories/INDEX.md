@@ -17,5 +17,6 @@ One-line status board for operator scenarios. Full stories in `BC-NNN-<slug>.md`
 | BC-010 | Container health observability (4 endpoints) | shipped     | — (merged to dev)                   |
 | BC-012 | Shared `beaconry_health/` package (typed trap guard) | shipped     | — (merged to dev)                   |
 | BC-013 | Scout live HTTP probes + unified status table | shipped     | — (merged to dev)                   |
+| BC-014 | DockerAdapter same-track pull (no :latest jump) | shipped     | — (merged to dev)                   |
 
 Lifecycle: `draft → ready → in-progress → shipped`. Status matches each story's frontmatter.
