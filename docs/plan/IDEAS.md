@@ -200,6 +200,15 @@ Running list of ideas and discussions that may become future BC-NNN stories.
   priority: later
   Operators running the demo during dev would appreciate a `BEACONRY_DEV_CHAT_ID` fallback so prod notifications don't fire from a dev iteration.
 
+- **Audit-protocol upgrade: grep-verify every shipping-evidence pointer**
+  trigger: BC-018 three-lens audit 2026-10-30 — the pre-ship audit marked 5 rows ✓ pointing at `test_telegram_mock.py` and two `test_hub_helpers.py` tests that did not exist. The behaviors were covered by the e2e test, but the pointers were vaporware. The follow-up audit caught it only because the user re-asked "everything implemented?"
+  priority: soon
+  Scope sketch:
+    - Add a `make verify-evidence-pointers` lint that parses every `docs/plan/BC-*-plan.md § Shipping evidence` table and asserts every `test_*.py::test_name` pointer resolves to an actual pytest node id (`pytest --collect-only -q`), and every file pointer exists on disk.
+    - Fail `make check` when a row claims ✓ but its pointer doesn't resolve.
+    - Register as a drift guard in `workflow.md § Blocking gates`.
+  **The win**: moves the three-lens audit from "vigilance" to "lint" for its most error-prone lens. The user's own repeated "everything implemented?" prompt becomes an automated check.
+
 - **BC-019 — `make demo` works with host-run telegram-mock (deliver on BC-018 Scenario 7's literal recipe)**
   trigger: BC-018 close-gap audit 2026-10-30 — Scenario 7's literal `BEACONRY_TELEGRAM_BASE_URL=http://localhost:9080 make demo` crashed with `InvalidToken` because (a) `poc/docker-compose.yml` doesn't propagate `BEACONRY_TELEGRAM_BASE_URL` or `BEACONRY_SKIP_GRYPE_DB` to the hub container, and (b) even propagated, `localhost:9080` inside the hub container doesn't resolve to the host's telegram-mock.
   priority: soon
