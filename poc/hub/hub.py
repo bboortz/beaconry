@@ -532,9 +532,10 @@ async def on_button_click(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             f"⏳ Probing <code>{_esc(finding.source_ref)}</code> ({probe.probe_type}:{_esc(probe.probe_arg)})…",
             parse_mode="HTML",
         )
-        from poc.hub.waterfall import run_probe
-
-        result = await run_probe(probe)
+        # BC-011 fix: use the module-level _waterfall binding (dual-mode import
+        # at the top of this file) rather than a fresh `from poc.hub.waterfall ...`
+        # which fails inside the container (no `poc` package at /app).
+        result = await _waterfall.run_probe(probe)
         if result.ok:
             set_status(finding_id, "fixed_verified")
             await query.edit_message_text(
