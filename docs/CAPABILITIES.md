@@ -675,6 +675,15 @@ Enforcement: `poc/scripts/verify_traceability.py` runs as part of `make check`. 
 - **verified by:**
   - `poc/tests/unit/test_compose_env_propagation.py`
 
+### CAP-T052: `make findings` auto-routes to the running Compose hub's volume DB
+- **type:** technical
+- **status:** active
+- **origin:** BC-007 close-gap (post-BC-011 live tap)
+- **description:** `poc/scripts/findings.py` detects whether a `beaconry-hub` container is running via `docker inspect`. If yes, routes the query through `docker exec beaconry-hub python3 -c '<inline-script>'` against `/data/beaconry.db` so operators see the live Compose-volume state instead of their stale `.beaconry-cache/beaconry.db` local-dev file. Mirrors BC-013's `make status` compose awareness. Operator override: `BEACONRY_FINDINGS_LOCAL=1 make findings` forces the local path. Closes the gap surfaced during BC-011's live tap session: operator tapped the Verify button, DB flipped to `fixed_verified` in the volume, but `make findings STATUS=fixed_verified` returned empty because it was reading the wrong file.
+- **supports:** CAP-B012, CAP-B018
+- **verified by:**
+  - `poc/tests/integration/test_BC_007_findings_cli.py`
+
 ### CAP-T017: Orphan tests fail the gate with a copy-pasteable template
 - **type:** technical
 - **status:** active

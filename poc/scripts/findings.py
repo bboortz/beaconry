@@ -110,8 +110,95 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     return p.parse_args(argv)
 
 
+HUB_CONTAINER = os.environ.get("BEACONRY_HUB_CONTAINER", "beaconry-hub")
+
+
+def _running_compose_hub() -> bool:
+    """Return True if a container named `beaconry-hub` is up — used to route the query
+    through `docker exec` so operators see the live Compose-volume DB, not the stale
+    local-dev `.beaconry-cache/` file. Mirrors BC-013's `make status` compose awareness.
+    """
+    import subprocess
+
+    try:
+        result = subprocess.run(
+            ["docker", "inspect", "--format={{.State.Running}}", HUB_CONTAINER],
+            capture_output=True,
+            text=True,
+            timeout=3,
+            check=False,
+        )
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        return False
+    return result.returncode == 0 and result.stdout.strip() == "true"
+
+
+def _run_in_container(args: list[str]) -> int:
+    """Exec findings.py inside the running hub container; stream output to our stdout."""
+    import subprocess
+
+    cmd = ["docker", "exec", HUB_CONTAINER, "python3", "-m", "scripts.findings", *args]
+    # In the container, poc/ is the WORKDIR under /app, and scripts.findings is `scripts`
+    # relative to that. But hub.py is COPY'd flat to /app, not under `poc/`. Simpler:
+    # just invoke findings.py as a path.
+    cmd = [
+        "docker",
+        "exec",
+        "-e",
+        "DATA_DIR=/data",
+        HUB_CONTAINER,
+        "python3",
+        "-c",
+        _INLINE_FINDINGS_SCRIPT.replace("##STATUS_FILTER##", repr(args[-1] if args else None)),
+    ]
+    return subprocess.run(cmd, check=False).returncode
+
+
+# Minimal inline script executed inside the container so we don't depend on
+# poc/scripts/findings.py being COPY'd into the image. Mirrors the top-level
+# load/sort/format logic above.
+_INLINE_FINDINGS_SCRIPT = """
+import os, sqlite3, sys
+STATUS_ORDER = ('open', 'verification_failed', 'snoozed', 'accepted', 'fixed', 'fixed_verified')
+STATUS_RANK = {s: i for i, s in enumerate(STATUS_ORDER)}
+db = '/data/beaconry.db'
+if not os.path.exists(db):
+    print(f'No findings in {db} yet.'); sys.exit(0)
+status = ##STATUS_FILTER##
+con = sqlite3.connect(f'file:{db}?mode=ro', uri=True)
+cols = {r[1] for r in con.execute('PRAGMA table_info(findings)')}
+tier_sort = ', tier' if 'tier' in cols else ''
+sql = f'SELECT cve_id,severity,cvss,host,source_ref,package,status{tier_sort} FROM findings'
+if status:
+    sql += ' WHERE status=?'
+    rows = con.execute(sql, (status,)).fetchall()
+else:
+    rows = con.execute(sql).fetchall()
+if not rows:
+    msg = f'No findings' + (f\" with status='{status}'\" if status else '') + f' in {db}.'
+    print(msg); sys.exit(0)
+# sort: (status_rank, tier if present else 99, -cvss)
+rows = sorted(rows, key=lambda r: (STATUS_RANK.get(r[6], 99), r[7] if tier_sort and len(r) > 7 else 99, -(r[2] or 0.0)))
+widths = [20, 10, 5, 14, 22, 18, 19]
+headers = ['CVE', 'Severity', 'CVSS', 'Host', 'Target', 'Package', 'Status']
+def fmt(v, w):
+    s = f'{v:.1f}' if isinstance(v, float) else ('' if v is None else str(v))
+    return (s[:w-1] + '…' if len(s) > w else s).ljust(w)
+print('  '.join(h.ljust(w) for h,w in zip(headers, widths)))
+print('  '.join('-'*w for w in widths))
+for r in rows:
+    print('  '.join(fmt(r[i], widths[i]) for i in range(7)))
+"""
+
+
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv if argv is not None else sys.argv[1:])
+
+    # BC-007 close-gap: if the Compose hub container is running, route the query there
+    # so operators see the live volume DB, not their stale `.beaconry-cache/` file.
+    if _running_compose_hub() and not os.environ.get("BEACONRY_FINDINGS_LOCAL"):
+        return _run_in_container([args.status] if args.status else [])
+
     data_dir = Path(os.environ.get("DATA_DIR", ".beaconry-cache"))
     db_path = data_dir / "beaconry.db"
     rows = load_findings(db_path, status=args.status)

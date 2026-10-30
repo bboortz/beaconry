@@ -3,6 +3,7 @@
 Covers:
     - CAP-B012: Operator reviews current findings state without re-running the pipeline
     - CAP-T025: Findings reporter reads SQLite, formats a table, honors STATUS filter
+    - CAP-T052: `make findings` auto-routes to the running Compose hub's volume DB
 """
 
 from __future__ import annotations
@@ -72,7 +73,14 @@ def _row_with_tier(tier: int, **overrides: object) -> dict:
 
 
 def _run(data_dir: Path, *args: str) -> subprocess.CompletedProcess[str]:
-    env = {**os.environ, "DATA_DIR": str(data_dir)}
+    env = {
+        **os.environ,
+        "DATA_DIR": str(data_dir),
+        # BC-007 close-gap: force the local-file path so these tests don't
+        # route to a live beaconry-hub container that may be running on the
+        # host (compose-aware detection would otherwise shadow DATA_DIR).
+        "BEACONRY_FINDINGS_LOCAL": "1",
+    }
     return subprocess.run(
         [sys.executable, "-m", "poc.scripts.findings", *args],
         capture_output=True,
@@ -285,3 +293,42 @@ def test_bc011_sort_rank_puts_fixed_verified_last(tmp_path: Path) -> None:
     result = _run(tmp_path)
     assert result.returncode == 0
     assert result.stdout.index("CVE-OPEN") < result.stdout.index("CVE-FXV")
+
+
+# ── BC-007 close-gap: compose-volume routing ──────────────────────────────────
+
+
+def test_running_compose_hub_detection_returns_false_when_container_absent(
+    monkeypatch: object,
+) -> None:
+    """When no beaconry-hub container is running, we fall back to the local-dev DB."""
+    from poc.scripts import findings
+
+    # Point the detection at a container that cannot exist.
+    monkeypatch.setattr(findings, "HUB_CONTAINER", "beaconry-hub-no-such-container-xyz")  # type: ignore[attr-defined]
+    assert findings._running_compose_hub() is False
+
+
+def test_beaconry_findings_local_env_forces_local_path(tmp_path: Path) -> None:
+    """Operators can force the local-dev path even when a compose hub is running
+    (useful when debugging the mock pipeline on a machine with a live stack)."""
+    db = _init_dev_db(tmp_path)
+    _insert(db, id="x1", cve_id="CVE-LOCAL", severity="High", cvss=7.5, status="open", **_row())
+
+    env = {
+        **os.environ,
+        "DATA_DIR": str(tmp_path),
+        "BEACONRY_FINDINGS_LOCAL": "1",
+    }
+    result = subprocess.run(
+        [sys.executable, "-m", "poc.scripts.findings"],
+        capture_output=True,
+        text=True,
+        cwd=REPO_ROOT,
+        env=env,
+        timeout=15,
+    )
+    assert result.returncode == 0
+    assert "CVE-LOCAL" in result.stdout, (
+        "BEACONRY_FINDINGS_LOCAL=1 must take the local-file branch even if a hub is up"
+    )
