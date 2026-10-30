@@ -282,6 +282,16 @@ Enforcement: `poc/scripts/verify_traceability.py` runs as part of `make check`. 
 - **verified by:**
   - `poc/tests/unit/test_hub_helpers.py`
 
+### CAP-T022: Fix/feat branches without a plan doc fail the gate
+- **type:** technical
+- **status:** active
+- **origin:** BC-004 (fix branch enforce-plan-docs)
+- **design:** memory/code-quality.md
+- **description:** When `verify-traceability` runs on a branch whose name matches `fix/<slug>` or `feat/<slug>`, the script requires `docs/plan/<slug>-plan.md` to exist and errors (naming the branch + expected path + remediation hint) if it doesn't. Other branch types (`main`, `dev`, `chore/*`, `docs/*`, `refactor/*`) and detached HEAD are no-ops. Closes a long-standing slip where fix branches shipped without plan docs because the rule had no automated teeth.
+- **supports:** CAP-B006
+- **verified by:**
+  - `poc/tests/integration/test_BC_004_traceability.py`
+
 ### CAP-T017: Orphan tests fail the gate with a copy-pasteable template
 - **type:** technical
 - **status:** active

@@ -3,6 +3,7 @@
 Covers:
     - CAP-T016: verify-traceability enforces bidirectional links
     - CAP-T017: Orphan tests fail the gate
+    - CAP-T022: Fix/feat branches without a plan doc fail the gate
 """
 
 from __future__ import annotations
@@ -10,6 +11,17 @@ from __future__ import annotations
 from pathlib import Path
 
 import pytest
+
+
+@pytest.fixture(autouse=True)
+def _neutralize_ambient_branch_check(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Pre-existing tests call run() without a branch arg; the real git branch
+    (e.g. fix/enforce-plan-docs) would then trigger an unrelated plan-doc check.
+    Autouse monkeypatch makes get_current_branch() return "" so the check is a
+    no-op unless a test explicitly passes branch="fix/..."."""
+    from poc.scripts import verify_traceability as vt
+
+    monkeypatch.setattr(vt, "get_current_branch", lambda: "")
 
 
 @pytest.fixture
@@ -419,6 +431,81 @@ def test_design_multiple_refs_comma_separated(tmp_docs_and_tests: tuple[Path, Pa
     from poc.scripts.verify_traceability import run
 
     assert run(docs=docs, tests=tests) == 0
+
+
+def _happy_minimal_setup(docs: Path, tests: Path) -> None:
+    """Minimum capability + test that keeps the rest of verify-traceability happy."""
+    (docs / "CAPABILITIES.md").write_text(
+        """
+### CAP-B001: Example
+- **type:** business
+- **status:** active
+- **origin:** BC-999
+- **description:** fixture
+- **verified by:**
+  - `tests/test_ok.py`
+"""
+    )
+    (tests / "test_ok.py").write_text('"""Covers:\n    - CAP-B001: Example\n"""\n')
+
+
+def test_branch_plan_doc_missing_fails(
+    tmp_docs_and_tests: tuple[Path, Path],
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """fix/<slug> branch without docs/plan/<slug>-plan.md → gate fails."""
+    docs, tests = tmp_docs_and_tests
+    _happy_minimal_setup(docs, tests)
+    (docs / "plan").mkdir()
+
+    from poc.scripts.verify_traceability import run
+
+    rc = run(docs=docs, tests=tests, branch="fix/missing-plan")
+    assert rc != 0
+    err = capsys.readouterr().err
+    assert "fix/missing-plan" in err
+    assert "missing-plan-plan.md" in err
+
+
+def test_branch_plan_doc_present_passes(tmp_docs_and_tests: tuple[Path, Path]) -> None:
+    docs, tests = tmp_docs_and_tests
+    _happy_minimal_setup(docs, tests)
+    (docs / "plan").mkdir()
+    (docs / "plan" / "something-plan.md").write_text("# plan\n")
+
+    from poc.scripts.verify_traceability import run
+
+    rc = run(docs=docs, tests=tests, branch="fix/something")
+    assert rc == 0
+
+
+def test_branch_plan_doc_check_skipped_on_non_feat_fix_branches(
+    tmp_docs_and_tests: tuple[Path, Path],
+) -> None:
+    docs, tests = tmp_docs_and_tests
+    _happy_minimal_setup(docs, tests)
+    (docs / "plan").mkdir()
+
+    from poc.scripts.verify_traceability import run
+
+    # No plan doc anywhere. These branches must still pass.
+    for branch in ("dev", "main", "chore/tooling", "docs/typo", "refactor/split"):
+        assert run(docs=docs, tests=tests, branch=branch) == 0, (
+            f"branch {branch!r} should be exempt from plan-doc check"
+        )
+
+
+def test_branch_plan_doc_check_skipped_on_detached_head(
+    tmp_docs_and_tests: tuple[Path, Path],
+) -> None:
+    docs, tests = tmp_docs_and_tests
+    _happy_minimal_setup(docs, tests)
+    (docs / "plan").mkdir()
+
+    from poc.scripts.verify_traceability import run
+
+    # Empty branch (detached HEAD, no repo, CI without a branch) → no-op.
+    assert run(docs=docs, tests=tests, branch="") == 0
 
 
 def test_bidirectional_consistency_requires_test_file_in_verified_by(

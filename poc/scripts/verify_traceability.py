@@ -21,6 +21,7 @@ from __future__ import annotations
 
 import ast
 import re
+import subprocess
 import sys
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -149,6 +150,42 @@ def iter_test_files(tests_root: Path) -> list[Path]:
     return sorted(p for p in tests_root.rglob("test_*.py") if p.is_file())
 
 
+def get_current_branch() -> str:
+    """Return the current git branch, or empty string on detached HEAD / no repo."""
+    try:
+        result = subprocess.run(
+            ["git", "branch", "--show-current"],
+            capture_output=True,
+            check=False,
+            text=True,
+            timeout=5,
+        )
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        return ""
+    return result.stdout.strip() if result.returncode == 0 else ""
+
+
+def check_branch_plan_doc(branch: str, docs: Path) -> list[str]:
+    """Return a list of errors if branch is feat/<slug> or fix/<slug> and the
+    expected plan doc doesn't exist. Empty list means pass (or N/A)."""
+    if not branch:
+        return []
+    if "/" not in branch:
+        return []
+    prefix, slug = branch.split("/", 1)
+    if prefix not in ("feat", "fix"):
+        return []
+    expected = docs / "plan" / f"{slug}-plan.md"
+    if expected.exists():
+        return []
+    return [
+        f"branch '{branch}' is a {prefix}/* branch but '{expected}' doesn't exist.\n"
+        f"    Create it from docs/plan/_template.md before the next commit, OR\n"
+        f"    rename the branch to a chore/* / docs/* / refactor/* type that is\n"
+        f"    exempt from the plan-doc rule."
+    ]
+
+
 def _rel(path: Path, base: Path) -> str:
     try:
         return str(path.relative_to(base))
@@ -156,9 +193,17 @@ def _rel(path: Path, base: Path) -> str:
         return str(path)
 
 
-def run(docs: Path, tests: Path) -> int:
-    """Verify bidirectional traceability. Return 0 on success, 1 on any error."""
+def run(docs: Path, tests: Path, *, branch: str | None = None) -> int:
+    """Verify bidirectional traceability. Return 0 on success, 1 on any error.
+
+    When `branch` is None, the current git branch is detected automatically.
+    Pass a string to force a specific branch (for tests).
+    """
     errors: list[str] = []
+
+    # Branch-plan-doc check (fast, runs first so a missing plan surfaces early).
+    resolved_branch = branch if branch is not None else get_current_branch()
+    errors.extend(check_branch_plan_doc(resolved_branch, docs))
 
     cap_file = docs / "CAPABILITIES.md"
     caps = parse_capabilities(cap_file)
