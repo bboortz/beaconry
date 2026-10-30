@@ -75,6 +75,7 @@ None visible to the operator — new behavior is strictly more defensive. Any ex
 | README documents button actions + fix stub wording | README diff | "Telegram button actions" section added | ✓ |
 | Dev DB filename consistent story-to-code | grep sanity | BC-003 story Gherkin updated `dev.db` → `beaconry.db` | ✓ |
 | CAP-B007/B008/T028/T029 registered | verify-traceability | 40 CAPs, 0 mismatches 2026-10-30 | ✓ |
+| `pytest -m real_tools` passes end-to-end | integration (opt-in) | `test_real_syft_grype_produces_findings` ran 2026-10-30 with syft+grype on PATH → 1 passed in 8.4s (added to table in fix/BC-003-close-gaps) | ✓ |
 
 (Rows flip to ✓ as evidence lands. Phase 3 live rows are the gating ones — Phase 2 can't ship without them.)
 

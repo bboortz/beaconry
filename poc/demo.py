@@ -224,6 +224,7 @@ async def run_real_pipeline_once(image: str = "nginx:1.24") -> list[hub.Finding]
     """
     hub.DATA_DIR = Path(os.environ["DATA_DIR"])
     hub.DB_PATH = hub.DATA_DIR / "beaconry.db"
+    hub.init_db()  # idempotent — ensures schema exists before save_finding
 
     print(f"==> Scout: running syft against {image}…")
     sbom = await _run_syft(image)

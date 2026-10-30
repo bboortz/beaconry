@@ -648,6 +648,67 @@ def test_shipping_evidence_not_enforced_on_draft(
     assert run(docs=docs, tests=tests, branch="") == 0
 
 
+def test_shipping_evidence_warns_on_scenario_count_mismatch(
+    tmp_docs_and_tests: tuple[Path, Path], capsys: pytest.CaptureFixture[str]
+) -> None:
+    """BC-003 close-gaps: story with 5 Scenarios + plan with 3 rows → stderr warning,
+    gate still exits 0 (advisory, not failure)."""
+    docs, tests = tmp_docs_and_tests
+    _happy_minimal_setup(docs, tests)
+    stories = docs / "stories"
+    plans = docs / "plan"
+    plans.mkdir(exist_ok=True)
+    (stories / "BC-301-sample.md").write_text(
+        "---\nstatus: shipped\n---\n\n```gherkin\n"
+        "  Scenario: A\n  Scenario: B\n  Scenario: C\n"
+        "  Scenario: D\n  Scenario: E\n```\n"
+    )
+    (plans / "BC-301-sample-plan.md").write_text(
+        """
+## Shipping evidence
+
+| Scenario / goal | Evidence type | Pointer | Status |
+|---|---|---|---|
+| First | unit | `test_a` | ✓ |
+| Second | unit | `test_b` | ✓ |
+| Third | unit | `test_c` | ✓ |
+
+## Next
+
+"""
+    )
+
+    from poc.scripts.verify_traceability import run
+
+    rc = run(docs=docs, tests=tests, branch="")
+    assert rc == 0, "scenario-count mismatch must warn, not fail"
+    err = capsys.readouterr().err
+    assert "WARNING" in err
+    assert "5 Gherkin Scenarios" in err
+    assert "3 evidence rows" in err
+
+
+def test_shipping_evidence_scenario_count_match_quiet(
+    tmp_docs_and_tests: tuple[Path, Path], capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Equal counts → no warning in stderr."""
+    docs, tests = tmp_docs_and_tests
+    _happy_minimal_setup(docs, tests)
+    stories = docs / "stories"
+    plans = docs / "plan"
+    plans.mkdir(exist_ok=True)
+    (stories / "BC-302-sample.md").write_text(
+        "---\nstatus: shipped\n---\n\n```gherkin\n  Scenario: A\n```\n"
+    )
+    (plans / "BC-302-sample-plan.md").write_text(_FILLED_EVIDENCE_TABLE)
+
+    from poc.scripts.verify_traceability import run
+
+    rc = run(docs=docs, tests=tests, branch="")
+    assert rc == 0
+    assert "WARNING" not in capsys.readouterr().err
+
+
 def test_shipping_evidence_section_absent_is_grandfathered(
     tmp_docs_and_tests: tuple[Path, Path],
 ) -> None:

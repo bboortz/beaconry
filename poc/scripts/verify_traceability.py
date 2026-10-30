@@ -225,9 +225,20 @@ def _parse_shipping_evidence_rows(plan_text: str) -> list[list[str]] | None:
     return rows
 
 
+def _count_gherkin_scenarios(story_text: str) -> int:
+    """Count `Scenario:` lines in the story's Gherkin block. 0 if no Gherkin found."""
+    return len(re.findall(r"^\s*Scenario:", story_text, re.MULTILINE))
+
+
 def check_shipping_evidence(story_path: Path, plan_path: Path) -> list[str]:
     """For a `shipped` story, assert its plan's Shipping evidence table is complete.
-    Returns a list of error strings; empty = pass."""
+    Returns a list of error strings; empty = pass.
+
+    Also warns (via stderr, not an error) when the story's Gherkin has more
+    Scenario: lines than the plan's evidence table has rows — a hint that
+    scenarios may be missing from the table (though a single row can
+    legitimately roll up multiple scenarios).
+    """
     errors: list[str] = []
     if not _story_is_shipped(story_path):
         return errors  # not shipped yet — audit happens at ship time
@@ -259,6 +270,18 @@ def check_shipping_evidence(story_path: Path, plan_path: Path) -> list[str]:
                 f"{plan_path}: Shipping evidence row {i} has status {status!r} — "
                 f"a shipped story requires every row at ✓"
             )
+
+    # Advisory: Gherkin scenario count vs evidence row count.
+    scenario_count = _count_gherkin_scenarios(story_path.read_text())
+    if scenario_count > len(rows):
+        print(
+            f"verify-traceability: WARNING: {story_path.name} has {scenario_count} "
+            f"Gherkin Scenarios but {plan_path.name} has {len(rows)} evidence rows. "
+            f"A row may legitimately roll up multiple scenarios — if so, ignore. "
+            f"If not, add the missing rows.",
+            file=sys.stderr,
+        )
+
     return errors
 
 

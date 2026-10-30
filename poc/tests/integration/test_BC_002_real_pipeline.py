@@ -75,6 +75,7 @@ async def test_real_syft_grype_produces_findings(
 
     monkeypatch.setattr(hub, "MOCK", False, raising=True)
     monkeypatch.setattr(hub, "tg_app", _FakeApp(), raising=False)
+    monkeypatch.setenv("DATA_DIR", str(tmp_path))
 
     from poc.demo import run_real_pipeline_once
 
