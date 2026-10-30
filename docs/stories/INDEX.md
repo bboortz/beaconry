@@ -7,7 +7,7 @@ One-line status board for operator scenarios. Full stories in `BC-NNN-<slug>.md`
 | BC-000 | Repo + development process scaffold    | shipped     | — (merged to dev)                   |
 | BC-001 | End-to-end mocked POC demo             | shipped     | — (merged to dev)                   |
 | BC-002 | Real pipeline on one container         | shipped     | — (merged to dev)                   |
-| BC-003 | Live-verified Telegram button handling | in-progress | feat/BC-003-live-verified-buttons   |
+| BC-003 | Live-verified Telegram button handling | shipped     | — (merged to dev)                   |
 | BC-004 | Capabilities docs + test traceability  | shipped     | — (merged to dev)                   |
 | BC-005 | Multi-image Compose demo               | shipped     | — (merged to dev)                   |
 | BC-006 | Tighten the shipping gate (tiers)      | shipped     | — (merged to dev)                   |

@@ -1,7 +1,7 @@
 ---
 id: BC-003
 title: Live-verified Telegram button handling
-status: in-progress
+status: shipped
 created: 2026-10-29
 ---
 
@@ -120,20 +120,9 @@ The non-live scenarios (callback validation, pytest -m real_tools, README, DB-fi
 
 Depends on CAP-B002 (notifications arrive — prerequisite), CAP-T003 (HTML escape in edited messages).
 
-## Shipping evidence (preliminary — fills in when BC-003 moves to ready)
+## Shipping evidence (shipped — see plan for the full table)
 
-| Scenario / goal | Evidence type | Pointer | Status |
-|---|---|---|---|
-| Snooze button updates DB + edits message | live manual | awaits tap session with user + Claude | ❌ |
-| Accept-risk updates DB + edits message | live manual | awaits tap session | ❌ |
-| Fix-now stub honored | live manual | awaits tap session | ❌ |
-| Double-tap idempotent | live manual + unit | awaits implementation + tap session | ❌ |
-| Callback_data validation rejects malformed input | unit test | not yet implemented | ❌ |
-| `pytest -m real_tools` passes end-to-end | integration (opt-in) | awaits manual run with syft+grype on PATH | ❌ |
-| README documents operator setup | README diff | awaits update | ❌ |
-| Dev DB filename consistent story-to-code | grep sanity | awaits reconciliation | ❌ |
-
-Legend: ✓ covered · ⚠️ partial · ❌ open.
+Phase 1+2 (automated) and Phase 3 (live tap session on 2026-10-30) all closed. See `docs/plan/BC-003-live-verified-buttons-plan.md` for the complete Shipping evidence table.
 
 ## Open questions
 

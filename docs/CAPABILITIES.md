@@ -109,7 +109,7 @@ Enforcement: `poc/scripts/verify_traceability.py` runs as part of `make check`. 
 
 ### CAP-B007: Operator snoozes/accepts findings and the system respects the decision across runs
 - **type:** business
-- **status:** aspirational
+- **status:** active
 - **origin:** BC-003
 - **design:** memory/telegram-patterns.md
 - **description:** Tapping [⏰ Snooze 4h] updates the finding's status in the dev DB to `snoozed`; tapping [✅ Accept risk] sets it to `accepted`. Subsequent `make demo` runs skip these findings via `save_finding`'s dedup (status != open ⇒ already in DB with final status). Automated via callback-data validation + idempotence (CAP-T028/T029); live-verified via the Phase 3 tap session in BC-003.
@@ -118,7 +118,7 @@ Enforcement: `poc/scripts/verify_traceability.py` runs as part of `make check`. 
 
 ### CAP-B008: Fix-now button is honest about its stub state until BC-004
 - **type:** business
-- **status:** aspirational
+- **status:** active
 - **origin:** BC-003
 - **design:** memory/telegram-patterns.md
 - **description:** With `BEACONRY_FIX_ENABLED` unset (default), tapping [🔧 Fix now] edits the message to "⚙️ Fix execution coming in a later story — <cve> left as `open`". DB status unchanged. Operator never sees a silent no-op. Live-verified via the Phase 3 tap session in BC-003.

@@ -68,10 +68,10 @@ None visible to the operator — new behavior is strictly more defensive. Any ex
 | Well-formed callback is accepted + routes to DB | unit test | `test_on_button_click_accepts_well_formed_callback` | ✓ |
 | Double-tap Snooze is idempotent | unit test | `test_double_tap_snooze_is_idempotent` | ✓ |
 | Double-tap Accept is idempotent | unit test | `test_double_tap_accept_is_idempotent` | ✓ |
-| Snooze updates DB + edits message (live) | live manual | awaits Phase 3 session | ❌ |
-| Accept-risk updates DB + edits message (live) | live manual | awaits Phase 3 session | ❌ |
-| Fix-now stub honored (live) | live manual | awaits Phase 3 session | ❌ |
-| Double-tap safe (live) | live manual | awaits Phase 3 session | ❌ |
+| Snooze updates DB + edits message (live) | live manual | 2026-10-30 session: 3 Snoozes fired; DB rows flipped; phone screenshot shows "⏰ Snoozed 4h — CVE-…" | ✓ |
+| Accept-risk updates DB + edits message (live) | live manual | 2026-10-30 session: CVE-2024-45492 → accepted; phone screenshot shows "✅ Risk accepted — …" | ✓ |
+| Fix-now stub honored (live) | live manual | 2026-10-30 session: CVE-2024-56171 → open (unchanged); phone screenshot shows "⚙️ Fix execution coming in a later story — … left as open" | ✓ |
+| Double-tap safe (live) | live manual + bait script | 2026-10-30: adhoc `bait_snooze.py` sent a new message with snooze callback_data for an already-snoozed finding; phone screenshot shows "ℹ️ Already snoozed — CVE-2019-8457"; DB status unchanged (no set_status call) | ✓ |
 | README documents button actions + fix stub wording | README diff | "Telegram button actions" section added | ✓ |
 | Dev DB filename consistent story-to-code | grep sanity | BC-003 story Gherkin updated `dev.db` → `beaconry.db` | ✓ |
 | CAP-B007/B008/T028/T029 registered | verify-traceability | 40 CAPs, 0 mismatches 2026-10-30 | ✓ |
