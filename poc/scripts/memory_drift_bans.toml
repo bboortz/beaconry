@@ -29,6 +29,16 @@ exception_regex = [
   "pre-BC-014",
 ]
 
+# ── BC-011: Post-fix service health probe (shipped) ────────────────────────
+[[ban]]
+pattern = "verify_fix[^.\\n]*only[^.\\n]*CVE"
+banned_since = "BC-011"
+reason = "verify_fix is the CVE presence check; BC-011 adds the operator-triggered probe (CAP-B018). Don't describe verify_fix as the final arbiter of fix success."
+exception_regex = [
+  "pre-BC-011",
+  "BC-009[^.\\n]*verify_fix",
+]
+
 # ── BC-013: Scout migrated to HTTP (9372538, closed 909ee87) ────────────────
 [[ban]]
 pattern = "[Ss]cout[^\\n]*(file-sentinel|scout\\.live|scout\\.ready|scout\\.healthz\\.json)[^\\n]*(instead of|rather than|primary|canonical|default|in /data/)"

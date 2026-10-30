@@ -161,6 +161,15 @@ Enforcement: `poc/scripts/verify_traceability.py` runs as part of `make check`. 
 - **verified by:**
   - `poc/tests/unit/test_status_cli.py`
 
+### CAP-B018: Operator confirms a fix actually brought the service back up
+- **type:** business
+- **status:** active
+- **origin:** BC-011
+- **design:** memory/design-decisions.md § Auto-fix trust model
+- **description:** Promotes BC-009's "✅ Fixed and verified" from "CVE gone from the image file" to "CVE gone AND probe-confirmed service health". Operator sees a `🔍 Verify service health` button attached to the Fixed message when a probe policy exists for the image. After the operator restarts their container themselves, they tap the button; beaconry runs the configured probe (TCP connect, HTTP GET, or Docker HEALTHCHECK read) and emits one of three terminal messages: `✅ Service healthy — probe passed`, `⚠️ Probe failed: <reason>` with a rollback command, or `⏭️ No probe configured`. DB status transitions to `fixed_verified` on pass, `verification_failed` on probe failure. Closes the "beaconry can lie about fix success" gap (same-track pull in BC-014 reduced the risk; BC-011 is the explicit after-check).
+- **verified by:**
+  - `poc/tests/unit/test_hub_helpers.py`
+
 ### CAP-B006: Operator has a clear development process to contribute
 - **type:** business
 - **status:** active
@@ -626,6 +635,35 @@ Enforcement: `poc/scripts/verify_traceability.py` runs as part of `make check`. 
 - **supports:** CAP-B013, CAP-T026, CAP-T027
 - **verified by:**
   - `poc/tests/unit/test_memory_drift_guard.py`
+
+### CAP-T048: Policy-driven probe resolver (BEACONRY_HEALTH_PROBES env var)
+- **type:** technical
+- **status:** active
+- **origin:** BC-011
+- **design:** memory/design-decisions.md § Auto-fix trust model
+- **description:** `poc/hub/waterfall.py::parse_policies(env)` parses `BEACONRY_HEALTH_PROBES` at hub startup, raising `MalformedPolicyError` on any bad entry so the operator sees the problem before a scan arrives. Syntax: `<image_ref>=<probe_type>:<probe_arg>;...`. `resolve_probe(image_ref, policies)` returns the matching `Probe` or `None`. Resolver drives both the button-attachment decision in notifications and the dispatch in the verify callback.
+- **supports:** CAP-B018
+- **verified by:**
+  - `poc/tests/unit/test_waterfall.py`
+
+### CAP-T049: Three probe types — docker_healthcheck, tcp, http
+- **type:** technical
+- **status:** active
+- **origin:** BC-011
+- **design:** memory/design-decisions.md § Auto-fix trust model
+- **description:** `waterfall.run_probe(probe)` dispatches to one of three implementations: `_probe_tcp` (asyncio `open_connection` to `<host>:<port>`), `_probe_http` (`urllib.request.urlopen` wrapped in `asyncio.to_thread`, 2xx-3xx pass), `_probe_docker_healthcheck` (`docker.from_env().containers.get(name).attrs['State']['Health']['Status']`). Each returns a `ProbeResult(ok, reason)` with the reason string surfaced in the operator-facing Telegram message. Timeouts: 5s per probe. Levels 3 (systemd stability) + 4 (custom command) from design-decisions.md are deferred to a future story.
+- **supports:** CAP-B018, CAP-T048
+- **verified by:**
+  - `poc/tests/unit/test_waterfall.py`
+
+### CAP-T050: New DB statuses `fixed_verified` + `verification_failed`
+- **type:** technical
+- **status:** active
+- **origin:** BC-011
+- **description:** The findings table's `status` column (TEXT, no CHECK constraint) accepts two new values set by `on_button_click`'s verify action: `fixed_verified` after a successful probe, `verification_failed` after a failure. No schema migration required — the TEXT column already permits any value, mirroring the BC-003 pattern. `make findings` display logic sorts them alongside the existing BC-007 status rank; the `--status` filter accepts them unchanged.
+- **supports:** CAP-B018, CAP-B012
+- **verified by:**
+  - `poc/tests/unit/test_hub_helpers.py`
 
 ### CAP-T017: Orphan tests fail the gate with a copy-pasteable template
 - **type:** technical

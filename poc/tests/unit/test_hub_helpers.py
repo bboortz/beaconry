@@ -17,6 +17,8 @@ Covers:
     - CAP-T031: verify_fix re-runs syft + grype on the new image
     - CAP-T032: Fix flow distinguishes pull-failed from pull-OK-but-upstream-still-vulnerable
     - CAP-T033: Operator can opt out of fix execution via BEACONRY_FIX_ENABLED=0
+    - CAP-B018: Operator confirms a fix actually brought the service back up
+    - CAP-T050: New DB statuses `fixed_verified` + `verification_failed` with idempotent migration
 """
 
 from __future__ import annotations
@@ -612,3 +614,109 @@ def test_set_status_updates_the_row() -> None:
     row = con.execute("SELECT status FROM findings WHERE id=?", ("unit-status-1",)).fetchone()
     con.close()
     assert row is not None and row[0] == "accepted"
+
+
+# ── BC-011: verify-service-health button handler ──────────────────────────────
+
+
+def _probe(probe_arg: str = "host:5432"):
+    from poc.hub.waterfall import Probe
+
+    return Probe(image_ref="postgres:16-alpine", probe_type="tcp", probe_arg=probe_arg)
+
+
+async def _run_verify_tap(finding_id: str) -> _FakeUpdate:
+    update = _FakeUpdate(f"verify:{finding_id}")
+    await hub.on_button_click(update, context=None)  # type: ignore[arg-type]
+    return update
+
+
+async def test_verify_action_tcp_pass_sets_fixed_verified(monkeypatch: pytest.MonkeyPatch) -> None:
+    hub.init_db()
+    hub.save_finding(_finding(id="bc11cafebabe0001", source_ref="postgres:16-alpine"))
+
+    from poc.hub.waterfall import ProbeResult
+
+    monkeypatch.setattr(hub, "_resolve_probe_for", lambda _ref: _probe())
+
+    async def _fake_run(_p: object) -> ProbeResult:
+        return ProbeResult(ok=True, reason="tcp connect ok postgres:5432")
+
+    monkeypatch.setattr("poc.hub.waterfall.run_probe", _fake_run)
+
+    update = await _run_verify_tap("bc11cafebabe0001")
+    assert hub.get_status("bc11cafebabe0001") == "fixed_verified"
+    final = str(update.callback_query.edits[-1]["text"])
+    assert "Service healthy" in final
+    assert "probe passed" in final.lower()
+
+
+async def test_verify_action_tcp_fail_sets_verification_failed(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    hub.init_db()
+    hub.save_finding(_finding(id="bc11cafebabe0002", source_ref="postgres:16-alpine"))
+
+    from poc.hub.waterfall import ProbeResult
+
+    monkeypatch.setattr(hub, "_resolve_probe_for", lambda _ref: _probe())
+
+    async def _fake_run(_p: object) -> ProbeResult:
+        return ProbeResult(
+            ok=False, reason="tcp connect failed postgres:5432: ConnectionRefusedError"
+        )
+
+    monkeypatch.setattr("poc.hub.waterfall.run_probe", _fake_run)
+
+    update = await _run_verify_tap("bc11cafebabe0002")
+    assert hub.get_status("bc11cafebabe0002") == "verification_failed"
+    final = str(update.callback_query.edits[-1]["text"])
+    assert "Probe failed" in final
+    assert "docker tag" in final
+    assert "postgres:rollback" in final
+
+
+async def test_verify_action_no_policy_shows_skip_message(monkeypatch: pytest.MonkeyPatch) -> None:
+    hub.init_db()
+    hub.save_finding(_finding(id="bc11cafebabe0003", source_ref="rare:custom"))
+
+    monkeypatch.setattr(hub, "_resolve_probe_for", lambda _ref: None)
+
+    update = await _run_verify_tap("bc11cafebabe0003")
+    # DB status unchanged — operator informed, not misled.
+    assert hub.get_status("bc11cafebabe0003") == "open"
+    final = str(update.callback_query.edits[-1]["text"])
+    assert "No probe configured" in final
+    assert "rare:custom" in final
+
+
+async def test_verify_action_is_idempotent_on_fixed_verified(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    hub.init_db()
+    hub.save_finding(_finding(id="bc11cafebabe0004", source_ref="postgres:16-alpine"))
+    hub.set_status("bc11cafebabe0004", "fixed_verified")
+
+    probe_calls: list[int] = []
+    monkeypatch.setattr(hub, "_resolve_probe_for", lambda _ref: _probe())
+
+    async def _fake_run(_p: object) -> object:
+        probe_calls.append(1)
+        from poc.hub.waterfall import ProbeResult
+
+        return ProbeResult(ok=True, reason="")
+
+    monkeypatch.setattr("poc.hub.waterfall.run_probe", _fake_run)
+
+    update = await _run_verify_tap("bc11cafebabe0004")
+    assert probe_calls == [], "idempotent handler must not re-run the probe"
+    final = str(update.callback_query.edits[-1]["text"])
+    assert "Already fixed_verified" in final
+
+
+async def test_malformed_verify_callback_rejected(monkeypatch: pytest.MonkeyPatch) -> None:
+    hub.init_db()
+    update = _FakeUpdate("verify:not-a-hex-id")
+    await hub.on_button_click(update, context=None)  # type: ignore[arg-type]
+    final = str(update.callback_query.edits[-1]["text"])
+    assert "malformed" in final.lower() or "invalid" in final.lower()

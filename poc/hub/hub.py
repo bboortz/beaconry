@@ -29,10 +29,12 @@ from telegram.ext import Application, CallbackQueryHandler, ContextTypes
 
 try:
     # Container path: beaconry_health COPY'd next to hub.py on /app
+    import waterfall as _waterfall
     from beaconry_health import build_router, check_binary, check_db, check_dir_populated
 except ImportError:
     # Host test path: imported as poc.hub.hub, package at poc.beaconry_health
     from poc.beaconry_health import build_router, check_binary, check_db, check_dir_populated
+    from poc.hub import waterfall as _waterfall
 
 logging.basicConfig(
     level=logging.INFO,
@@ -70,6 +72,15 @@ tg_app: Application | None = None
 _startup_complete: bool = False
 _last_scan_ts: int = 0
 HUB_VERSION = "0.1.0"
+
+# BC-011: policy-driven probe resolver. Parsed once at startup (fail-fast on
+# malformed input) and read by on_button_click's `verify` action.
+HEALTH_POLICIES: dict[str, "_waterfall.Probe"] = {}
+
+
+def _resolve_probe_for(image_ref: str) -> "_waterfall.Probe | None":
+    """Thin wrapper so tests can monkeypatch at the hub level."""
+    return _waterfall.resolve_probe(image_ref, HEALTH_POLICIES)
 
 
 # ── Database ──────────────────────────────────────────────────────────────────
@@ -365,7 +376,7 @@ async def notify(finding: Finding) -> None:
     )
 
 
-CALLBACK_RE = re.compile(r"^(fix|snooze|ack):[a-f0-9]{16}(?::\d+)?$")
+CALLBACK_RE = re.compile(r"^(fix|snooze|ack|verify):[a-f0-9]{16}(?::\d+)?$")
 
 
 async def on_button_click(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -448,14 +459,34 @@ async def on_button_click(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 
         if clean:
             set_status(finding_id, "fixed")
-            await query.edit_message_text(
+            # BC-011: attach "🔍 Verify service health" button when a probe policy exists.
+            fixed_text = (
                 f"✅ <b>Fixed and verified</b>\n"
                 f"CVE: <code>{_esc(finding.cve_id)}</code> on "
                 f"<code>{_esc(finding.host)}</code>\n"
                 f"Command: <code>{_esc(result.command)}</code>\n"
-                f"Re-scan: clean ✓",
-                parse_mode="HTML",
+                f"Re-scan: clean ✓"
             )
+            probe = _resolve_probe_for(finding.source_ref)
+            if probe is not None:
+                verify_keyboard = InlineKeyboardMarkup(
+                    [
+                        [
+                            InlineKeyboardButton(
+                                "🔍 Verify service health",
+                                callback_data=f"verify:{finding_id}",
+                            )
+                        ]
+                    ]
+                )
+                fixed_text += (
+                    "\n\n<i>Restart your container, then tap below to probe the service.</i>"
+                )
+                await query.edit_message_text(
+                    fixed_text, parse_mode="HTML", reply_markup=verify_keyboard
+                )
+            else:
+                await query.edit_message_text(fixed_text, parse_mode="HTML")
         else:
             await query.edit_message_text(
                 f"⚠️ <b>Pulled, but CVE still present upstream</b>\n"
@@ -481,6 +512,49 @@ async def on_button_click(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
             parse_mode="HTML",
         )
 
+    elif action == "verify":
+        # BC-011: operator taps after restarting their service — run the configured probe.
+        if get_status(finding_id) == "fixed_verified":
+            await query.edit_message_text(
+                f"ℹ️ Already fixed_verified — <code>{_esc(finding.cve_id)}</code>",
+                parse_mode="HTML",
+            )
+            return
+        probe = _resolve_probe_for(finding.source_ref)
+        if probe is None:
+            await query.edit_message_text(
+                f"⏭️ No probe configured for <code>{_esc(finding.source_ref)}</code>\n"
+                f"<i>Set BEACONRY_HEALTH_PROBES to enable post-restart verification.</i>",
+                parse_mode="HTML",
+            )
+            return
+        await query.edit_message_text(
+            f"⏳ Probing <code>{_esc(finding.source_ref)}</code> ({probe.probe_type}:{_esc(probe.probe_arg)})…",
+            parse_mode="HTML",
+        )
+        from poc.hub.waterfall import run_probe
+
+        result = await run_probe(probe)
+        if result.ok:
+            set_status(finding_id, "fixed_verified")
+            await query.edit_message_text(
+                f"✅ <b>Service healthy — probe passed</b>\n"
+                f"CVE: <code>{_esc(finding.cve_id)}</code>\n"
+                f"Probe: <code>{_esc(probe.probe_type)}:{_esc(probe.probe_arg)}</code> → "
+                f"{_esc(result.reason)}",
+                parse_mode="HTML",
+            )
+        else:
+            set_status(finding_id, "verification_failed")
+            base_name = finding.source_ref.split(":")[0]
+            await query.edit_message_text(
+                f"⚠️ <b>Probe failed:</b> <code>{_esc(result.reason)}</code>\n"
+                f"CVE: <code>{_esc(finding.cve_id)}</code>\n"
+                f"Rollback with: <code>docker tag {base_name}:rollback {_esc(finding.source_ref)}</code>\n"
+                f"<i>Then restart the service and tap again.</i>",
+                parse_mode="HTML",
+            )
+
 
 # ── FastAPI + lifespan ────────────────────────────────────────────────────────
 
@@ -490,6 +564,15 @@ async def lifespan(app: FastAPI):
     global tg_app, _startup_complete
 
     init_db()
+
+    # BC-011: parse policies once at startup; malformed → named error, do not boot.
+    global HEALTH_POLICIES
+    HEALTH_POLICIES = _waterfall.parse_policies(os.environ.get("BEACONRY_HEALTH_PROBES", ""))
+    if HEALTH_POLICIES:
+        log.info(
+            "BC-011 health policies loaded: %s",
+            {k: f"{v.probe_type}:{v.probe_arg}" for k, v in HEALTH_POLICIES.items()},
+        )
 
     if MOCK:
         log.info("MOCK mode — skipping grype DB update and Telegram startup")

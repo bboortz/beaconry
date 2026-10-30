@@ -100,7 +100,7 @@ Each notification carries three buttons:
 
 Double-tapping Snooze/Accept is safe — the handler notices the finding is already in that state, re-shows the current status, and skips the DB write. Malformed callback payloads are rejected with a warning.
 
-### Fix now behavior (BC-009 + BC-014)
+### Fix now behavior (BC-009 + BC-014 + BC-011)
 
 Tapping [🔧 Fix now] on a `source_type=docker` finding walks `⏳ Fixing…` → `🔍 Verifying…` → one of three honest terminal states:
 
@@ -122,6 +122,30 @@ docker tag postgres:rollback postgres:16-alpine
 Opt-out: `BEACONRY_FIX_ENABLED=0 make demo` restores the pre-BC-009 stub ("⚙️ Fix execution disabled") — useful for demos, dry-runs, and safety-conscious exploration.
 
 Non-docker findings (pacman/pip) route to ManualAdapter: the message shows the exact command (`sudo pacman -Syu <package>`) and the DB status stays `open` until the operator runs it externally.
+
+**Post-restart service health probe (BC-011)**
+
+The `✅ Fixed and verified` message confirms the CVE is gone from the image. It does **not** confirm the service came back up healthy after you restart. Set `BEACONRY_HEALTH_PROBES` to attach a `🔍 Verify service health` button that runs a probe after you restart your container.
+
+```bash
+# One policy per image, semicolon-separated:
+BEACONRY_HEALTH_PROBES="postgres:16-alpine=tcp:postgres:5432;nginxproxy/nginx-proxy:alpine=http:http://nginx-proxy/healthz;redis:7-alpine=docker_healthcheck:redis"
+```
+
+Three probe types:
+- `tcp:<host>:<port>` — plain socket connect (good for DBs)
+- `http:<url>` — GET; 2xx-3xx pass, 4xx-5xx fail
+- `docker_healthcheck:<container_name>` — reads docker's `State.Health.Status`
+
+Workflow: tap 🔧 Fix now → ✅ Fixed and verified → restart your container → tap 🔍 Verify service health → one of three terminal states:
+
+| Message | DB status | Meaning |
+|---|---|---|
+| `✅ Service healthy — probe passed` | `fixed_verified` | CVE gone AND service answering probe |
+| `⚠️ Probe failed: <reason>` | `verification_failed` | Service didn't come back up — includes `docker tag <base>:rollback <source_ref>` rollback command |
+| `⏭️ No probe configured for <image>` | unchanged | No `BEACONRY_HEALTH_PROBES` entry matches — add one or leave it |
+
+Button only appears when a policy matches; without a policy, BC-009's behavior is unchanged. Malformed `BEACONRY_HEALTH_PROBES` fails hub startup fast — operator sees the error immediately rather than at probe time.
 
 ### Pre-ship audit
 
