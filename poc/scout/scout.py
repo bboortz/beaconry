@@ -8,8 +8,16 @@ Scans:
   - Docker images on the host (via Docker socket + syft)
   - Arch Linux packages (via pacman local DB parser)
   - Open TCP ports (via ss -tlnp)
+
+BC-013: scout runs a tiny FastAPI HTTP server on port 8001 serving the
+four endpoints via `beaconry_health.build_router`. The scan loop runs as
+a background asyncio task via `asyncio.to_thread(collect_and_post)` so
+the HTTP event loop stays responsive during long-running scans. SentinelWriter
+(BC-010) is no longer used — kept available in `beaconry_health` for
+future HTTP-less loop services.
 """
 
+import asyncio
 import fnmatch
 import json
 import logging
@@ -17,18 +25,21 @@ import os
 import subprocess
 import sys
 import time
+from contextlib import asynccontextmanager
 from pathlib import Path
 
 import docker
 import docker.errors
 import requests
+import uvicorn
+from fastapi import FastAPI
 
 try:
     # Container path: beaconry_health COPY'd next to scout.py on /app
-    from beaconry_health import SentinelWriter
+    from beaconry_health import build_router
 except ImportError:
     # Host test path: imported as poc.scout.scout
-    from poc.beaconry_health import SentinelWriter
+    from poc.beaconry_health import build_router
 
 logging.basicConfig(
     level=logging.INFO,
@@ -36,15 +47,26 @@ logging.basicConfig(
 )
 log = logging.getLogger("scout")
 
+# Suppress noisy loggers (httpx might leak scan payloads at INFO).
+for _noisy in ("httpx", "httpcore"):
+    logging.getLogger(_noisy).setLevel(logging.WARNING)
+
 HUB_URL = os.environ.get("HUB_URL", "http://hub:8000")
 SCAN_INTERVAL = int(os.environ.get("SCAN_INTERVAL", "300"))
 HOST_NAME = os.environ.get("HOST_NAME", os.uname().nodename)
 PACMAN_DB = os.environ.get("PACMAN_DB", "/host/var/lib/pacman")
-DATA_DIR = Path(os.environ.get("SCOUT_DATA_DIR", "/data"))
-_sentinels = SentinelWriter(DATA_DIR)
+HTTP_PORT = int(os.environ.get("SCOUT_HTTP_PORT", "8001"))
 
 # BC-005 defaults — demo-safe allowlist, no excludes by default.
 DEFAULT_INCLUDE_GLOBS = "nginx*,redis*,postgres*"
+
+# BC-013 health state — mutable module globals read by /readyz /healthz providers.
+_docker_socket_ok: bool = False
+_started: bool = False
+_last_scan_ts: int = 0
+_images_seen: int = 0
+_bytes_posted: int = 0
+SCOUT_VERSION = "0.1.0"
 
 
 def parse_globs(env: str) -> list[str]:
@@ -95,10 +117,13 @@ def syft_scan(target: str) -> dict | None:
 
 
 def scan_docker_images() -> list[dict]:
+    global _docker_socket_ok
     try:
         client = docker.from_env()
+        _docker_socket_ok = True
     except docker.errors.DockerException as e:
         log.warning("Docker socket unavailable: %s", e)
+        _docker_socket_ok = False
         return []
 
     include_globs = parse_globs(os.environ.get("SCOUT_INCLUDE", DEFAULT_INCLUDE_GLOBS))
@@ -224,12 +249,14 @@ def scan_open_ports() -> list[dict]:
     return ports
 
 
-# ── Main loop ─────────────────────────────────────────────────────────────────
+# ── Scan loop ─────────────────────────────────────────────────────────────────
 
 
-def collect_and_post(once: bool = False):
+def collect_and_post():
+    """One scan iteration. Bumps module-local state so /healthz surfaces metrics."""
+    global _last_scan_ts, _images_seen, _bytes_posted, _started
+
     log.info("Scan starting — host: %s", HOST_NAME)
-    _sentinels.live()
     sboms: list[dict] = []
     images_seen = 0
     bytes_posted = 0
@@ -239,8 +266,6 @@ def collect_and_post(once: bool = False):
         sboms.extend(docker_sboms)
         images_seen = len(docker_sboms)
         log.info("Docker: %d image(s) scanned", len(docker_sboms))
-        if docker_sboms:
-            _sentinels.ready()
     except Exception as e:
         log.error("Docker scan error: %s", e)
 
@@ -262,14 +287,11 @@ def collect_and_post(once: bool = False):
     except Exception as e:
         log.error("Port scan error: %s", e)
 
+    _last_scan_ts = int(time.time())
+    _images_seen = images_seen
+
     if not sboms:
         log.warning("No SBOMs collected — nothing to send")
-        _sentinels.healthz(
-            status="degraded",
-            last_scan_ts=int(time.time()),
-            images_seen=0,
-            bytes_posted=0,
-        )
         return
 
     payload = {
@@ -278,44 +300,83 @@ def collect_and_post(once: bool = False):
         "sboms": sboms,
         "open_ports": open_ports,
     }
-    post_ok = False
     try:
         body = json.dumps(payload)
         bytes_posted = len(body)
+        _bytes_posted = bytes_posted
         resp = requests.post(
             f"{HUB_URL}/scan", data=body, headers={"Content-Type": "application/json"}, timeout=120
         )
         resp.raise_for_status()
         data = resp.json()
         log.info("Hub response: %d new finding(s)", data.get("findings", 0))
-        post_ok = True
-        _sentinels.started()
+        _started = True
     except requests.RequestException as e:
         log.error("Failed to post to hub: %s", e)
 
-    _sentinels.healthz(
-        status="ok" if post_ok else "degraded",
-        last_scan_ts=int(time.time()),
-        images_seen=images_seen,
-        bytes_posted=bytes_posted,
+
+# ── Health providers for build_router ─────────────────────────────────────────
+
+
+def _scout_readyz_providers() -> dict[str, str]:
+    """Local prereqs — Docker socket is the only external dep scout needs."""
+    return {"docker_socket": "ok" if _docker_socket_ok else "unavailable"}
+
+
+def _scout_healthz_summary() -> dict:
+    checks = {
+        "docker_socket": "ok" if _docker_socket_ok else "unavailable",
+        "last_scan_ts": _last_scan_ts,
+        "images_seen": _images_seen,
+        "bytes_posted": _bytes_posted,
+    }
+    degraded = not _docker_socket_ok
+    return {
+        "status": "degraded" if degraded else "ok",
+        "version": SCOUT_VERSION,
+        "checks": checks,
+    }
+
+
+# ── FastAPI app + background scan task ───────────────────────────────────────
+
+
+async def _scan_loop_forever() -> None:
+    """Background task: run collect_and_post every SCAN_INTERVAL seconds."""
+    while True:
+        try:
+            await asyncio.to_thread(collect_and_post)
+        except Exception as e:
+            log.error("Scan cycle error: %s", e)
+        log.info("Next scan in %ds", SCAN_INTERVAL)
+        await asyncio.sleep(SCAN_INTERVAL)
+
+
+@asynccontextmanager
+async def lifespan(_app: FastAPI):
+    log.info("Beaconry Scout %s — hub: %s, interval: %ds", SCOUT_VERSION, HUB_URL, SCAN_INTERVAL)
+    task = asyncio.create_task(_scan_loop_forever())
+    yield
+    task.cancel()
+
+
+app = FastAPI(title="Beaconry Scout", version=SCOUT_VERSION, lifespan=lifespan)
+app.include_router(
+    build_router(
+        livez_provider=lambda: "alive",
+        readyz_providers=_scout_readyz_providers,
+        startup_flag_getter=lambda: _started,
+        healthz_summary_getter=_scout_healthz_summary,
     )
+)
 
 
 def main():
     once = "--once" in sys.argv
-    log.info("Beaconry Scout 0.1.0 — hub: %s, interval: %ds", HUB_URL, SCAN_INTERVAL)
-
     if once:
-        collect_and_post(once=True)
+        collect_and_post()
         return
-
-    while True:
-        try:
-            collect_and_post()
-        except Exception as e:
-            log.error("Scan cycle error: %s", e)
-        log.info("Next scan in %ds", SCAN_INTERVAL)
-        time.sleep(SCAN_INTERVAL)
+    uvicorn.run(app, host="0.0.0.0", port=HTTP_PORT, log_level="warning")
 
 
 if __name__ == "__main__":

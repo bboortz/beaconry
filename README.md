@@ -142,14 +142,18 @@ Every beaconry service follows the four-endpoint convention from `memory/health-
 
 Compose healthcheck targets `/readyz`. The restart-loop trap is explicit: a dead Telegram token or missing DB **must not** fail `/livez` — restarting won't fix those failures. Degradation surfaces in `/healthz` instead.
 
-**One-command status check:**
+**One-command status check (BC-013):**
 
 ```bash
 make status
-# hub: healthy (grype_db ok, telegram polling, last scan 42s ago) · scout: healthy (last scan 42s ago, 11 images)
+# NAME            STATE    HEALTH    LAST SCAN  DETAILS
+# beaconry-hub    running  healthy   13s ago    grype_db ok · telegram polling
+# beaconry-scout  running  healthy   13s ago    11 images · docker_socket ok
 ```
 
-Exits 0 all-healthy, non-zero on any degradation. Sibling to `make findings` (BC-007).
+Both services queried uniformly via HTTP /healthz (hub on `:8000`, scout on `:8001` since BC-013). No `docker exec` fallbacks; no raw Python exception class names in the output.
+
+**Exit codes:** `python3 -m poc.scripts.status` returns 0 (all healthy) / 1 (any degraded) / 2 (any down). `make status` collapses non-zero to 2 by GNU make convention — call the python module directly for granular exit codes if you're scripting around them.
 
 **Hub `/health` kept** as a transitional 200-alias for pre-BC-010 monitors; body shape changed from `{"status":"ok"}` to `{"status":"ready", "checks":{...}}`.
 

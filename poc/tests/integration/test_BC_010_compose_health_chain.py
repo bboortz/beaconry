@@ -71,15 +71,27 @@ def test_scout_depends_on_hub_service_healthy() -> None:
     )
 
 
-def test_scout_has_healthcheck_against_sentinel_files() -> None:
-    """BC-010: scout gets a healthcheck pointing at scout.live + scout.ready sentinels."""
+def test_scout_healthcheck_targets_readyz() -> None:
+    """BC-013: scout healthcheck now probes /readyz HTTP (BC-010's sentinel-file test replaced)."""
     config = _compose_config()
     scout_hc = config["services"]["scout"].get("healthcheck")
-    assert scout_hc, "scout missing healthcheck in BC-010"
+    assert scout_hc, "scout missing healthcheck"
     test = scout_hc["test"]
     joined = " ".join(test) if isinstance(test, list) else str(test)
-    assert "scout.ready" in joined, f"scout healthcheck must reference scout.ready: {joined}"
-    assert "scout.live" in joined, f"scout healthcheck must reference scout.live: {joined}"
+    assert "/readyz" in joined, f"scout healthcheck must target /readyz: {joined}"
+    assert "8001" in joined, f"scout healthcheck must hit scout's HTTP port 8001: {joined}"
+
+
+def test_scout_exposes_http_port() -> None:
+    """BC-013: scout exposes 127.0.0.1:8001 so `make status` can query /healthz from host."""
+    config = _compose_config()
+    scout = config["services"]["scout"]
+    ports = scout.get("ports", [])
+    port_strs = [str(p) for p in ports] + [
+        str(p.get("target", "")) for p in ports if isinstance(p, dict)
+    ]
+    joined = " ".join(port_strs)
+    assert "8001" in joined, f"scout should expose port 8001: {ports}"
 
 
 def test_scout_mounts_beaconry_data_volume() -> None:

@@ -152,6 +152,15 @@ Enforcement: `poc/scripts/verify_traceability.py` runs as part of `make check`. 
 - **verified by:**
   - `poc/tests/integration/test_BC_012_dockerfile_copy_lint.py`
 
+### CAP-B017: Operator sees beaconry stack status at a glance in a Docker-compose-ps-like table
+- **type:** business
+- **status:** active
+- **origin:** BC-013
+- **design:** memory/health-checks.md
+- **description:** `make status` output is a column-aligned table — NAME, STATE, HEALTH, LAST SCAN, DETAILS — with one row per beaconry container. Replaces BC-010's single-line `hub: healthy ... · scout: healthy ...` summary. Human phrasing for every state: "running / down / healthy / degraded"; raw Python exception class names (URLError, ConnectionError, Traceback) never appear in operator-facing output. Exit codes 0 (all healthy) / 1 (any degraded) / 2 (any down) so operators can script around it.
+- **verified by:**
+  - `poc/tests/unit/test_status_cli.py`
+
 ### CAP-B006: Operator has a clear development process to contribute
 - **type:** business
 - **status:** active
@@ -495,12 +504,12 @@ Enforcement: `poc/scripts/verify_traceability.py` runs as part of `make check`. 
 - **verified by:**
   - `poc/tests/unit/test_hub_health.py`
 
-### CAP-T036: Scout implements the four-endpoint health convention via file-sentinels
+### CAP-T036: Scout implements the four-endpoint health convention via file-sentinels (superseded in BC-013)
 - **type:** technical
 - **status:** active
-- **origin:** BC-010
+- **origin:** BC-010 (superseded for scout in BC-013)
 - **design:** memory/health-checks.md
-- **description:** Scout — a pure loop with no HTTP server — writes four files to `/data/` on each loop iteration: `scout.live` (mtime-liveness, bumped every loop), `scout.ready` (one-shot after first Docker socket probe succeeds), `scout.started` (one-shot after first successful `/scan` POST), and `scout.healthz.json` (overwritten each loop with `{status, last_scan_ts, images_seen, bytes_posted}`). Compose healthcheck reads `scout.live + scout.ready`; `make status` reads `scout.healthz.json`. The standard permits an HTTP server alternative; file-sentinels chosen for V1 simplicity.
+- **description:** `beaconry_health.sentinels.SentinelWriter` provides the file-sentinel implementation of the four-indicator convention: `scout.live` (mtime-liveness, bumped every loop), `scout.ready` (one-shot after local prereqs succeed), `scout.started` (one-shot after first outbound work completes), and `scout.healthz.json` (per-loop summary). **Scout migrated to HTTP endpoints in BC-013**; `SentinelWriter` remains available for future HTTP-less loop services. Unit tests exercise the writer class directly (behavior-preservation harness).
 - **supports:** CAP-B015, CAP-B009
 - **verified by:**
   - `poc/tests/unit/test_scout_health.py`
@@ -567,6 +576,36 @@ Enforcement: `poc/scripts/verify_traceability.py` runs as part of `make check`. 
 - **supports:** CAP-B016, CAP-B011
 - **verified by:**
   - `poc/tests/integration/test_BC_012_dockerfile_copy_lint.py`
+
+### CAP-T043: Scout serves /livez /readyz /startupz /healthz via FastAPI + beaconry_health.build_router
+- **type:** technical
+- **status:** active
+- **origin:** BC-013
+- **design:** memory/health-checks.md
+- **description:** `poc/scout/scout.py` runs a uvicorn-hosted FastAPI app on port 8001 with the four endpoints wired via `beaconry_health.build_router`. Scan loop runs as an asyncio background task via `asyncio.to_thread(collect_and_post)`, keeping the HTTP event loop responsive during long syft/grype scans. Scout's `/livez` honors the restart-loop trap: a dead Docker socket surfaces in `/healthz` as degradation but does not fail `/livez` or `/readyz`-trigger a restart loop. Supersedes BC-010's file-sentinel approach for scout; `SentinelWriter` stays in `beaconry_health` for HTTP-less loop services.
+- **supports:** CAP-B015, CAP-B017, CAP-T035, CAP-T038
+- **verified by:**
+  - `poc/tests/unit/test_scout_http_health.py`
+
+### CAP-T044: `make status` queries both services uniformly via HTTP; no docker exec special case
+- **type:** technical
+- **status:** active
+- **origin:** BC-013
+- **design:** memory/health-checks.md
+- **description:** `poc/scripts/status.py` is now a single code path: `fetch_healthz(url)` + `gather_service_status` for each service. The BC-010 `docker exec beaconry-scout cat scout.healthz.json` fallback is deleted. `SCOUT_LIVE_MAX_AGE_S`, `SCOUT_DATA_DIR`, and `SCOUT_CONTAINER` env knobs removed — no longer needed because scout answers live via HTTP. Test `test_no_docker_exec_called` monkeypatches `subprocess.run` and asserts no `docker exec` invocation during a status run.
+- **supports:** CAP-B015, CAP-B017
+- **verified by:**
+  - `poc/tests/unit/test_status_cli.py`
+
+### CAP-T045: `make status` output follows a column format with human-readable error phrasing
+- **type:** technical
+- **status:** active
+- **origin:** BC-013
+- **design:** memory/health-checks.md
+- **description:** Output is five columns (NAME, STATE, HEALTH, LAST SCAN, DETAILS) with left-aligned headers and dynamic widths. All error cases produce human DETAILS strings — "compose stack not up — try `cd poc && docker compose up -d`" when both services unreachable; "container not up" for partial-up; "degraded: grype_db missing" for degraded. Raw Python exception class names (URLError, ConnectionError, Traceback) never appear — tested explicitly via `test_output_has_no_raw_exception_names`.
+- **supports:** CAP-B017
+- **verified by:**
+  - `poc/tests/unit/test_status_cli.py`
 
 ### CAP-T017: Orphan tests fail the gate with a copy-pasteable template
 - **type:** technical
