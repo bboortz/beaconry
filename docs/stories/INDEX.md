@@ -18,5 +18,6 @@ One-line status board for operator scenarios. Full stories in `BC-NNN-<slug>.md`
 | BC-012 | Shared `beaconry_health/` package (typed trap guard) | shipped     | — (merged to dev)                   |
 | BC-013 | Scout live HTTP probes + unified status table | shipped     | — (merged to dev)                   |
 | BC-014 | DockerAdapter same-track pull (no :latest jump) | shipped     | — (merged to dev)                   |
+| BC-015 | Memory drift regression guard (growing banned-pattern list) | shipped     | — (merged to dev)                   |
 
 Lifecycle: `draft → ready → in-progress → shipped`. Status matches each story's frontmatter.

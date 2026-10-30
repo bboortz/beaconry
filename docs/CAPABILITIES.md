@@ -617,6 +617,16 @@ Enforcement: `poc/scripts/verify_traceability.py` runs as part of `make check`. 
 - **verified by:**
   - `poc/tests/unit/test_executor_dispatch.py`
 
+### CAP-T047: `make verify-memory-drift` catches regressions of shipped documentation-reality changes
+- **type:** technical
+- **status:** active
+- **origin:** BC-015
+- **design:** memory/workflow.md § Blocking gates (must pass to merge to `dev`)
+- **description:** `poc/scripts/verify_memory_drift.py` reads a growing TOML of banned regex patterns (`poc/scripts/memory_drift_bans.toml`) and scans every `memory/*.md` file for recurrences. Each entry carries `pattern`, `banned_since` (BC id), `reason`, and optional `exception_regex` list for legitimate historical mentions. Seeded with BC-013 (scout-migrated-to-HTTP) + BC-014 (DockerAdapter same-track) drifts. Hooked into `make check` fast tier. Append-only — patterns document historical facts; if an entry becomes over-broad the fix is to add `exception_regex`, not to delete the pattern. Pre-ship audit (DD-TGD step 6a) checklist grows a required row: *if the story deprecates documented behavior, add a `memory_drift_bans.toml` entry in this commit*. Live-proven by Phase 4 planted-regression (git-reverted BC-014's memory close, confirmed the script caught both matching lines with named errors, restored).
+- **supports:** CAP-B013, CAP-T026, CAP-T027
+- **verified by:**
+  - `poc/tests/unit/test_memory_drift_guard.py`
+
 ### CAP-T017: Orphan tests fail the gate with a copy-pasteable template
 - **type:** technical
 - **status:** active

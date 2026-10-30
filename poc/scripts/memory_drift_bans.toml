@@ -1,0 +1,45 @@
+# BC-015 — memory drift regression guard patterns.
+#
+# Append-only growing list. When a story deprecates a documented behavior
+# that lives in memory/*.md, add an entry here in the same commit that closes
+# the drift. See docs/stories/BC-015-memory-drift-guard.md.
+#
+# Fields:
+#   pattern (regex, required)            — the stale phrase to ban
+#   banned_since (string, required)      — originating BC id (e.g. "BC-014")
+#   reason (string, required)            — one-liner explaining what changed
+#   exception_regex (list, optional)     — legitimate historical mentions
+
+# ── BC-014: DockerAdapter same-track pull (0e80c9c, closed 38439bf) ──────────
+[[ban]]
+pattern = "DockerAdapter[^.\\n]*docker pull[^.\\n]*:latest"
+banned_since = "BC-014"
+reason = "DockerAdapter uses same-track pull per BC-014 — preserves source_ref tag instead of :latest. Don't describe it as pulling :latest."
+exception_regex = [
+  # Historical/comparative mentions that explicitly flag the behavior as pre-BC-014.
+  "pre-BC-014",
+  "BC-009.*(:latest|hardcoded)",
+]
+
+[[ban]]
+pattern = "docker tag[^\\n]*:rollback[^\\n]*:latest"
+banned_since = "BC-014"
+reason = "Rollback restore target follows BC-014's same-track rule — use <source_ref>, not :latest."
+exception_regex = [
+  "pre-BC-014",
+]
+
+# ── BC-013: Scout migrated to HTTP (9372538, closed 909ee87) ────────────────
+[[ban]]
+pattern = "[Ss]cout[^\\n]*(file-sentinel|scout\\.live|scout\\.ready|scout\\.healthz\\.json)[^\\n]*(instead of|rather than|primary|canonical|default|in /data/)"
+banned_since = "BC-013"
+reason = "Scout migrated to HTTP endpoints in BC-013. File-sentinels are available via SentinelWriter for HTTP-less loop services only — don't describe scout as using them."
+exception_regex = [
+  # The SentinelWriter class is a legitimate reference.
+  "SentinelWriter",
+  # Explicitly historical/superseded wording.
+  "pre-BC-013",
+  "superseded",
+  "migrated to HTTP",
+  "HTTP-less",
+]

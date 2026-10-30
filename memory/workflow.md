@@ -114,6 +114,8 @@ Two tiers (BC-006). Fast tier (`make check`) runs pre-push + the merge gate; ful
 | Tests | `pytest` | fast | **pre-push** + `make check` |
 | Coverage | `pytest --cov`, threshold ≥ 60% | fast | `make check` |
 | Traceability | `make verify-traceability` | fast | `make check` + pre-push |
+| Dockerfile `COPY beaconry_health/` | `make verify-dockerfile-health-copy` | fast | `make check` |
+| Memory drift (BC-013/014/… bans) | `make verify-memory-drift` | fast | `make check` |
 | Smoke | `make smoke` (mocked pipeline) | fast | `make check` |
 | Compose integration | `pytest -m compose` | full | `make check-full` |
 | Real-tools integration | `pytest -m real_tools` | full | `make check-full` |
