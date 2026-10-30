@@ -19,6 +19,7 @@ Covers:
     - CAP-T033: Operator can opt out of fix execution via BEACONRY_FIX_ENABLED=0
     - CAP-B018: Operator confirms a fix actually brought the service back up
     - CAP-T050: New DB statuses `fixed_verified` + `verification_failed` with idempotent migration
+    - CAP-T056: Hub configurable Telegram API base URL via `BEACONRY_TELEGRAM_BASE_URL`
 """
 
 from __future__ import annotations
@@ -787,3 +788,71 @@ async def test_fix_success_omits_verify_button_when_no_policy(
     assert "reply_markup" not in final_edit, (
         "no policy → no Verify button; operator shouldn't be prompted to probe nothing"
     )
+
+
+# ── BC-018: env-splitting dials (close-gap coverage) ─────────────────────────
+
+
+def test_telegram_base_url_env_overrides_default(monkeypatch: pytest.MonkeyPatch) -> None:
+    """BC-018: BEACONRY_TELEGRAM_BASE_URL=... steers Application.builder.base_url.
+
+    Covers CAP-T056. hub.py reads the env at import time, so reload under the
+    monkeypatched env and inspect the module-level global.
+    """
+    import importlib
+
+    monkeypatch.setenv("BEACONRY_TELEGRAM_BASE_URL", "http://telegram-mock:8080")
+    reloaded = importlib.reload(hub)
+    try:
+        assert reloaded.TELEGRAM_BASE_URL == "http://telegram-mock:8080"
+    finally:
+        # Restore pristine module for subsequent tests.
+        monkeypatch.delenv("BEACONRY_TELEGRAM_BASE_URL", raising=False)
+        importlib.reload(hub)
+
+
+def test_telegram_base_url_defaults_to_empty_string(monkeypatch: pytest.MonkeyPatch) -> None:
+    """BC-018: unset env → empty string → hub keeps the real-Telegram default."""
+    import importlib
+
+    monkeypatch.delenv("BEACONRY_TELEGRAM_BASE_URL", raising=False)
+    reloaded = importlib.reload(hub)
+    try:
+        assert reloaded.TELEGRAM_BASE_URL == ""
+    finally:
+        importlib.reload(hub)
+
+
+def test_skip_grype_db_env_only(monkeypatch: pytest.MonkeyPatch) -> None:
+    """BC-018: BEACONRY_SKIP_GRYPE_DB=1 alone (no BEACONRY_MOCK) must skip DB download.
+
+    The two dials were deliberately split so e2e stacks can run REAL
+    python-telegram-bot against telegram-mock while still skipping the heavy
+    grype download. Regressing this collapses them back together.
+    """
+    import importlib
+
+    monkeypatch.delenv("BEACONRY_MOCK", raising=False)
+    monkeypatch.setenv("BEACONRY_SKIP_GRYPE_DB", "1")
+    reloaded = importlib.reload(hub)
+    try:
+        assert reloaded.SKIP_GRYPE_DB is True
+        assert reloaded.MOCK is False, "BEACONRY_SKIP_GRYPE_DB must not imply MOCK"
+    finally:
+        monkeypatch.delenv("BEACONRY_SKIP_GRYPE_DB", raising=False)
+        importlib.reload(hub)
+
+
+def test_mock_env_still_implies_skip_grype_db(monkeypatch: pytest.MonkeyPatch) -> None:
+    """BC-018 back-compat: BEACONRY_MOCK=1 remains an alias that also skips grype DB."""
+    import importlib
+
+    monkeypatch.setenv("BEACONRY_MOCK", "1")
+    monkeypatch.delenv("BEACONRY_SKIP_GRYPE_DB", raising=False)
+    reloaded = importlib.reload(hub)
+    try:
+        assert reloaded.MOCK is True
+        assert reloaded.SKIP_GRYPE_DB is True
+    finally:
+        monkeypatch.delenv("BEACONRY_MOCK", raising=False)
+        importlib.reload(hub)

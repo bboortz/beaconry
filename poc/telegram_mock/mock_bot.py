@@ -23,8 +23,14 @@ import json
 import time
 from typing import Any
 
-from beaconry_health import build_router
 from fastapi import FastAPI, Request
+
+try:
+    # Container path: beaconry_health COPY'd next to mock_bot.py on /app
+    from beaconry_health import build_router
+except ImportError:
+    # Host test path: imported as poc.telegram_mock.mock_bot
+    from poc.beaconry_health import build_router
 
 VERSION = "0.1.0"
 

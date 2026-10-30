@@ -713,6 +713,7 @@ Enforcement: `poc/scripts/verify_traceability.py` runs as part of `make check`. 
 - **supports:** CAP-B018, CAP-B011
 - **verified by:**
   - `poc/tests/e2e/test_BC_011_probe_flow.py`
+  - `poc/tests/unit/test_telegram_mock.py`
 
 ### CAP-T056: Hub configurable Telegram API base URL via `BEACONRY_TELEGRAM_BASE_URL`
 - **type:** technical
@@ -723,6 +724,7 @@ Enforcement: `poc/scripts/verify_traceability.py` runs as part of `make check`. 
 - **supports:** CAP-T055
 - **verified by:**
   - `poc/tests/e2e/test_BC_011_probe_flow.py`
+  - `poc/tests/unit/test_hub_helpers.py`
 
 ### CAP-T017: Orphan tests fail the gate with a copy-pasteable template
 - **type:** technical
