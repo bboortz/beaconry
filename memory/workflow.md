@@ -42,8 +42,16 @@ Per feature (BC-NNN):
                            tests are complete. verify-traceability enforces this on
                            every make check.
 
-6. Gates                   make check — lint, type (pyright basic), test, coverage ≥ 60%,
-                           verify-traceability, docker build, smoke (bash demo.sh --smoke).
+6. Gates                   make check (fast tier) — lint, type (pyright basic), test,
+                           coverage ≥ 60%, verify-traceability, smoke. make check-full adds
+                           opt-in markers (compose, real_tools).
+
+6a. Pre-ship audit         Fill the "Shipping evidence" table in the plan doc. One row per
+                           Gherkin scenario and plan goal. Three audit lenses:
+                             - Gherkin coverage (every Scenario has a pointer)
+                             - data-model symmetry (every write has a mirror read, and vice versa)
+                             - self-consistency (story applies its own new conventions)
+                           Any ⚠️ or ❌ row blocks shipping — cycle back to step 5.
 
 7. Update DESIGN.md        Only if architecture changed. Final shape only — not the delta.
 

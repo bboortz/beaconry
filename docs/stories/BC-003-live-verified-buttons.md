@@ -120,6 +120,21 @@ The non-live scenarios (callback validation, pytest -m real_tools, README, DB-fi
 
 Depends on CAP-B002 (notifications arrive — prerequisite), CAP-T003 (HTML escape in edited messages).
 
+## Shipping evidence (preliminary — fills in when BC-003 moves to ready)
+
+| Scenario / goal | Evidence type | Pointer | Status |
+|---|---|---|---|
+| Snooze button updates DB + edits message | live manual | awaits tap session with user + Claude | ❌ |
+| Accept-risk updates DB + edits message | live manual | awaits tap session | ❌ |
+| Fix-now stub honored | live manual | awaits tap session | ❌ |
+| Double-tap idempotent | live manual + unit | awaits implementation + tap session | ❌ |
+| Callback_data validation rejects malformed input | unit test | not yet implemented | ❌ |
+| `pytest -m real_tools` passes end-to-end | integration (opt-in) | awaits manual run with syft+grype on PATH | ❌ |
+| README documents operator setup | README diff | awaits update | ❌ |
+| Dev DB filename consistent story-to-code | grep sanity | awaits reconciliation | ❌ |
+
+Legend: ✓ covered · ⚠️ partial · ❌ open.
+
 ## Open questions
 
 - Should Fix-now now point to BC-004 or stay at BC-003 if we re-scope? → Settle in the plan doc when BC-003 moves `draft → ready`.

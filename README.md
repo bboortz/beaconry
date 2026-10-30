@@ -88,6 +88,8 @@ Design-Driven, Test-Guarded Development. Every feature flows:
 7. PR to `dev` → `/ultrareview` → `/code-review` → merge
 8. CI fast-forwards `main` to `dev`
 
+Pre-ship audit (step 6a) fills the `Shipping evidence` table in each plan doc. A story moves to `shipped` only when every Gherkin scenario and plan goal has a pointer (test, log line, or dated manual verification). Three audit lenses: Gherkin coverage, data-model symmetry, self-consistency.
+
 Full detail in [`memory/workflow.md`](memory/workflow.md).
 
 ---

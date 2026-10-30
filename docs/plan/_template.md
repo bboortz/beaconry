@@ -66,6 +66,18 @@ Migration or operator action required by this change. "None — change is additi
 
 ---
 
+## Shipping evidence
+
+Pre-ship audit (DD-TGD step 6a). This story may only move to `shipped` when every row below has non-empty evidence. The three audit lenses behind this table: **Gherkin coverage** (every Scenario has a pointer), **data-model symmetry** (every write path has a mirror read, and vice versa), **self-consistency** (if the story introduces a convention — new template field, new CAP, new rule — the story's own artifacts apply it).
+
+| Scenario / goal | Evidence type | Pointer | Status |
+|---|---|---|---|
+| <copy a Scenario title or plan goal> | unit / integration / live / manual | <test name, log line, "verified YYYY-MM-DD"> | ✓ / ⚠️ / ❌ |
+
+Legend: ✓ covered · ⚠️ partial (notes required) · ❌ open (blocks shipping).
+
+---
+
 ## Testing strategy
 
 How correctness is verified: which integration test encodes the Gherkin, which unit tests cover helpers.

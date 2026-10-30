@@ -98,6 +98,15 @@ Enforcement: `poc/scripts/verify_traceability.py` runs as part of `make check`. 
 - **verified by:**
   - `poc/tests/integration/test_BC_007_findings_cli.py`
 
+### CAP-B013: Developer trusts that `shipped` means every acceptance has evidence
+- **type:** business
+- **status:** active
+- **origin:** BC-008
+- **design:** memory/workflow.md
+- **description:** DD-TGD gains step 6a "Pre-ship audit". Each plan doc carries a `Shipping evidence` table listing every Gherkin scenario + plan goal with a pointer (test name, log line, or dated manual verification). A story moves to `shipped` only when every row has non-empty evidence. Three audit lenses: Gherkin coverage, data-model symmetry, self-consistency.
+- **verified by:**
+  - `poc/tests/integration/test_BC_008_pre_ship_audit.py`
+
 ### CAP-B006: Operator has a clear development process to contribute
 - **type:** business
 - **status:** active
@@ -330,6 +339,16 @@ Enforcement: `poc/scripts/verify_traceability.py` runs as part of `make check`. 
 - **verified by:**
   - `poc/tests/integration/test_BC_007_findings_cli.py`
   - `poc/tests/unit/test_hub_helpers.py`
+
+### CAP-T026: Plan template carries a Shipping evidence section used as the pre-ship checklist
+- **type:** technical
+- **status:** active
+- **origin:** BC-008
+- **design:** memory/workflow.md
+- **description:** `docs/plan/_template.md` includes a `## Shipping evidence` section with a 4-column table (Scenario, Evidence type, Pointer, Status) and a legend. New plan docs inherit this. The pre-ship audit (DD-TGD step 6a) is the discipline of filling every row before marking the story `shipped`. Template-based for now; automated enforcement (parsing Gherkin against the table) is a future follow-up if drift reappears.
+- **supports:** CAP-B013
+- **verified by:**
+  - `poc/tests/integration/test_BC_008_pre_ship_audit.py`
 
 ### CAP-T022: Fix/feat branches without a plan doc fail the gate
 - **type:** technical

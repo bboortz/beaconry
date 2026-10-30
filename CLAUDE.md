@@ -79,6 +79,7 @@ Design-Driven, Test-Guarded Development. Per feature:
 5. Refactor + unit tests for non-trivial helpers (every test file needs a `Covers:` block)
 5a. **Register capabilities** — add or extend entries in `docs/CAPABILITIES.md`; ensure bidirectional links. `make verify-traceability` must pass.
 6. **Fast tier** `make check` passes (lint, type, test, coverage ≥ 60%, verify-traceability, smoke). Before pushing or opening a PR, run **full tier** `make check-full` (adds opt-in `compose` + `real_tools` markers).
+6a. **Pre-ship audit** — fill the "Shipping evidence" table in the plan doc with a pointer for every Gherkin scenario + plan goal. Three lenses: **Gherkin coverage** (every Scenario has a pointer), **data-model symmetry** (every write has a mirror read, and vice versa), **self-consistency** (if the story introduces a convention — new template field, new CAP, new rule — the story's own artifacts apply it). Any row left at ⚠️ or ❌ blocks shipping; cycle back to step 5.
 7. DESIGN.md updated only if architecture changed
 8. PR to `dev` → user runs `/ultrareview` → Claude runs `/code-review` → user merges
 
