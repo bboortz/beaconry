@@ -72,7 +72,7 @@ Pre-ship audit (DD-TGD step 6a). This story may only move to `shipped` when ever
 
 | Scenario / goal | Evidence type | Pointer | Status |
 |---|---|---|---|
-| <copy a Scenario title or plan goal> | unit / integration / live / manual | <test name, log line, "verified YYYY-MM-DD"> | ✓ / ⚠️ / ❌ |
+| <copy a Scenario title or plan goal> | unit / integration / live / manual | <test name, log line, "verified YYYY-MM-DD"> | ❌ |
 
 Legend: ✓ covered · ⚠️ partial (notes required) · ❌ open (blocks shipping).
 

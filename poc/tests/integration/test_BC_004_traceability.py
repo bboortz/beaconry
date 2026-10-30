@@ -4,6 +4,7 @@ Covers:
     - CAP-T016: verify-traceability enforces bidirectional links
     - CAP-T017: Orphan tests fail the gate
     - CAP-T022: Fix/feat branches without a plan doc fail the gate
+    - CAP-T027: Shipped stories must have a completed Shipping evidence table
 """
 
 from __future__ import annotations
@@ -539,6 +540,123 @@ def test_multi_segment_cap_id_resolves_bidirectionally(
         tests,
         "multi",
         '"""Covers:\n    - CAP-FOO-BAR: Multi-segment id\n"""\n',
+    )
+
+    from poc.scripts.verify_traceability import run
+
+    assert run(docs=docs, tests=tests, branch="") == 0
+
+
+_FILLED_EVIDENCE_TABLE = """
+## Shipping evidence
+
+| Scenario / goal | Evidence type | Pointer | Status |
+|---|---|---|---|
+| First item | unit | `test_x` | ✓ |
+
+## Next section
+
+"""
+
+_PLACEHOLDER_EVIDENCE_TABLE = """
+## Shipping evidence
+
+| Scenario / goal | Evidence type | Pointer | Status |
+|---|---|---|---|
+| <copy a Scenario title or plan goal> | unit / integration | <test name> | ❌ |
+
+## Next section
+
+"""
+
+_OPEN_STATUS_EVIDENCE_TABLE = """
+## Shipping evidence
+
+| Scenario / goal | Evidence type | Pointer | Status |
+|---|---|---|---|
+| First item | unit | `test_x` | ⚠️ |
+
+## Next section
+
+"""
+
+
+def _write_shipped_story_and_plan(docs: Path, slug: str, plan_body: str) -> None:
+    stories = docs / "stories"
+    plans = docs / "plan"
+    plans.mkdir(exist_ok=True)
+    (stories / f"{slug}.md").write_text("---\nstatus: shipped\n---\n")
+    (plans / f"{slug}-plan.md").write_text(plan_body)
+
+
+def test_shipping_evidence_placeholder_fails_on_shipped(
+    tmp_docs_and_tests: tuple[Path, Path], capsys: pytest.CaptureFixture[str]
+) -> None:
+    docs, tests = tmp_docs_and_tests
+    _happy_minimal_setup(docs, tests)
+    _write_shipped_story_and_plan(docs, "BC-200-sample", _PLACEHOLDER_EVIDENCE_TABLE)
+
+    from poc.scripts.verify_traceability import run
+
+    rc = run(docs=docs, tests=tests, branch="")
+    assert rc != 0
+    err = capsys.readouterr().err
+    assert "placeholder" in err
+    assert "BC-200-sample" in err
+
+
+def test_shipping_evidence_open_rows_fail_on_shipped(
+    tmp_docs_and_tests: tuple[Path, Path], capsys: pytest.CaptureFixture[str]
+) -> None:
+    docs, tests = tmp_docs_and_tests
+    _happy_minimal_setup(docs, tests)
+    _write_shipped_story_and_plan(docs, "BC-201-open-row", _OPEN_STATUS_EVIDENCE_TABLE)
+
+    from poc.scripts.verify_traceability import run
+
+    rc = run(docs=docs, tests=tests, branch="")
+    assert rc != 0
+    err = capsys.readouterr().err
+    assert "BC-201-open-row" in err
+
+
+def test_shipping_evidence_filled_passes(
+    tmp_docs_and_tests: tuple[Path, Path],
+) -> None:
+    docs, tests = tmp_docs_and_tests
+    _happy_minimal_setup(docs, tests)
+    _write_shipped_story_and_plan(docs, "BC-202-filled", _FILLED_EVIDENCE_TABLE)
+
+    from poc.scripts.verify_traceability import run
+
+    assert run(docs=docs, tests=tests, branch="") == 0
+
+
+def test_shipping_evidence_not_enforced_on_draft(
+    tmp_docs_and_tests: tuple[Path, Path],
+) -> None:
+    docs, tests = tmp_docs_and_tests
+    _happy_minimal_setup(docs, tests)
+    stories = docs / "stories"
+    plans = docs / "plan"
+    plans.mkdir(exist_ok=True)
+    (stories / "BC-203-draft.md").write_text("---\nstatus: draft\n---\n")
+    (plans / "BC-203-draft-plan.md").write_text(_PLACEHOLDER_EVIDENCE_TABLE)
+
+    from poc.scripts.verify_traceability import run
+
+    assert run(docs=docs, tests=tests, branch="") == 0
+
+
+def test_shipping_evidence_section_absent_is_grandfathered(
+    tmp_docs_and_tests: tuple[Path, Path],
+) -> None:
+    docs, tests = tmp_docs_and_tests
+    _happy_minimal_setup(docs, tests)
+    _write_shipped_story_and_plan(
+        docs,
+        "BC-204-legacy",
+        "# Legacy plan\n\nNo Shipping evidence section here — pre-BC-008 shipped.\n",
     )
 
     from poc.scripts.verify_traceability import run

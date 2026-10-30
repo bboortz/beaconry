@@ -350,6 +350,16 @@ Enforcement: `poc/scripts/verify_traceability.py` runs as part of `make check`. 
 - **verified by:**
   - `poc/tests/integration/test_BC_008_pre_ship_audit.py`
 
+### CAP-T027: Shipped stories must have a completed Shipping evidence table
+- **type:** technical
+- **status:** active
+- **origin:** BC-008 (fix branch automate-audit)
+- **design:** memory/workflow.md
+- **description:** verify-traceability parses `docs/plan/<slug>-plan.md` for the `## Shipping evidence` section when the matching `docs/stories/<slug>.md` is `status: shipped`. Fails the gate on: template placeholder text remaining (`<copy a` / `<test name` substrings), rows with non-✓ status (⚠️ / ❌), empty table. Draft / in-progress stories are not checked. Plans without the section are grandfathered (pre-BC-008). Closes the discipline gap from BC-008 Option A.
+- **supports:** CAP-B013
+- **verified by:**
+  - `poc/tests/integration/test_BC_004_traceability.py`
+
 ### CAP-T022: Fix/feat branches without a plan doc fail the gate
 - **type:** technical
 - **status:** active

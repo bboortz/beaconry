@@ -186,6 +186,82 @@ def check_branch_plan_doc(branch: str, docs: Path) -> list[str]:
     ]
 
 
+def _story_is_shipped(story_path: Path) -> bool:
+    """Return True if the story file's frontmatter has status: shipped."""
+    if not story_path.exists():
+        return False
+    for line in story_path.read_text().splitlines():
+        stripped = line.strip()
+        if stripped.startswith("status:"):
+            return stripped.split(":", 1)[1].strip() == "shipped"
+        if stripped == "---" and "status:" in story_path.read_text().split("---", 2)[1]:
+            continue
+    return False
+
+
+def _parse_shipping_evidence_rows(plan_text: str) -> list[list[str]] | None:
+    """Return the parsed rows of the Shipping evidence table, or None if the
+    section is absent (grandfathered). Returns an empty list if the section
+    exists but the table is empty."""
+    # Anchor to line-start so inline mentions in prose don't false-match.
+    heading_match = re.search(r"^## Shipping evidence\s*$", plan_text, re.MULTILINE)
+    if not heading_match:
+        return None
+    after = plan_text[heading_match.end() :]
+    # Table ends at the next heading or EOF.
+    next_heading = re.search(r"^##[^#]", after, re.MULTILINE)
+    section = after[: next_heading.start()] if next_heading else after
+    rows: list[list[str]] = []
+    for line in section.splitlines():
+        if not line.strip().startswith("|"):
+            continue
+        cells = [c.strip() for c in line.strip().strip("|").split("|")]
+        # Skip header + separator rows.
+        if cells and cells[0].lower() in {"scenario / goal", "scenario", ""}:
+            continue
+        if all(set(c) <= {"-", " "} for c in cells):
+            continue
+        rows.append(cells)
+    return rows
+
+
+def check_shipping_evidence(story_path: Path, plan_path: Path) -> list[str]:
+    """For a `shipped` story, assert its plan's Shipping evidence table is complete.
+    Returns a list of error strings; empty = pass."""
+    errors: list[str] = []
+    if not _story_is_shipped(story_path):
+        return errors  # not shipped yet — audit happens at ship time
+    if not plan_path.exists():
+        return errors  # plan absent is a separate concern (CAP-T022)
+
+    plan_text = plan_path.read_text()
+    rows = _parse_shipping_evidence_rows(plan_text)
+    if rows is None:
+        return errors  # section absent — grandfathered pre-BC-008 plan
+
+    if not rows:
+        errors.append(
+            f"{plan_path}: Shipping evidence section exists but table is empty "
+            f"(story is shipped; fill the table or revert status)"
+        )
+        return errors
+
+    for i, row in enumerate(rows, start=1):
+        if any("<copy a" in cell or "<test name" in cell for cell in row):
+            errors.append(
+                f"{plan_path}: Shipping evidence row {i} still has template "
+                f"placeholder text — fill it before shipping"
+            )
+            continue
+        status = row[-1] if row else ""
+        if "✓" not in status:
+            errors.append(
+                f"{plan_path}: Shipping evidence row {i} has status {status!r} — "
+                f"a shipped story requires every row at ✓"
+            )
+    return errors
+
+
 def _rel(path: Path, base: Path) -> str:
     try:
         return str(path.relative_to(base))
@@ -204,6 +280,17 @@ def run(docs: Path, tests: Path, *, branch: str | None = None) -> int:
     # Branch-plan-doc check (fast, runs first so a missing plan surfaces early).
     resolved_branch = branch if branch is not None else get_current_branch()
     errors.extend(check_branch_plan_doc(resolved_branch, docs))
+
+    # BC-008 pre-ship audit — for every shipped story, assert its plan's
+    # Shipping evidence table is complete (no placeholders, every row ✓).
+    stories_dir = docs / "stories"
+    plans_dir = docs / "plan"
+    if stories_dir.is_dir() and plans_dir.is_dir():
+        for story_file in stories_dir.glob("BC-*.md"):
+            # Match story slug to plan slug by stripping the "BC-NNN-" prefix.
+            slug = story_file.stem  # e.g. BC-008-pre-ship-audit
+            plan_file = plans_dir / f"{slug}-plan.md"
+            errors.extend(check_shipping_evidence(story_file, plan_file))
 
     cap_file = docs / "CAPABILITIES.md"
     caps = parse_capabilities(cap_file)
