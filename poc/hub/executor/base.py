@@ -18,6 +18,7 @@ class Finding:
     source_ref: str  # image name ("nginx:1.24") or package name ("openssl")
     description: str
     tier: int = 3  # urgency tier (0 highest, 3 lowest) — see poc/hub/urgency.py
+    kev: bool = False  # True if the CVE is in the CISA KEV catalog (BC-020)
 
 
 @dataclass

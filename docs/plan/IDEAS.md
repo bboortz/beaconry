@@ -213,8 +213,8 @@ See per-decision review dates in `memory/`:
 
 ## Parking lot (ideas we discussed but likely won't do)
 
-- **BC-020 — `make demo` works with host-run telegram-mock (BC-018 Scenario 7's literal recipe)**
-  parked: 2026-10-31 after reviewing the two existing demo modes.
+- **`make demo` works with host-run telegram-mock (BC-018 Scenario 7's literal recipe)**
+  parked: 2026-10-31 after reviewing the two existing demo modes. (Originally queued as BC-020 before the KEV-ingest story claimed that number.)
   Why parked: the dividend overlaps `BEACONRY_MOCK=1 make demo` (already stubs Telegram with no real token needed) and `make test-e2e` (already exercises real python-telegram-bot against telegram-mock end-to-end). The marginal slice BC-020 would add — real PTB library hitting the mock *through the `make demo` entrypoint* — has no second real-world use case not already covered. Compose plumbing (env propagation + `host.docker.internal` `extra_hosts` for Linux) adds complexity nobody will reach for.
   Original scope sketch (if revived): add `BEACONRY_TELEGRAM_BASE_URL` + `BEACONRY_SKIP_GRYPE_DB` to `docker-compose.yml` hub env, drop both from the test-only allowlist, add `extra_hosts: - "host.docker.internal:host-gateway"`, document the recipe in README.
   Links: BC-018 (origin), CAP-T056 (behavior proven elsewhere), `docs/plan/BC-018-close-gap-unit-coverage-plan.md § Scenario 7 live-verification — DEFERRED`.

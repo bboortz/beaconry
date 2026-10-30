@@ -20,6 +20,8 @@ Covers:
     - CAP-B018: Operator confirms a fix actually brought the service back up
     - CAP-T050: New DB statuses `fixed_verified` + `verification_failed` with idempotent migration
     - CAP-T056: Hub configurable Telegram API base URL via `BEACONRY_TELEGRAM_BASE_URL`
+    - CAP-T059: Hub ingest path wires urgency.classify_tier → DB tier column
+    - CAP-T060: Notification format inserts a KEV header line for tier 0 findings
 """
 
 from __future__ import annotations
@@ -856,3 +858,63 @@ def test_mock_env_still_implies_skip_grype_db(monkeypatch: pytest.MonkeyPatch) -
     finally:
         monkeypatch.delenv("BEACONRY_MOCK", raising=False)
         importlib.reload(hub)
+
+
+# ── BC-020: Finding.kev + DB migration + save/load round-trip ────────────────
+
+
+def test_finding_has_kev_field_default_false() -> None:
+    """Finding dataclass carries a bool `kev` field, defaulting to False."""
+    f = _finding()
+    assert hasattr(f, "kev"), "Finding dataclass must have a `kev` field"
+    assert f.kev is False
+    kev_f = _finding(kev=True)
+    assert kev_f.kev is True
+
+
+def test_init_db_adds_kev_column_idempotent(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: object
+) -> None:
+    """BC-020 migration: `kev` column lands on first init_db and is idempotent."""
+    import sqlite3
+
+    db_path = tmp_path / "beaconry.db"  # type: ignore[operator]
+    monkeypatch.setattr(hub, "DB_PATH", db_path)
+    hub.init_db()
+    hub.init_db()  # second call must not raise (idempotent migration)
+
+    con = sqlite3.connect(db_path)
+    cols = {row[1] for row in con.execute("PRAGMA table_info(findings)")}
+    con.close()
+    assert "kev" in cols
+    assert "tier" in cols
+
+
+def test_save_and_load_finding_round_trips_kev_flag(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: object
+) -> None:
+    """kev=True Finding → save → load → kev is True (not an int, not None)."""
+    db_path = tmp_path / "beaconry.db"  # type: ignore[operator]
+    monkeypatch.setattr(hub, "DB_PATH", db_path)
+    hub.init_db()
+    f = _finding(id="bc020kev01", kev=True, tier=0)
+    assert hub.save_finding(f) is True
+    loaded = hub.load_finding("bc020kev01")
+    assert loaded is not None
+    assert loaded.kev is True
+    assert loaded.tier == 0
+
+
+def test_format_notification_prepends_kev_header_for_tier_0() -> None:
+    """CAP-T060: Tier 0 findings get the "🚨 KEV — EXPLOITED IN THE WILD" header line."""
+    f = _finding(tier=0, kev=True, cve_id="CVE-2026-9999", severity="High", cvss=7.5)
+    body = hub.format_notification(f)
+    first_line = body.splitlines()[0]
+    assert "KEV" in first_line
+    assert "🚨" in first_line
+
+
+def test_format_notification_omits_kev_header_for_non_tier_0() -> None:
+    f = _finding(tier=2, kev=False, cve_id="CVE-2026-1111", severity="Critical", cvss=9.5)
+    body = hub.format_notification(f)
+    assert "KEV" not in body

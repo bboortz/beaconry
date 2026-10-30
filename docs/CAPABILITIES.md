@@ -737,6 +737,47 @@ Enforcement: `poc/scripts/verify_traceability.py` runs as part of `make check`. 
   - `poc/tests/integration/test_BC_019_verify_evidence_pointers.py`
   - `poc/tests/unit/test_verify_evidence_pointers.py`
 
+### CAP-B019: Operator sees KEV-listed CVEs visually distinct and ranked first across the UI (Telegram + findings CLI)
+- **type:** business
+- **status:** active
+- **origin:** BC-020 (first implementation of the Tier 0 differentiation promised in `memory/design-decisions.md § Urgency tiers` since BC-000)
+- **description:** When a finding's CVE is in the CISA KEV catalog, the Telegram notification prepends `🚨 KEV — EXPLOITED IN THE WILD`, the DB stores `tier=0` + `kev=1`, and `make findings` surfaces a `KEV` column while sorting rows by `(tier, -cvss)` so Tier 0 rows surface first regardless of CVSS score. Operator at a glance distinguishes "exploit in the wild" from "high CVSS but speculative." Pre-BC-020, every finding was effectively Tier 3 (DB default) because `urgency.classify_tier` was dead code.
+- **supports:** CAP-B011, CAP-B018
+- **verified by:**
+  - `poc/tests/integration/test_BC_020_kev_ingest.py`
+
+### CAP-T058: CISA KEV feed ingestion — fetch on boot + hourly refresh + stale fallback + /healthz freshness
+- **type:** technical
+- **status:** active
+- **origin:** BC-020
+- **design:** docs/stories/BC-020-kev-ingest.md
+- **description:** `poc/hub/kev.py` fetches `https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json` (overridable via `BEACONRY_KEV_FEED_URL` for air-gapped setups), parses `vulnerabilities[].cveID` into a frozenset, caches to `${DATA_DIR}/kev_cache.json`, exposes `is_known_exploited(cve_id)` as an O(1) case-insensitive lookup. Fetch runs in an asyncio background task spawned by `lifespan` — it does NOT gate `/readyz` (restart-loop trap). `/healthz` surfaces freshness: `{"kev": "ok|stale|unfetched", "kev_last_fetch_s": N, "kev_count": N}`. Fetch failure is non-fatal; disk cache survives.
+- **supports:** CAP-B019
+- **verified by:**
+  - `poc/tests/integration/test_BC_020_kev_ingest.py`
+  - `poc/tests/unit/test_kev.py`
+
+### CAP-T059: Hub ingest path wires urgency.classify_tier → DB tier column
+- **type:** technical
+- **status:** active
+- **origin:** BC-020
+- **design:** memory/design-decisions.md § Urgency tiers
+- **description:** Pre-BC-020, `urgency.classify_tier` existed with passing tests but was never called by hub.py — every finding stored `tier=3` (DB default). BC-020 calls it from `process_sbom_entry` with `kev=kev.is_known_exploited(cve_id)` and `internet_facing=False` (deferred to a separate story). DB schema gains a `kev INTEGER DEFAULT 0` column (idempotent ALTER migration). `Finding` dataclass gains `kev: bool = False`. The urgency ladder is now behavior, not just docs.
+- **supports:** CAP-B019
+- **verified by:**
+  - `poc/tests/integration/test_BC_020_kev_ingest.py`
+  - `poc/tests/unit/test_hub_helpers.py`
+
+### CAP-T060: Notification format inserts a KEV header line for tier 0 findings
+- **type:** technical
+- **status:** active
+- **origin:** BC-020
+- **description:** `format_notification(f)` prepends `🚨 <b>KEV — EXPLOITED IN THE WILD</b>` as the first line when `f.tier == 0`. Operator sees the Tier 0 differentiation at a glance in Telegram without having to parse the severity row.
+- **supports:** CAP-B019
+- **verified by:**
+  - `poc/tests/integration/test_BC_020_kev_ingest.py`
+  - `poc/tests/unit/test_hub_helpers.py`
+
 ### CAP-T017: Orphan tests fail the gate with a copy-pasteable template
 - **type:** technical
 - **status:** active

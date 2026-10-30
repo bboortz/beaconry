@@ -7,6 +7,7 @@ dispatches to executor adapters on approval, verifies fix via re-scan.
 """
 
 import asyncio
+import contextlib
 import hashlib
 import json
 import logging
@@ -29,11 +30,15 @@ from telegram.ext import Application, CallbackQueryHandler, ContextTypes
 
 try:
     # Container path: beaconry_health COPY'd next to hub.py on /app
+    import kev as _kev
+    import urgency as _urgency
     import waterfall as _waterfall
     from beaconry_health import build_router, check_binary, check_db, check_dir_populated
 except ImportError:
     # Host test path: imported as poc.hub.hub, package at poc.beaconry_health
     from poc.beaconry_health import build_router, check_binary, check_db, check_dir_populated
+    from poc.hub import kev as _kev
+    from poc.hub import urgency as _urgency
     from poc.hub import waterfall as _waterfall
 
 logging.basicConfig(
@@ -111,14 +116,15 @@ def init_db() -> None:
             description  TEXT,
             found_at     INTEGER,
             status       TEXT DEFAULT 'open',
-            tier         INTEGER DEFAULT 3
+            tier         INTEGER DEFAULT 3,
+            kev          INTEGER DEFAULT 0
         )
     """)
-    # Idempotent migration for DBs created before the tier column existed.
-    import contextlib
-
+    # Idempotent migrations for DBs created before each column existed.
     with contextlib.suppress(sqlite3.OperationalError):
         con.execute("ALTER TABLE findings ADD COLUMN tier INTEGER DEFAULT 3")
+    with contextlib.suppress(sqlite3.OperationalError):
+        con.execute("ALTER TABLE findings ADD COLUMN kev INTEGER DEFAULT 0")
     con.commit()
     con.close()
 
@@ -130,8 +136,8 @@ def save_finding(f: Finding) -> bool:
         con.execute(
             """INSERT OR IGNORE INTO findings
                (id, host, cve_id, package, version, fixed_version, severity,
-                cvss, source_type, source_ref, description, found_at, tier)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                cvss, source_type, source_ref, description, found_at, tier, kev)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (
                 f.id,
                 f.host,
@@ -146,6 +152,7 @@ def save_finding(f: Finding) -> bool:
                 f.description,
                 int(time.time()),
                 f.tier,
+                1 if f.kev else 0,
             ),
         )
         new_row = con.execute("SELECT changes()").fetchone()[0] > 0
@@ -159,11 +166,15 @@ def load_finding(finding_id: str) -> Finding | None:
     con = sqlite3.connect(DB_PATH)
     row = con.execute(
         "SELECT id,host,cve_id,package,version,fixed_version,severity,"
-        "cvss,source_type,source_ref,description,tier FROM findings WHERE id=?",
+        "cvss,source_type,source_ref,description,tier,kev FROM findings WHERE id=?",
         (finding_id,),
     ).fetchone()
     con.close()
-    return Finding(*row) if row else None
+    if row is None:
+        return None
+    # Last column (kev) is INTEGER in SQLite; coerce to bool for the dataclass.
+    *head, kev_int = row
+    return Finding(*head, kev=bool(kev_int))
 
 
 def set_status(finding_id: str, status: str) -> None:
@@ -247,21 +258,27 @@ async def process_sbom_entry(entry: dict, host: str) -> list[Finding]:
         source_ref = source_meta.get("image") or artifact.get("name", "")
         fix_versions = vuln.get("fix", {}).get("versions") or []
 
-        findings.append(
-            Finding(
-                id=make_id(host, vuln["id"], source_ref, artifact.get("name", "")),
-                host=host,
-                cve_id=vuln["id"],
-                package=artifact.get("name", ""),
-                version=artifact.get("version", ""),
-                fixed_version=fix_versions[0] if fix_versions else "not available",
-                severity=vuln.get("severity", "Unknown"),
-                cvss=cvss,
-                source_type=source_type,
-                source_ref=source_ref,
-                description=(vuln.get("description") or "")[:200],
-            )
+        cve_id = vuln["id"]
+        is_kev = _kev.is_known_exploited(cve_id)
+        # Build a provisional finding so classify_tier gets the real CVSS/severity.
+        f = Finding(
+            id=make_id(host, cve_id, source_ref, artifact.get("name", "")),
+            host=host,
+            cve_id=cve_id,
+            package=artifact.get("name", ""),
+            version=artifact.get("version", ""),
+            fixed_version=fix_versions[0] if fix_versions else "not available",
+            severity=vuln.get("severity", "Unknown"),
+            cvss=cvss,
+            source_type=source_type,
+            source_ref=source_ref,
+            description=(vuln.get("description") or "")[:200],
+            kev=is_kev,
         )
+        # BC-020: wire the urgency ladder. internet_facing deferred to a later
+        # story — treat as False for V1. KEV presence trumps CVSS per the Tier 0 rule.
+        f.tier = _urgency.classify_tier(f, kev=is_kev, internet_facing=False)
+        findings.append(f)
 
     return findings
 
@@ -329,13 +346,19 @@ def format_notification(finding: Finding) -> str:
     def esc(s: str) -> str:
         return html.escape(s, quote=False)
 
-    lines = [
-        f"{emoji} <b>{esc(finding.severity)} — {esc(finding.cve_id)}</b>",
-        f"CVSS: <code>{finding.cvss:.1f}</code> · Host: <code>{esc(finding.host)}</code>",
-        f"Target: <code>{esc(finding.source_ref)}</code> ({esc(finding.source_type)})",
-        f"Package: <code>{esc(finding.package)} {esc(finding.version)}</code> "
-        f"→ fixed in <code>{esc(finding.fixed_version)}</code>",
-    ]
+    lines: list[str] = []
+    # BC-020: Tier 0 (KEV) gets a visually distinct header above the severity row.
+    if finding.tier == 0:
+        lines.append("🚨 <b>KEV — EXPLOITED IN THE WILD</b>")
+    lines.extend(
+        [
+            f"{emoji} <b>{esc(finding.severity)} — {esc(finding.cve_id)}</b>",
+            f"CVSS: <code>{finding.cvss:.1f}</code> · Host: <code>{esc(finding.host)}</code>",
+            f"Target: <code>{esc(finding.source_ref)}</code> ({esc(finding.source_type)})",
+            f"Package: <code>{esc(finding.package)} {esc(finding.version)}</code> "
+            f"→ fixed in <code>{esc(finding.fixed_version)}</code>",
+        ]
+    )
     if finding.description:
         desc = esc(finding.description[:160])
         lines.append(f"\n<i>{desc}</i>")
@@ -574,6 +597,12 @@ async def lifespan(app: FastAPI):
 
     init_db()
 
+    # BC-020: warm KEV in-memory from disk cache so the first scan already has
+    # urgency scoring (even if the HTTP fetch is still pending). Also kicks off
+    # the hourly refresh loop. Non-blocking: /readyz does NOT wait on KEV.
+    _kev.warm_from_cache_if_any()
+    _kev_task = asyncio.create_task(_kev.refresh_loop())
+
     # BC-011: parse policies once at startup; malformed → named error, do not boot.
     global HEALTH_POLICIES
     HEALTH_POLICIES = _waterfall.parse_policies(os.environ.get("BEACONRY_HEALTH_PROBES", ""))
@@ -609,6 +638,9 @@ async def lifespan(app: FastAPI):
     if not TELEGRAM_BOT_TOKEN:
         log.info("TELEGRAM_BOT_TOKEN empty — skipping Telegram startup")
         yield
+        _kev_task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await _kev_task
         return
 
     builder = Application.builder().token(TELEGRAM_BOT_TOKEN)
@@ -625,6 +657,11 @@ async def lifespan(app: FastAPI):
     log.info("Telegram bot polling started")
 
     yield
+
+    # BC-020: cancel KEV refresh loop on shutdown.
+    _kev_task.cancel()
+    with contextlib.suppress(asyncio.CancelledError):
+        await _kev_task
 
     assert tg_app is not None
     assert tg_app.updater is not None
@@ -656,12 +693,20 @@ def _hub_readyz_providers() -> dict[str, str]:
 
 
 def _hub_healthz_summary() -> dict:
+    kev_summary = _kev.freshness()
     checks = {
         **_hub_readyz_providers(),
         "telegram": _telegram_check(),
         "last_scan_ts": _last_scan_ts,
+        # BC-020: KEV freshness. Status is "ok" | "stale" | "unfetched".
+        **kev_summary,
     }
-    bool_checks = [v for k, v in checks.items() if k != "last_scan_ts"]
+    # KEV is non-fatal — stale/unfetched surface in /healthz but don't flip "degraded".
+    bool_checks = [
+        v
+        for k, v in checks.items()
+        if k not in ("last_scan_ts", "kev", "kev_last_fetch_s", "kev_count")
+    ]
     degraded = any(v not in ("ok", "polling", "mock") for v in bool_checks)
     return {
         "status": "degraded" if degraded else "ok",

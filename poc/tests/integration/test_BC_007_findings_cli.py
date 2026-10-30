@@ -192,8 +192,9 @@ def test_long_fields_truncate_with_ellipsis(tmp_path: Path) -> None:
     assert result.returncode == 0
     assert "…" in result.stdout
     for line in result.stdout.splitlines():
-        # BC-011: Status column widened from 9→19 to fit "verification_failed" → 120 chars total.
-        assert len(line) <= 120, f"line too long: {line!r}"
+        # BC-011: Status column widened from 9→19 to fit "verification_failed" (+10).
+        # BC-020: KEV column added (3 chars + 2-space separator = +5) → 125 chars total.
+        assert len(line) <= 125, f"line too long: {line!r}"
 
 
 def test_unit_format_table_renders_header_and_rows() -> None:

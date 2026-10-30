@@ -17,6 +17,8 @@ services:
       - BEACONRY_FIX_ENABLED=${BEACONRY_FIX_ENABLED:-1}
       # BC-011: policy-driven probe resolver
       - BEACONRY_HEALTH_PROBES=${BEACONRY_HEALTH_PROBES:-}
+      # BC-020: optional override of the CISA KEV feed URL (air-gapped setups)
+      - BEACONRY_KEV_FEED_URL=${BEACONRY_KEV_FEED_URL:-}
       # BEACONRY_MOCK is dev-mode; opt-in via explicit env
       - BEACONRY_MOCK=${BEACONRY_MOCK:-}
     volumes:

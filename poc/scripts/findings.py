@@ -29,8 +29,11 @@ STATUS_RANK = {s: i for i, s in enumerate(STATUS_ORDER)}
 
 # (dict-key, header, max_width). Order defines column order.
 # `tier` is queried for sort but not displayed — severity carries the same signal
-# for operators and the row budget is already at 110 chars.
+# for operators and the row budget is already at 110 chars. BC-020 added `kev`
+# as a visible 3-char column (✓/—) because the Tier 0 differentiation is the
+# whole product value; operators scanning the table must see it at a glance.
 COLUMNS: list[tuple[str, str, int]] = [
+    ("kev", "KEV", 3),
     ("cve_id", "CVE", 20),
     ("severity", "Severity", 10),
     ("cvss", "CVSS", 5),
@@ -50,8 +53,11 @@ def _truncate(value: str, width: int) -> str:
     return value[: width - 1] + "…"
 
 
-def _format_cell(raw: object, width: int) -> str:
-    if isinstance(raw, float):
+def _format_cell(raw: object, width: int, *, is_kev: bool = False) -> str:
+    if is_kev:
+        # kev column: SQLite stores 0/1 ints; render as ✓ / — for scanability.
+        text = "✓" if raw else "—"
+    elif isinstance(raw, float):
         text = f"{raw:.1f}"
     elif raw is None:
         text = ""
@@ -66,7 +72,7 @@ def format_table(rows: list[dict]) -> str:
     separator = "  ".join("-" * w for _, _, w in COLUMNS)
     body_lines = []
     for row in rows:
-        cells = [_format_cell(row.get(key), w) for key, _, w in COLUMNS]
+        cells = [_format_cell(row.get(key), w, is_kev=(key == "kev")) for key, _, w in COLUMNS]
         body_lines.append("  ".join(cells))
     return "\n".join([header, separator, *body_lines])
 
@@ -77,18 +83,24 @@ def load_findings(db_path: Path, status: str | None = None) -> list[dict]:
     display_columns = [key for key, _, _ in COLUMNS]
     con = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
     try:
-        # Degrade gracefully for DBs that predate the tier column — findings.py
-        # is pure-read, so it can't migrate; it just drops the tier from the
-        # sort key when the column is absent.
+        # Degrade gracefully for pre-BC-011/BC-020 DBs — findings.py is pure-read,
+        # so it drops absent columns from the SELECT and defaults them to None.
         schema_cols = {row[1] for row in con.execute("PRAGMA table_info(findings)")}
+        present_display = [c for c in display_columns if c in schema_cols]
+        missing_display = [c for c in display_columns if c not in schema_cols]
         extra_cols = [c for c in SORT_ONLY_COLUMNS if c in schema_cols]
-        all_columns = [*display_columns, *extra_cols]
-        sql = f"SELECT {', '.join(all_columns)} FROM findings"
+        selected = [*present_display, *extra_cols]
+        sql = f"SELECT {', '.join(selected)} FROM findings"
         params: tuple[str, ...] = ()
         if status:
             sql += " WHERE status = ?"
             params = (status,)
-        rows = [dict(zip(all_columns, r, strict=True)) for r in con.execute(sql, params).fetchall()]
+        rows = []
+        for r in con.execute(sql, params).fetchall():
+            row = dict(zip(selected, r, strict=True))
+            for mc in missing_display:
+                row[mc] = None
+            rows.append(row)
     finally:
         con.close()
     rows.sort(
@@ -168,7 +180,8 @@ status = ##STATUS_FILTER##
 con = sqlite3.connect(f'file:{db}?mode=ro', uri=True)
 cols = {r[1] for r in con.execute('PRAGMA table_info(findings)')}
 tier_sort = ', tier' if 'tier' in cols else ''
-sql = f'SELECT cve_id,severity,cvss,host,source_ref,package,status{tier_sort} FROM findings'
+kev_col = ', kev' if 'kev' in cols else ''
+sql = f'SELECT cve_id,severity,cvss,host,source_ref,package,status{tier_sort}{kev_col} FROM findings'
 if status:
     sql += ' WHERE status=?'
     rows = con.execute(sql, (status,)).fetchall()
@@ -177,17 +190,22 @@ else:
 if not rows:
     msg = f'No findings' + (f\" with status='{status}'\" if status else '') + f' in {db}.'
     print(msg); sys.exit(0)
-# sort: (status_rank, tier if present else 99, -cvss)
-rows = sorted(rows, key=lambda r: (STATUS_RANK.get(r[6], 99), r[7] if tier_sort and len(r) > 7 else 99, -(r[2] or 0.0)))
-widths = [20, 10, 5, 14, 22, 18, 19]
-headers = ['CVE', 'Severity', 'CVSS', 'Host', 'Target', 'Package', 'Status']
-def fmt(v, w):
-    s = f'{v:.1f}' if isinstance(v, float) else ('' if v is None else str(v))
+# positional indexes: [cve,sev,cvss,host,target,pkg,status,(tier?),(kev?)]
+tier_idx = 7 if tier_sort else None
+kev_idx = (7 + bool(tier_sort)) if kev_col else None
+rows = sorted(rows, key=lambda r: (STATUS_RANK.get(r[6], 99), r[tier_idx] if tier_idx and len(r) > tier_idx else 99, -(r[2] or 0.0)))
+widths = [3, 20, 10, 5, 14, 22, 18, 19]
+headers = ['KEV', 'CVE', 'Severity', 'CVSS', 'Host', 'Target', 'Package', 'Status']
+def fmt(v, w, kev=False):
+    if kev: s = '✓' if v else '—'
+    else:   s = f'{v:.1f}' if isinstance(v, float) else ('' if v is None else str(v))
     return (s[:w-1] + '…' if len(s) > w else s).ljust(w)
 print('  '.join(h.ljust(w) for h,w in zip(headers, widths)))
 print('  '.join('-'*w for w in widths))
 for r in rows:
-    print('  '.join(fmt(r[i], widths[i]) for i in range(7)))
+    kev_val = r[kev_idx] if kev_idx is not None and len(r) > kev_idx else None
+    display = [kev_val, r[0], r[1], r[2], r[3], r[4], r[5], r[6]]
+    print('  '.join(fmt(display[i], widths[i], kev=(i==0)) for i in range(8)))
 """
 
 
