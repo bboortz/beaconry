@@ -12,7 +12,6 @@ import json
 import logging
 import os
 import re
-import shutil
 import sqlite3
 import tempfile
 import time
@@ -23,9 +22,17 @@ import uvicorn
 from executor.base import ExecutorPlugin, Finding
 from executor.docker_adapter import DockerAdapter
 from executor.manual_adapter import ManualAdapter
-from fastapi import FastAPI, Response
+from fastapi import FastAPI
+from fastapi import Response as _FastAPIResponse
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import Application, CallbackQueryHandler, ContextTypes
+
+try:
+    # Container path: beaconry_health COPY'd next to hub.py on /app
+    from beaconry_health import build_router, check_binary, check_db, check_dir_populated
+except ImportError:
+    # Host test path: imported as poc.hub.hub, package at poc.beaconry_health
+    from poc.beaconry_health import build_router, check_binary, check_db, check_dir_populated
 
 logging.basicConfig(
     level=logging.INFO,
@@ -526,99 +533,33 @@ async def lifespan(app: FastAPI):
 api = FastAPI(title="Beaconry Hub", version="0.1.0", lifespan=lifespan)
 
 
-def _check_db() -> str:
-    """BC-010 /readyz probe — DB file writable. Does NOT read; a dead row shouldn't matter."""
-    try:
-        con = sqlite3.connect(DB_PATH)
-        con.execute("SELECT 1").fetchone()
-        con.close()
-        return "ok"
-    except (sqlite3.Error, OSError):
-        return "unavailable"
+def _grype_db_dir() -> Path:
+    return Path(os.environ.get("GRYPE_DB_CACHE_DIR", "/data/grype-db"))
 
 
-def _check_grype_binary() -> str:
-    return "ok" if shutil.which("grype") else "missing"
-
-
-def _check_grype_db() -> str:
-    """grype DB dir exists and is non-empty."""
-    cache = Path(os.environ.get("GRYPE_DB_CACHE_DIR", "/data/grype-db"))
-    if not cache.exists():
-        return "missing"
-    try:
-        return "ok" if any(cache.iterdir()) else "empty"
-    except OSError:
-        return "unavailable"
-
-
-def _check_telegram() -> str:
+def _telegram_check() -> str:
     if MOCK:
         return "mock"
     return "polling" if tg_app is not None else "not_running"
 
 
-def _collect_checks() -> dict:
+def _hub_readyz_providers() -> dict[str, str]:
+    """Local prereq probes — must NOT include external services (restart-loop trap)."""
     return {
-        "db": _check_db(),
-        "grype_db": _check_grype_db(),
-        "grype_binary": _check_grype_binary(),
-        "telegram": _check_telegram(),
+        "db": check_db(DB_PATH),
+        "grype_db": check_dir_populated(_grype_db_dir()),
+        "grype_binary": check_binary("grype"),
+    }
+
+
+def _hub_healthz_summary() -> dict:
+    checks = {
+        **_hub_readyz_providers(),
+        "telegram": _telegram_check(),
         "last_scan_ts": _last_scan_ts,
     }
-
-
-@api.get("/livez")
-async def livez() -> dict:
-    """Liveness: process alive and the event loop responds. NO external deps.
-
-    If a dead DB or Telegram token failed /livez, Docker would restart the
-    container in a loop (restart would not fix those failures). See
-    `memory/health-checks.md § The restart-loop trap`.
-    """
-    return {"status": "alive"}
-
-
-@api.get("/readyz")
-async def readyz(response: Response) -> dict:
-    """Readiness: local prereqs satisfied — ready to accept a /scan POST.
-
-    Checks DB writable, grype binary present, grype DB file populated.
-    Does NOT check Telegram (that's a notify-degradation, visible in
-    /healthz; failing /readyz on it would restart-loop).
-    """
-    checks = {
-        "db": _check_db(),
-        "grype_db": _check_grype_db(),
-        "grype_binary": _check_grype_binary(),
-    }
-    failed = [k for k, v in checks.items() if v not in ("ok", "mock")]
-    if failed:
-        response.status_code = 503
-        return {"status": "not_ready", "failed": failed, "checks": checks}
-    return {"status": "ready", "checks": checks}
-
-
-@api.get("/startupz")
-async def startupz(response: Response) -> dict:
-    """First-run gate — only 200 once lifespan has finished grype DB update."""
-    if not _startup_complete:
-        response.status_code = 503
-        return {"status": "starting"}
-    return {"status": "started"}
-
-
-@api.get("/healthz")
-async def healthz() -> dict:
-    """Operator-facing summary. Side-effect free. Always 200.
-
-    Returns {status: ok|degraded, version, checks: {...}} — degradation
-    surfaces here even for failures that must NOT fail /livez or /readyz
-    (e.g. Telegram token revoked).
-    """
-    checks = _collect_checks()
-    boolean_check_values = [v for k, v in checks.items() if k != "last_scan_ts"]
-    degraded = any(v not in ("ok", "polling", "mock") for v in boolean_check_values)
+    bool_checks = [v for k, v in checks.items() if k != "last_scan_ts"]
+    degraded = any(v not in ("ok", "polling", "mock") for v in bool_checks)
     return {
         "status": "degraded" if degraded else "ok",
         "version": HUB_VERSION,
@@ -626,12 +567,27 @@ async def healthz() -> dict:
     }
 
 
+api.include_router(
+    build_router(
+        livez_provider=lambda: "alive",
+        readyz_providers=_hub_readyz_providers,
+        startup_flag_getter=lambda: _startup_complete,
+        healthz_summary_getter=_hub_healthz_summary,
+    )
+)
+
+
 @api.get("/health")
-async def health(response: Response) -> dict:
+async def health(response: _FastAPIResponse) -> dict:
     """Legacy alias — kept as a transitional compat endpoint for pre-BC-010
-    monitors. Behavior now mirrors /readyz instead of returning blind 200.
+    monitors. Delegates to the same readyz logic via the shared provider.
     """
-    return await readyz(response)
+    checks = _hub_readyz_providers()
+    failed = [k for k, v in checks.items() if v != "ok"]
+    if failed:
+        response.status_code = 503
+        return {"status": "not_ready"}
+    return {"status": "ready"}
 
 
 def dedup_and_cap(findings: list[Finding], cap: int) -> tuple[list[Finding], list[Finding]]:

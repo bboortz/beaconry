@@ -63,11 +63,11 @@ HTTP preferred for anything with an existing HTTP server; file-sentinel acceptab
 
 ## Checklist — adding a new beaconry container
 
-Before PR'ing a new service:
+Before PR'ing a new service (BC-012 made step 1 the smallest work and gate-protected):
 
-- [ ] Four endpoints wired (or file-sentinel equivalents).
-- [ ] `/livez` touches no external deps — proved by a unit test that mocks the DB open to `OSError` and asserts `/livez` still returns 200.
-- [ ] Compose service has a healthcheck pointed at `/readyz` using the template above.
+- [ ] **`COPY beaconry_health/ ./beaconry_health/`** in your Dockerfile. The lint (`make check` → `verify-dockerfile-health-copy`) fails if you forget this and your service `import`s from the package.
+- [ ] Instantiate / configure, don't reimplement: hub-shaped service → `api.include_router(build_router(my_livez, my_readyz_providers, my_startup_flag_getter, my_healthz_summary))`. Loop-only service → `writer = SentinelWriter(DATA_DIR); writer.live()` etc. The restart-loop trap is enforced by `build_router`'s types — passing a dep-checking probe to the `/livez` slot is a pyright error.
+- [ ] Compose service has a healthcheck pointed at `/readyz` (HTTP) or the sentinel-file test (loop services).
 - [ ] Any service that depends on this one declares `condition: service_healthy`.
 - [ ] `make status` includes the new service in its one-line summary.
 - [ ] The new container's Dockerfile ships whatever its healthcheck script needs (python / curl / shell — see `memory/docker-standard.md`).

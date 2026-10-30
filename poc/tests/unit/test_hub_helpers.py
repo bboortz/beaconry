@@ -24,6 +24,7 @@ from __future__ import annotations
 import hub
 import pytest
 
+from poc.beaconry_health import checks as _bh_checks
 from poc.hub.executor.base import Finding
 
 
@@ -540,7 +541,7 @@ def test_health_endpoint_returns_ok(monkeypatch: pytest.MonkeyPatch, tmp_path: o
     (grype_dir / "vulnerability.db").write_text("x")
     monkeypatch.setenv("GRYPE_DB_CACHE_DIR", str(grype_dir))
     monkeypatch.setattr(hub, "_startup_complete", True, raising=False)
-    monkeypatch.setattr(hub.shutil, "which", lambda _cmd: "/usr/local/bin/grype")
+    monkeypatch.setattr(_bh_checks, "_which", lambda _cmd: "/usr/local/bin/grype")
 
     client = TestClient(hub.api)
     response = client.get("/health")

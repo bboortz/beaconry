@@ -7,8 +7,10 @@ RUN curl -sSfL https://raw.githubusercontent.com/anchore/syft/main/install.sh \
     | sh -s -- -b /usr/local/bin
 
 WORKDIR /app
-COPY requirements.txt .
+COPY scout/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
-COPY scout.py health.py ./
+COPY scout/scout.py ./
+# BC-012: shared health-check package — every container COPYs this.
+COPY beaconry_health/ ./beaconry_health/
 
 CMD ["python3", "-u", "scout.py"]

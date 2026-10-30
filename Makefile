@@ -1,4 +1,4 @@
-.PHONY: help lint format type test check check-full demo smoke clean install-hooks verify-traceability findings status
+.PHONY: help lint format type test check check-full demo smoke clean install-hooks verify-traceability verify-dockerfile-health-copy findings status
 
 PYTHON ?= python3
 PYTEST_ARGS ?=
@@ -39,7 +39,10 @@ test:
 verify-traceability:
 	$(PYTHON) -m poc.scripts.verify_traceability
 
-check: lint type test verify-traceability smoke
+verify-dockerfile-health-copy:
+	$(PYTHON) -m poc.scripts.verify_dockerfile_health_copy
+
+check: lint type test verify-traceability verify-dockerfile-health-copy smoke
 	@echo ""
 	@echo "✓ Fast tier (make check) passed"
 

@@ -143,6 +143,15 @@ Enforcement: `poc/scripts/verify_traceability.py` runs as part of `make check`. 
 - **verified by:**
   - `poc/tests/unit/test_status_cli.py`
 
+### CAP-B016: Developer adds a new beaconry container's health surface in <10 lines
+- **type:** business
+- **status:** active
+- **origin:** BC-012
+- **design:** memory/health-checks.md
+- **description:** The four-endpoint convention from BC-010 is now a dependency, not a reimplementation. New containers run `COPY beaconry_health/ ./beaconry_health/` in their Dockerfile and `api.include_router(build_router(my_checks))` in code — the Dockerfile lint rule catches forgotten COPY at merge time. Dropping the barrier to adding a container means BC-011's target-probe worker and future adapters (ansible, nix, k8s) can land without ~120 LOC of reinvented endpoint wiring.
+- **verified by:**
+  - `poc/tests/integration/test_BC_012_dockerfile_copy_lint.py`
+
 ### CAP-B006: Operator has a clear development process to contribute
 - **type:** business
 - **status:** active
@@ -525,6 +534,38 @@ Enforcement: `poc/scripts/verify_traceability.py` runs as part of `make check`. 
 - **supports:** CAP-B015
 - **verified by:**
   - `poc/tests/unit/test_status_cli.py`
+
+### CAP-T040: Shared `beaconry_health/` package provides FastAPI router factory, sentinel writer, and reusable probes
+- **type:** technical
+- **status:** active
+- **origin:** BC-012
+- **design:** memory/health-checks.md
+- **description:** `poc/beaconry_health/` ships four modules: `endpoints.py` (`build_router(livez_provider, readyz_providers, startup_flag_getter, healthz_summary_getter) -> APIRouter`), `sentinels.py` (`SentinelWriter` class for loop-only services), `checks.py` (reusable probes `check_db`, `check_binary`, `check_dir_populated`), and `trap.py` (typed `LivezProvider` / `ReadyzProvider` aliases). Hub consumes `build_router` directly; scout consumes `SentinelWriter`. All BC-010 behavior preserved — `test_hub_health.py` and `test_scout_health.py` pass unchanged after the migration (behavior-preservation evidence).
+- **supports:** CAP-B016, CAP-T035, CAP-T036
+- **verified by:**
+  - `poc/tests/unit/test_beaconry_health_endpoints.py`
+  - `poc/tests/unit/test_beaconry_health_sentinels.py`
+  - `poc/tests/unit/test_beaconry_health_checks.py`
+
+### CAP-T041: Typed `LivezProvider` / `ReadyzProvider` interfaces make the restart-loop trap a type error
+- **type:** technical
+- **status:** active
+- **origin:** BC-012
+- **design:** memory/health-checks.md § The restart-loop trap (do not step in it)
+- **description:** `beaconry_health.trap` defines `LivezProvider = Callable[[], Literal["alive"]]` and `ReadyzProvider = Callable[[], dict[str, str]]` — incompatible return types. `build_router` accepts them as keyword-only typed arguments. A caller who wires a readyz-shaped provider to the `/livez` slot (reopening the restart-loop trap) gets a pyright error at import time; the trap is syntactically unreachable, not just "documented but trusted". Runtime shadow test asserts the aliases don't collapse to the same object — catches the degenerate refactor where someone unifies them.
+- **supports:** CAP-T038, CAP-T040
+- **verified by:**
+  - `poc/tests/unit/test_beaconry_health_trap.py`
+
+### CAP-T042: Dockerfile lint catches forgotten `COPY beaconry_health/` at merge time
+- **type:** technical
+- **status:** active
+- **origin:** BC-012
+- **design:** memory/health-checks.md § Checklist — adding a new beaconry container
+- **description:** `poc/scripts/verify_dockerfile_health_copy.py` walks each service directory under `poc/`, detects whether any `.py` file imports from `beaconry_health`, and asserts the matching Dockerfile has a `COPY beaconry_health/` line. Reported via a named error pointing at the Dockerfile and suggesting the fix. Hooked into `make check` so forgetting the COPY fails the gate before merge rather than failing `docker compose up` at operator-launch time (which would be hard to diagnose from an ImportError traceback).
+- **supports:** CAP-B016, CAP-B011
+- **verified by:**
+  - `poc/tests/integration/test_BC_012_dockerfile_copy_lint.py`
 
 ### CAP-T017: Orphan tests fail the gate with a copy-pasteable template
 - **type:** technical

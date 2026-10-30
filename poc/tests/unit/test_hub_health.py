@@ -18,6 +18,8 @@ import hub
 import pytest
 from fastapi.testclient import TestClient
 
+from poc.beaconry_health import checks as _bh_checks
+
 
 @pytest.fixture
 def client() -> TestClient:
@@ -62,7 +64,7 @@ def test_readyz_returns_200_when_all_prereqs_ok(
     (grype_dir / "vulnerability.db").write_text("x")
     monkeypatch.setenv("GRYPE_DB_CACHE_DIR", str(grype_dir))
     monkeypatch.setattr(hub, "_startup_complete", True, raising=False)
-    monkeypatch.setattr(hub.shutil, "which", lambda _cmd: "/usr/local/bin/grype")
+    monkeypatch.setattr(_bh_checks, "_which", lambda _cmd: "/usr/local/bin/grype")
 
     r = client.get("/readyz")
     assert r.status_code == 200
@@ -74,7 +76,7 @@ def test_readyz_503_when_grype_db_missing(
     """/readyz must 503 when grype DB directory is missing or empty — body names the check."""
     monkeypatch.setenv("GRYPE_DB_CACHE_DIR", str(tmp_path / "nope"))
     monkeypatch.setattr(hub, "_startup_complete", True, raising=False)
-    monkeypatch.setattr(hub.shutil, "which", lambda _cmd: "/usr/local/bin/grype")
+    monkeypatch.setattr(_bh_checks, "_which", lambda _cmd: "/usr/local/bin/grype")
 
     r = client.get("/readyz")
     assert r.status_code == 503
@@ -90,7 +92,7 @@ def test_readyz_503_when_grype_binary_missing(
     (grype_dir / "vulnerability.db").write_text("x")
     monkeypatch.setenv("GRYPE_DB_CACHE_DIR", str(grype_dir))
     monkeypatch.setattr(hub, "_startup_complete", True, raising=False)
-    monkeypatch.setattr(hub.shutil, "which", lambda _cmd: None)
+    monkeypatch.setattr(_bh_checks, "_which", lambda _cmd: None)
 
     r = client.get("/readyz")
     assert r.status_code == 503
@@ -127,7 +129,7 @@ def test_healthz_json_shape(
     (grype_dir / "vulnerability.db").write_text("x")
     monkeypatch.setenv("GRYPE_DB_CACHE_DIR", str(grype_dir))
     monkeypatch.setattr(hub, "_startup_complete", True, raising=False)
-    monkeypatch.setattr(hub.shutil, "which", lambda _cmd: "/usr/local/bin/grype")
+    monkeypatch.setattr(_bh_checks, "_which", lambda _cmd: "/usr/local/bin/grype")
 
     r = client.get("/healthz")
     assert r.status_code == 200
@@ -152,7 +154,7 @@ def test_healthz_surfaces_telegram_degradation_without_503(
     monkeypatch.setattr(hub, "_startup_complete", True, raising=False)
     monkeypatch.setattr(hub, "MOCK", False, raising=False)
     monkeypatch.setattr(hub, "tg_app", None, raising=False)
-    monkeypatch.setattr(hub.shutil, "which", lambda _cmd: "/usr/local/bin/grype")
+    monkeypatch.setattr(_bh_checks, "_which", lambda _cmd: "/usr/local/bin/grype")
 
     r = client.get("/healthz")
     assert r.status_code == 200
@@ -169,7 +171,7 @@ def test_healthz_last_scan_ts_tracks_receive_scan(
     (grype_dir / "vulnerability.db").write_text("x")
     monkeypatch.setenv("GRYPE_DB_CACHE_DIR", str(grype_dir))
     monkeypatch.setattr(hub, "_startup_complete", True, raising=False)
-    monkeypatch.setattr(hub.shutil, "which", lambda _cmd: "/usr/local/bin/grype")
+    monkeypatch.setattr(_bh_checks, "_which", lambda _cmd: "/usr/local/bin/grype")
     monkeypatch.setattr(hub, "_last_scan_ts", 1_700_000_000, raising=False)
 
     r = client.get("/healthz")
@@ -189,7 +191,7 @@ def test_health_still_200_as_compat_alias(
     (grype_dir / "vulnerability.db").write_text("x")
     monkeypatch.setenv("GRYPE_DB_CACHE_DIR", str(grype_dir))
     monkeypatch.setattr(hub, "_startup_complete", True, raising=False)
-    monkeypatch.setattr(hub.shutil, "which", lambda _cmd: "/usr/local/bin/grype")
+    monkeypatch.setattr(_bh_checks, "_which", lambda _cmd: "/usr/local/bin/grype")
 
     r = client.get("/health")
     assert r.status_code == 200

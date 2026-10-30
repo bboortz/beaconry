@@ -132,9 +132,19 @@ def test_hub_image_bundles_docker_cli() -> None:
     the original miss; this test guards against regression if the Dockerfile is refactored.
     """
     project_root = Path(__file__).resolve().parents[3]
-    hub_context = project_root / "poc" / "hub"
+    # BC-012: build context widened to poc/ so hub Dockerfile can COPY beaconry_health/.
+    hub_context = project_root / "poc"
     build = subprocess.run(
-        ["docker", "build", "-q", "-t", "beaconry-hub:ci-test", str(hub_context)],
+        [
+            "docker",
+            "build",
+            "-q",
+            "-t",
+            "beaconry-hub:ci-test",
+            "-f",
+            str(hub_context / "hub" / "Dockerfile"),
+            str(hub_context),
+        ],
         capture_output=True,
         check=False,
         timeout=600,

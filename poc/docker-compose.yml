@@ -1,7 +1,9 @@
 ---
 services:
   hub:
-    build: ./hub
+    build:
+      context: ./
+      dockerfile: hub/Dockerfile
     image: beaconry-hub:latest
     container_name: beaconry-hub
     restart: unless-stopped
@@ -30,7 +32,9 @@ services:
         max-file: "3"
 
   scout:
-    build: ./scout
+    build:
+      context: ./
+      dockerfile: scout/Dockerfile
     image: beaconry-scout:latest
     container_name: beaconry-scout
     restart: unless-stopped

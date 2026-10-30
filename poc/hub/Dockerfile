@@ -18,9 +18,11 @@ RUN curl -fsSL "https://download.docker.com/linux/static/stable/x86_64/docker-${
     docker --version
 
 WORKDIR /app
-COPY requirements.txt .
+COPY hub/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
-COPY hub.py .
-COPY executor/ executor/
+COPY hub/hub.py .
+COPY hub/executor/ executor/
+# BC-012: shared health-check package — every container COPYs this.
+COPY beaconry_health/ ./beaconry_health/
 
 CMD ["python3", "-u", "hub.py"]
