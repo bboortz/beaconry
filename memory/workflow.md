@@ -96,16 +96,19 @@ Lifecycle: `draft → ready → in-progress → shipped` (stored in frontmatter 
 
 ## Blocking gates (must pass to merge to `dev`)
 
-| Gate | Tool | Where |
-|------|------|-------|
-| Lint | `ruff check` | pre-commit (staged) + CI (full) |
-| Format | `ruff format --check` | pre-commit (staged) + CI (full) |
-| Type check | `pyright` (basic / default) | pre-commit (staged) + CI (full) |
-| Tests | `pytest` | **pre-push** + CI |
-| Coverage | `pytest --cov`, threshold ≥ 60% | CI |
-| Traceability | `make verify-traceability` | CI (part of make check) |
-| Docker build | `docker compose build` | CI |
-| Smoke test | `bash demo.sh --smoke` | CI |
+Two tiers (BC-006). Fast tier (`make check`) runs pre-push + the merge gate; full tier (`make check-full`) runs before pushing a feat/fix branch and in CI.
+
+| Gate | Tool | Tier | Where |
+|------|------|------|-------|
+| Lint | `ruff check` | fast | pre-commit (staged) + `make check` |
+| Format | `ruff format --check` | fast | pre-commit (staged) + `make check` |
+| Type check | `pyright` (basic / default) | fast | pre-commit (staged) + `make check` |
+| Tests | `pytest` | fast | **pre-push** + `make check` |
+| Coverage | `pytest --cov`, threshold ≥ 60% | fast | `make check` |
+| Traceability | `make verify-traceability` | fast | `make check` + pre-push |
+| Smoke | `make smoke` (mocked pipeline) | fast | `make check` |
+| Compose integration | `pytest -m compose` | full | `make check-full` |
+| Real-tools integration | `pytest -m real_tools` | full | `make check-full` |
 
 No advisory gates in the POC — if a check isn't worth blocking, it isn't worth running.
 

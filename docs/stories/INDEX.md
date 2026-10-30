@@ -10,5 +10,6 @@ One-line status board for operator scenarios. Full stories in `BC-NNN-<slug>.md`
 | BC-003 | Live-verified Telegram button handling | draft       | — (not yet branched)                |
 | BC-004 | Capabilities docs + test traceability  | shipped     | — (merged to dev)                   |
 | BC-005 | Multi-image Compose demo               | shipped     | — (merged to dev)                   |
+| BC-006 | Tighten the shipping gate (tiers)      | shipped     | — (merged to dev)                   |
 
 Lifecycle: `draft → ready → in-progress → shipped`. Status matches each story's frontmatter.

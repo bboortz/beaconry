@@ -80,6 +80,15 @@ Enforcement: `poc/scripts/verify_traceability.py` runs as part of `make check`. 
 - **verified by:**
   - `poc/tests/unit/test_scout_filter.py`
 
+### CAP-B011: Operator trusts the gate — green `make check` means "smoke-ready"
+- **type:** business
+- **status:** active
+- **origin:** BC-006
+- **design:** memory/workflow.md § Blocking gates (must pass to merge to `dev`)
+- **description:** Two documented tiers: `make check` (fast, ~7s, pre-push + merge-ready) runs lint + type + test + verify-traceability + smoke. `make check-full` (full, ~1–2m, pre-merge sanity + what CI will run) adds opt-in integration tests (compose + real_tools markers). Documented in README, CLAUDE.md, memory/workflow.md so operators know what each tier catches.
+- **verified by:**
+  - `poc/tests/integration/test_BC_006_gate_tiers.py`
+
 ### CAP-B006: Operator has a clear development process to contribute
 - **type:** business
 - **status:** active
@@ -281,6 +290,26 @@ Enforcement: `poc/scripts/verify_traceability.py` runs as part of `make check`. 
 - **supports:** CAP-B002, CAP-B009
 - **verified by:**
   - `poc/tests/unit/test_hub_helpers.py`
+
+### CAP-T023: `make check` includes smoke
+- **type:** technical
+- **status:** active
+- **origin:** BC-006
+- **design:** memory/workflow.md § Blocking gates (must pass to merge to `dev`)
+- **description:** The fast-tier `check` target declares `smoke` as a dependency. If `make smoke` (the mocked BC-001 pipeline) is broken, `make check` fails — closing the loophole that let BC-005's smoke regression ship.
+- **supports:** CAP-B011
+- **verified by:**
+  - `poc/tests/integration/test_BC_006_gate_tiers.py`
+
+### CAP-T024: `make check-full` includes opt-in markers
+- **type:** technical
+- **status:** active
+- **origin:** BC-006
+- **design:** memory/workflow.md § Blocking gates (must pass to merge to `dev`)
+- **description:** The full-tier `check-full` target depends on `check`, then invokes `pytest -m "compose or real_tools"`. The default pytest addopts exclude both markers, so `check` doesn't run them; `check-full` explicitly selects them. Operators without docker get `compose`-marked tests skipped (not failed); operators without syft/grype get `real_tools`-marked tests skipped.
+- **supports:** CAP-B011
+- **verified by:**
+  - `poc/tests/integration/test_BC_006_gate_tiers.py`
 
 ### CAP-T022: Fix/feat branches without a plan doc fail the gate
 - **type:** technical

@@ -23,16 +23,19 @@ make install-hooks   # pre-commit + pre-push
 make check           # lint + type + test
 ```
 
-`make check` is the authoritative local gate — same checks CI runs.
+`make check` is the authoritative local gate — same checks CI runs. Two tiers:
 
-| Target | Runs |
-|--------|------|
-| `make lint`   | `ruff check` + `ruff format --check` |
-| `make format` | `ruff format` + `ruff check --fix` |
-| `make type`   | `pyright` (basic mode) |
-| `make test`   | `pytest` with coverage |
-| `make check`  | lint + type + test (the merge gate) |
-| `make smoke`  | end-to-end pipeline smoke test |
+| Gate | Tier | Runs | Cost | When |
+|------|------|------|------|------|
+| `make lint`   | — | `ruff check` + `ruff format --check` | <2s | pre-commit |
+| `make type`   | — | `pyright` (basic mode) | ~1s | pre-commit |
+| `make test`   | — | `pytest` with coverage | ~3s | pre-push + make check |
+| `make verify-traceability` | — | CAPABILITIES.md ↔ tests + plan-doc enforcement | <1s | make check |
+| `make smoke`  | — | end-to-end pipeline (mocked) | ~2s | make check |
+| **`make check`** | **fast** | lint + type + test + verify-traceability + smoke | **~7s** | **pre-push + merge gate** |
+| **`make check-full`** | **full** | `make check` + `pytest -m "compose or real_tools"` | **~1–2m** | **pre-merge sanity + CI** |
+
+Fast tier runs every commit cycle; full tier runs before pushing a feat/fix branch for review (and CI, when it exists). Full-tier opt-in markers skip gracefully when their prerequisites (docker compose, syft+grype) aren't available.
 
 ---
 

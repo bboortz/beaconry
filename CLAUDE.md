@@ -78,7 +78,7 @@ Design-Driven, Test-Guarded Development. Per feature:
 4. Implementation to turn test green
 5. Refactor + unit tests for non-trivial helpers (every test file needs a `Covers:` block)
 5a. **Register capabilities** — add or extend entries in `docs/CAPABILITIES.md`; ensure bidirectional links. `make verify-traceability` must pass.
-6. `make check` passes (lint, type, test, coverage ≥ 60%, verify-traceability, docker build, smoke)
+6. **Fast tier** `make check` passes (lint, type, test, coverage ≥ 60%, verify-traceability, smoke). Before pushing or opening a PR, run **full tier** `make check-full` (adds opt-in `compose` + `real_tools` markers).
 7. DESIGN.md updated only if architecture changed
 8. PR to `dev` → user runs `/ultrareview` → Claude runs `/code-review` → user merges
 
