@@ -39,8 +39,8 @@ Operator sets minimum required level per service. No health check above Level 3 
 
 **Auto-rollback**: if health check fails after fix:
 - Package: downgrade to previous version
-- Container: `docker tag <name>:rollback <name>:latest && docker compose up -d`
-  (`:rollback` tag is snapped before every rebuild as a mandatory pre-step)
+- Container: `docker tag <base>:rollback <source_ref> && docker compose up -d`
+  (`:rollback` tag is snapped before every rebuild as a mandatory pre-step; the restore target is the same source tag the operator runs, per BC-014's same-track rule)
 
 ## Multi-host canary ring
 
@@ -72,7 +72,7 @@ Estimated downtime: ~Xs
 Scout is **read-only forever**. It generates SBOMs via syft, posts to hub. It never executes fixes.
 
 Execution is a **pluggable adapter** in the hub:
-- `DockerAdapter` — `docker pull :latest && docker compose up -d`
+- `DockerAdapter` — `docker pull <source_ref>` (same-track per BC-014; preserves `postgres:16-alpine`, `nginx:alpine`, etc. — operator restarts the container themselves)
 - `ManualAdapter` — shows the command, marks as manual action required
 - Future: `AnsibleAdapter`, `NixAdapter`, `WebhookAdapter`
 
@@ -108,7 +108,7 @@ Vendor-specific advisories pulled aggressively: Arch Linux Security Tracker, Deb
 
 ## Demo / POC trigger
 
-Pull `nginx:1.24` (known CVEs in base image packages). Scout scans it → hub finds CVE → Telegram [Fix now] → DockerAdapter pulls `nginx:latest` → re-scan confirms clean.
+Pull `nginx:1.24` (known CVEs in base image packages). Scout scans it → hub finds CVE → Telegram [Fix now] → DockerAdapter pulls `nginx:1.24` (same-track per BC-014; upstream re-releases the fluid tag → re-scan confirms clean).
 
 ## OSS release criterion
 
