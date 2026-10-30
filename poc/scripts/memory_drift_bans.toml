@@ -29,6 +29,17 @@ exception_regex = [
   "pre-BC-014",
 ]
 
+# ── BC-018: telegram-mock supersedes BC-017's /__test__/* endpoints ─────────
+[[ban]]
+pattern = "BEACONRY_TEST_MODE|__test__"
+banned_since = "BC-018"
+reason = "BC-017's /__test__/* endpoints and BEACONRY_TEST_MODE guard are gone (BC-018). e2e now drives via the separate telegram-mock service. Don't describe hub.py as having test-only endpoints."
+exception_regex = [
+  "superseded",
+  "pre-BC-018",
+  "BC-017.*deprecated",
+]
+
 # ── BC-011: Post-fix service health probe (shipped) ────────────────────────
 [[ban]]
 pattern = "verify_fix[^.\\n]*only[^.\\n]*CVE"

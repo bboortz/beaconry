@@ -694,13 +694,33 @@ Enforcement: `poc/scripts/verify_traceability.py` runs as part of `make check`. 
 - **verified by:**
   - `poc/tests/unit/test_docs_drift_guard.py`
 
-### CAP-T054: Automated end-to-end BC-011 probe flow via `make test-e2e` (no Telegram)
+### CAP-T054: BC-017's test-mode `/__test__/*` endpoints (DEPRECATED, superseded by CAP-T055 in BC-018)
+- **type:** technical
+- **status:** deprecated
+- **origin:** BC-017; superseded by CAP-T055 in BC-018
+- **design:** memory/workflow.md § Blocking gates (must pass to merge to `dev`)
+- **description:** Historical: BC-017 shipped `/__test__/*` endpoints inside hub.py behind a `BEACONRY_TEST_MODE=1` env guard. Audit flagged shipped surface area + misconfig risk. BC-018 replaced this with the telegram-mock service (CAP-T055); hub.py no longer contains the `/__test__/*` block or `BEACONRY_TEST_MODE` env var. Kept here for traceability; no code references.
+- **supports:** (none — superseded)
+- **verified by:**
+  - (none — code deleted; retained as historical marker)
+
+### CAP-T055: telegram-mock service — Telegram Bot API shim + test-driver endpoints
 - **type:** technical
 - **status:** active
-- **origin:** BC-017
-- **design:** memory/workflow.md § Blocking gates (must pass to merge to `dev`)
-- **description:** `poc/docker-compose.test.yml` under compose project name `beaconry-test` brings up `beaconry-hub-test` (bound 127.0.0.1:9000) + `probe-target-test` (nginx with `/healthy` and `/degraded` routes). Hub runs with `BEACONRY_MOCK=1` + `BEACONRY_TEST_MODE=1`; the test-mode guard mounts `/__test__/*` endpoints (`insert-finding`, `invoke-callback`, `messages`, `status/<id>`, `reset`, `all-findings`) that let `pytest -m e2e` drive the full handler chain without Telegram. Covers all 4 BC-011 terminal states, all 6 finding statuses, 5 image-tag scenarios (`:latest`, `:16-alpine`, `:16.1.3-alpine`, `/image:alpine`, `:X.Y`). `make test-e2e` orchestrates up→wait→test→down. Namespaced containers, network, and volume isolate from the operator's running stack.
+- **origin:** BC-018 (supersedes CAP-T054)
+- **design:** docs/stories/BC-018-telegram-mock.md
+- **description:** Separate `poc/telegram-mock/` service implements the subset of Telegram Bot API that python-telegram-bot calls (`/bot<token>/getMe`, `/getUpdates`, `/sendMessage`, `/editMessageText`, `/answerCallbackQuery`, `/deleteWebhook`) + three test-driver endpoints (`/__driver__/inject-callback`, `/__driver__/sent`, `/__driver__/reset`). Hub.py has ZERO test-only code; it runs its real production python-telegram-bot client against the mock (pointed via `BEACONRY_TELEGRAM_BASE_URL`). The e2e test seeds findings via `docker exec`, injects fake user taps via telegram-mock's driver, and asserts on captured outbound sendMessage/editMessageText calls. Covers all 4 BC-011 terminal states, all 6 finding statuses, 5 image-tag scenarios. Dividend: operators can `BEACONRY_TELEGRAM_BASE_URL=http://localhost:9080 make demo` for local dev without a real Telegram bot token.
 - **supports:** CAP-B018, CAP-B011
+- **verified by:**
+  - `poc/tests/e2e/test_BC_011_probe_flow.py`
+
+### CAP-T056: Hub configurable Telegram API base URL via `BEACONRY_TELEGRAM_BASE_URL`
+- **type:** technical
+- **status:** active
+- **origin:** BC-018
+- **design:** docs/plan/BC-018-telegram-mock-plan.md
+- **description:** `poc/hub/hub.py` reads `BEACONRY_TELEGRAM_BASE_URL` at startup. When set, hub's lifespan calls `Application.builder().base_url(f"{base_url}/bot")` so python-telegram-bot talks to the configured host instead of `api.telegram.org`. Empty = real Telegram (default). Enables (a) e2e tests against telegram-mock, (b) dev-without-real-bot workflows. Also split BC-010's `BEACONRY_MOCK` into independent dials: `BEACONRY_SKIP_GRYPE_DB=1` skips the grype DB update step; Telegram wiring is driven by `TELEGRAM_BOT_TOKEN` presence. `BEACONRY_MOCK=1` kept as back-compat alias that sets `SKIP_GRYPE_DB` + leaves `TELEGRAM_BOT_TOKEN` empty.
+- **supports:** CAP-T055
 - **verified by:**
   - `poc/tests/e2e/test_BC_011_probe_flow.py`
 

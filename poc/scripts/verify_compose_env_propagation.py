@@ -32,7 +32,10 @@ BEACONRY_PREFIX = "BEACONRY_"
 # sets them explicitly (e.g. via docker-compose.test.yml).
 _TEST_MODE_ALLOWLIST: frozenset[str] = frozenset(
     {
-        "BEACONRY_TEST_MODE",  # BC-017: enables /__test__/* endpoints
+        # BC-018: optional dials used by docker-compose.test.yml + local dev.
+        # Prod docker-compose.yml intentionally doesn't propagate them.
+        "BEACONRY_SKIP_GRYPE_DB",  # BC-018: skip ~90s grype DB download in e2e
+        "BEACONRY_TELEGRAM_BASE_URL",  # BC-018: point python-telegram-bot at telegram-mock
     }
 )
 

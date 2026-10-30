@@ -22,5 +22,6 @@ One-line status board for operator scenarios. Full stories in `BC-NNN-<slug>.md`
 | BC-015 | Memory drift regression guard (growing banned-pattern list) | shipped     | — (merged to dev)                   |
 | BC-016 | Docs drift guard — make help + README stay in sync with code | shipped     | — (merged to dev)                   |
 | BC-017 | Automated end-to-end BC-011 probe flow (no Telegram) | shipped     | — (merged to dev)                   |
+| BC-018 | telegram-mock service (supersedes BC-017 test-endpoint approach) | shipped     | — (merged to dev)                   |
 
 Lifecycle: `draft → ready → in-progress → shipped`. Status matches each story's frontmatter.

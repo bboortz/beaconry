@@ -49,6 +49,14 @@ for _noisy in ("httpx", "httpcore", "telegram", "telegram.ext"):
     logging.getLogger(_noisy).setLevel(logging.WARNING)
 
 MOCK = os.environ.get("BEACONRY_MOCK") == "1"
+# BC-018: split MOCK into two independent dials so e2e stacks can run REAL
+# python-telegram-bot against telegram-mock while still skipping the heavy
+# grype DB download. MOCK=1 remains a back-compat alias (sets both).
+SKIP_GRYPE_DB = os.environ.get("BEACONRY_SKIP_GRYPE_DB") == "1" or MOCK
+# When set, hub's python-telegram-bot client talks here instead of
+# api.telegram.org. Enables e2e via `telegram-mock` service + dev-without-
+# real-bot workflows. Empty = default Telegram API.
+TELEGRAM_BASE_URL = os.environ.get("BEACONRY_TELEGRAM_BASE_URL", "")
 # Env is read with defaults so importing hub never crashes; functions that
 # need real values (notify, lifespan) raise with a named error when invoked.
 TELEGRAM_BOT_TOKEN = os.environ.get("TELEGRAM_BOT_TOKEN", "")
@@ -575,28 +583,39 @@ async def lifespan(app: FastAPI):
             {k: f"{v.probe_type}:{v.probe_arg}" for k, v in HEALTH_POLICIES.items()},
         )
 
-    if MOCK:
-        log.info("MOCK mode — skipping grype DB update and Telegram startup")
-        _startup_complete = True
+    # BC-018: dial 1 — grype DB download. Skipped in MOCK or when the
+    # dedicated BEACONRY_SKIP_GRYPE_DB flag is set (e.g., e2e stacks).
+    if SKIP_GRYPE_DB:
+        log.info("Skipping grype vulnerability database update (SKIP_GRYPE_DB=1)")
+    else:
+        log.info("Updating grype vulnerability database (first run: ~200MB download)…")
+        proc = await asyncio.create_subprocess_exec(
+            "grype",
+            "db",
+            "update",
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        _, stderr = await proc.communicate()
+        if proc.returncode != 0:
+            log.warning("grype db update warning: %s", stderr.decode()[:200])
+        else:
+            log.info("Grype vulnerability database ready")
+    _startup_complete = True
+
+    # BC-018: dial 2 — Telegram wiring. Driven by TELEGRAM_BOT_TOKEN presence.
+    # Empty token (or MOCK=1 with no token) → skip. BEACONRY_TELEGRAM_BASE_URL
+    # points python-telegram-bot at a mock service for e2e / dev-without-bot.
+    if not TELEGRAM_BOT_TOKEN:
+        log.info("TELEGRAM_BOT_TOKEN empty — skipping Telegram startup")
         yield
         return
 
-    log.info("Updating grype vulnerability database (first run: ~200MB download)…")
-    proc = await asyncio.create_subprocess_exec(
-        "grype",
-        "db",
-        "update",
-        stdout=asyncio.subprocess.PIPE,
-        stderr=asyncio.subprocess.PIPE,
-    )
-    _, stderr = await proc.communicate()
-    if proc.returncode != 0:
-        log.warning("grype db update warning: %s", stderr.decode()[:200])
-    else:
-        log.info("Grype vulnerability database ready")
-    _startup_complete = True
-
-    _app = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
+    builder = Application.builder().token(TELEGRAM_BOT_TOKEN)
+    if TELEGRAM_BASE_URL:
+        log.info("BC-018: Telegram client pointed at %s", TELEGRAM_BASE_URL)
+        builder = builder.base_url(f"{TELEGRAM_BASE_URL.rstrip('/')}/bot")
+    _app = builder.build()
     _app.add_handler(CallbackQueryHandler(on_button_click))
     await _app.initialize()
     await _app.start()
@@ -771,100 +790,6 @@ async def receive_scan(payload: dict) -> dict:
         await send_digest(suppressed)
 
     return {"status": "ok", "findings": new_findings}
-
-
-# ── BC-017: test-mode endpoints (hard-gated by BEACONRY_TEST_MODE=1) ─────────
-#
-# These endpoints let the e2e test suite drive the handler path without
-# Telegram. ONLY mounted when BEACONRY_TEST_MODE=1 — the guard prevents
-# accidental exposure of DB-write + handler-invoke endpoints in production.
-# See docs/plan/BC-017-e2e-probe-flow-plan.md.
-
-
-if os.environ.get("BEACONRY_TEST_MODE") == "1":
-    log.warning("BC-017 TEST MODE enabled — /__test__/* endpoints mounted")
-
-    # Captured messages from the fake Telegram query. Reset per test via /__test__/reset.
-    _TEST_CAPTURED: list[dict] = []
-
-    class _TestFakeQuery:
-        """Minimal CallbackQuery stub capturing edit_message_text calls."""
-
-        def __init__(self, data: str) -> None:
-            self.data = data
-
-        async def answer(self) -> None:
-            pass
-
-        async def edit_message_text(self, text: str, **kwargs: object) -> None:
-            _TEST_CAPTURED.append({"text": text, **{k: str(v) for k, v in kwargs.items()}})
-
-    class _TestFakeUpdate:
-        def __init__(self, data: str) -> None:
-            self.callback_query = _TestFakeQuery(data)
-
-    @api.post("/__test__/insert-finding")
-    async def test_insert_finding(payload: dict) -> dict:
-        """Write a Finding row to the DB. Fields map to Finding dataclass."""
-        f = Finding(
-            id=payload["id"],
-            host=payload.get("host", "test-host"),
-            cve_id=payload.get("cve_id", "CVE-TEST"),
-            package=payload.get("package", "test-pkg"),
-            version=payload.get("version", "1.0"),
-            fixed_version=payload.get("fixed_version", "1.1"),
-            severity=payload.get("severity", "High"),
-            cvss=float(payload.get("cvss", 8.0)),
-            source_type=payload.get("source_type", "docker"),
-            source_ref=payload.get("source_ref", "test:latest"),
-            description=payload.get("description", "e2e fixture"),
-            tier=int(payload.get("tier", 2)),
-        )
-        init_db()
-        save_finding(f)
-        status = payload.get("status")
-        if status:
-            set_status(f.id, status)
-        return {"ok": True, "id": f.id, "status": get_status(f.id)}
-
-    @api.post("/__test__/invoke-callback")
-    async def test_invoke_callback(payload: dict) -> dict:
-        """Craft a fake Update + call on_button_click. Capture terminal edits."""
-        callback_data = payload["callback_data"]
-        _TEST_CAPTURED.clear()
-        update = _TestFakeUpdate(callback_data)
-        await on_button_click(update, context=None)  # type: ignore[arg-type]
-        return {"ok": True, "edits": list(_TEST_CAPTURED)}
-
-    @api.get("/__test__/messages")
-    async def test_messages() -> dict:
-        return {"edits": list(_TEST_CAPTURED)}
-
-    @api.get("/__test__/status/{finding_id}")
-    async def test_status(finding_id: str) -> dict:
-        return {"id": finding_id, "status": get_status(finding_id)}
-
-    @api.post("/__test__/reset")
-    async def test_reset(payload: dict | None = None) -> dict:
-        _TEST_CAPTURED.clear()
-        wipe_db = (payload or {}).get("wipe_db", False)
-        if wipe_db:
-            con = sqlite3.connect(DB_PATH)
-            con.execute("DELETE FROM findings")
-            con.commit()
-            con.close()
-        return {"ok": True, "wiped": bool(wipe_db)}
-
-    @api.get("/__test__/all-findings")
-    async def test_all_findings() -> dict:
-        con = sqlite3.connect(DB_PATH)
-        rows = con.execute("SELECT id, cve_id, source_ref, status FROM findings").fetchall()
-        con.close()
-        return {
-            "findings": [
-                {"id": r[0], "cve_id": r[1], "source_ref": r[2], "status": r[3]} for r in rows
-            ]
-        }
 
 
 if __name__ == "__main__":
