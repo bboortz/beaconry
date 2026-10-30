@@ -108,6 +108,7 @@ Two drifts in two consecutive stories is a trend. BC-015 adds a growing banned-p
 | Plan template gets memory-drift Shipping evidence row | self-consistency | `docs/plan/_template.md` diff | ✓ |
 | memory/workflow.md gate table updated | self-consistency | `memory/workflow.md` diff | ✓ |
 | CAP-T047 registered | verify-traceability | `make check` traceability green | ✓ |
+| Memory drift pattern added if this story deprecates documented behavior | N/A — self-consistency declaration | N/A: BC-015 adds a new gate; it does not deprecate any documented behavior that would need banning. Satisfies the template row that BC-015 itself introduced. | ✓ |
 
 Legend: ✓ · ⚠️ · ❌.
 
