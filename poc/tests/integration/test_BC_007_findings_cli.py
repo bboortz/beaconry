@@ -34,7 +34,8 @@ def _init_dev_db(data_dir: Path) -> Path:
             source_ref   TEXT,
             description  TEXT,
             found_at     INTEGER,
-            status       TEXT DEFAULT 'open'
+            status       TEXT DEFAULT 'open',
+            tier         INTEGER DEFAULT 3
         )
     """)
     con.commit()
@@ -64,6 +65,10 @@ def _row(**overrides: object) -> dict:
     }
     defaults.update(overrides)
     return defaults
+
+
+def _row_with_tier(tier: int, **overrides: object) -> dict:
+    return _row(tier=tier, **overrides)
 
 
 def _run(data_dir: Path, *args: str) -> subprocess.CompletedProcess[str]:
@@ -124,6 +129,38 @@ def test_sort_open_before_other_statuses(tmp_path: Path) -> None:
     result = _run(tmp_path)
     assert result.returncode == 0
     assert result.stdout.index("CVE-OPEN") < result.stdout.index("CVE-ACC")
+
+
+def test_sort_within_status_uses_tier_then_cvss(tmp_path: Path) -> None:
+    """BC-007 close-gaps: sort key is (status, tier, -cvss), not just (status, -cvss).
+    Within the open group, tier-0 (KEV) must come before tier-2 even if tier-2 has
+    higher cvss."""
+    db = _init_dev_db(tmp_path)
+    # Both open; tier-2 has higher cvss. Tier should win.
+    _insert(
+        db,
+        id="x1",
+        cve_id="CVE-TIER2-HIGH",
+        severity="Critical",
+        cvss=9.8,
+        status="open",
+        **_row_with_tier(2),
+    )
+    _insert(
+        db,
+        id="x2",
+        cve_id="CVE-TIER0-LOW",
+        severity="Critical",
+        cvss=7.5,
+        status="open",
+        **_row_with_tier(0),
+    )
+    result = _run(tmp_path)
+    assert result.returncode == 0
+    assert result.stdout.index("CVE-TIER0-LOW") < result.stdout.index("CVE-TIER2-HIGH"), (
+        "tier-0 (KEV) must come before tier-2 within the same status group even if "
+        "tier-2 has higher cvss"
+    )
 
 
 def test_pure_read_does_not_modify_db(tmp_path: Path) -> None:

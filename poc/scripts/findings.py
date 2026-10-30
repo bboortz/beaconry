@@ -19,6 +19,8 @@ STATUS_ORDER = ("open", "snoozed", "accepted", "fixed")
 STATUS_RANK = {s: i for i, s in enumerate(STATUS_ORDER)}
 
 # (dict-key, header, max_width). Order defines column order.
+# `tier` is queried for sort but not displayed — severity carries the same signal
+# for operators and the row budget is already at 110 chars.
 COLUMNS: list[tuple[str, str, int]] = [
     ("cve_id", "CVE", 20),
     ("severity", "Severity", 10),
@@ -28,6 +30,7 @@ COLUMNS: list[tuple[str, str, int]] = [
     ("package", "Package", 18),
     ("status", "Status", 9),
 ]
+SORT_ONLY_COLUMNS = ("tier",)
 
 
 def _truncate(value: str, width: int) -> str:
@@ -62,18 +65,30 @@ def format_table(rows: list[dict]) -> str:
 def load_findings(db_path: Path, status: str | None = None) -> list[dict]:
     if not db_path.exists():
         return []
-    columns = [key for key, _, _ in COLUMNS]
-    sql = f"SELECT {', '.join(columns)} FROM findings"
-    params: tuple[str, ...] = ()
-    if status:
-        sql += " WHERE status = ?"
-        params = (status,)
+    display_columns = [key for key, _, _ in COLUMNS]
     con = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
     try:
-        rows = [dict(zip(columns, r, strict=True)) for r in con.execute(sql, params).fetchall()]
+        # Degrade gracefully for DBs that predate the tier column — findings.py
+        # is pure-read, so it can't migrate; it just drops the tier from the
+        # sort key when the column is absent.
+        schema_cols = {row[1] for row in con.execute("PRAGMA table_info(findings)")}
+        extra_cols = [c for c in SORT_ONLY_COLUMNS if c in schema_cols]
+        all_columns = [*display_columns, *extra_cols]
+        sql = f"SELECT {', '.join(all_columns)} FROM findings"
+        params: tuple[str, ...] = ()
+        if status:
+            sql += " WHERE status = ?"
+            params = (status,)
+        rows = [dict(zip(all_columns, r, strict=True)) for r in con.execute(sql, params).fetchall()]
     finally:
         con.close()
-    rows.sort(key=lambda r: (STATUS_RANK.get(r.get("status", "open"), 99), -(r.get("cvss") or 0.0)))
+    rows.sort(
+        key=lambda r: (
+            STATUS_RANK.get(r.get("status", "open"), 99),
+            r.get("tier", 99),
+            -(r.get("cvss") or 0.0),
+        )
+    )
     return rows
 
 

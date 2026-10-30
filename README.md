@@ -51,6 +51,16 @@ cp poc/.env.example poc/.env   # fill TELEGRAM_BOT_TOKEN + TELEGRAM_CHAT_ID
 # Each run
 make demo                      # real pipeline via Docker Compose — host inventory
 BEACONRY_MOCK=1 make demo      # local Python mock pipeline (fast dev loop)
+make findings                  # read-only CLI view of what's in the dev DB
+make findings STATUS=accepted  # filter by status (open|snoozed|accepted|fixed)
+```
+
+**Querying the Compose named volume.** `make findings` reads `$DATA_DIR/beaconry.db` (default `.beaconry-cache/beaconry.db` — the local-Python path). The Compose stack writes to the `beaconry-data` named volume at `/data` inside the hub container. To query that DB from the host:
+
+```bash
+# Copy the Compose DB into a tmp dir and point make findings at it
+docker run --rm -v beaconry-data:/data busybox cat /data/beaconry.db > /tmp/compose.db
+DATA_DIR=/tmp make findings
 ```
 
 `make demo` (real mode) runs `docker compose up --build` under `poc/`. Scout and hub run as containers; the host needs only Docker + Docker Compose. Scout scans images matching `SCOUT_INCLUDE` (default `nginx*,redis*,postgres*` — demo-safe allowlist). Set `SCOUT_INCLUDE=*` in `poc/.env` to scan everything, or narrow with `SCOUT_EXCLUDE=*-test,*-dev`.

@@ -94,7 +94,7 @@ Enforcement: `poc/scripts/verify_traceability.py` runs as part of `make check`. 
 - **status:** active
 - **origin:** BC-007
 - **design:** DESIGN.md § Architecture
-- **description:** `make findings` prints a formatted table from the dev SQLite DB — CVE, severity, CVSS, host, target image, package, status. Sorted by status (open → snoozed → accepted → fixed) then by -cvss. `make findings STATUS=accepted` filters. Pure read, no network or Docker. Honors `DATA_DIR` env so it works against both local `.beaconry-cache/beaconry.db` and the Compose named volume at `/data`.
+- **description:** `make findings` prints a formatted table from the dev SQLite DB — CVE, severity, CVSS, host, target image, package, status. Sorted by (status rank, tier, -cvss) so tier-0 KEV findings surface before tier-2 even if tier-2 has higher CVSS. `make findings STATUS=accepted` filters. Pure read, no network or Docker. Honors `DATA_DIR` env; README documents the one-liner to query the Compose named volume.
 - **verified by:**
   - `poc/tests/integration/test_BC_007_findings_cli.py`
 

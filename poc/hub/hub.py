@@ -74,9 +74,15 @@ def init_db() -> None:
             source_ref   TEXT,
             description  TEXT,
             found_at     INTEGER,
-            status       TEXT DEFAULT 'open'
+            status       TEXT DEFAULT 'open',
+            tier         INTEGER DEFAULT 3
         )
     """)
+    # Idempotent migration for DBs created before the tier column existed.
+    import contextlib
+
+    with contextlib.suppress(sqlite3.OperationalError):
+        con.execute("ALTER TABLE findings ADD COLUMN tier INTEGER DEFAULT 3")
     con.commit()
     con.close()
 
@@ -88,8 +94,8 @@ def save_finding(f: Finding) -> bool:
         con.execute(
             """INSERT OR IGNORE INTO findings
                (id, host, cve_id, package, version, fixed_version, severity,
-                cvss, source_type, source_ref, description, found_at)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?)""",
+                cvss, source_type, source_ref, description, found_at, tier)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (
                 f.id,
                 f.host,
@@ -103,6 +109,7 @@ def save_finding(f: Finding) -> bool:
                 f.source_ref,
                 f.description,
                 int(time.time()),
+                f.tier,
             ),
         )
         new_row = con.execute("SELECT changes()").fetchone()[0] > 0
