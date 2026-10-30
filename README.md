@@ -88,6 +88,20 @@ Design-Driven, Test-Guarded Development. Every feature flows:
 7. PR to `dev` → `/ultrareview` → `/code-review` → merge
 8. CI fast-forwards `main` to `dev`
 
+### Telegram button actions
+
+Each notification carries three buttons:
+
+| Button | Action |
+|---|---|
+| 🔧 Fix now | Stub: edits message to "⚙️ Fix execution coming in a later story". No DB write. (Enabled via `BEACONRY_FIX_ENABLED=1` when the fix path lands.) |
+| ⏰ Snooze 4h | Marks finding `snoozed`; next `make demo` won't re-notify. |
+| ✅ Accept risk | Marks finding `accepted`; next `make demo` won't re-notify. |
+
+Double-tapping Snooze/Accept is safe — the handler notices the finding is already in that state, re-shows the current status, and skips the DB write. Malformed callback payloads are rejected with a warning.
+
+### Pre-ship audit
+
 Pre-ship audit (step 6a) fills the `Shipping evidence` table in each plan doc. A story moves to `shipped` only when every Gherkin scenario and plan goal has a pointer (test, log line, or dated manual verification). Three audit lenses: Gherkin coverage, data-model symmetry, self-consistency.
 
 Full detail in [`memory/workflow.md`](memory/workflow.md).

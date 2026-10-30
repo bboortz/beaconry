@@ -39,7 +39,7 @@ Enforcement: `poc/scripts/verify_traceability.py` runs as part of `make check`. 
 - **status:** active
 - **origin:** BC-002
 - **design:** memory/workflow.md
-- **description:** When `BEACONRY_FIX_ENABLED` is unset (default), tapping [🔧 Fix now] shows "Fix execution coming in BC-003 — <cve> left as open" and does not run any Docker action. BC-003 flips the default to enable real fix execution.
+- **description:** When `BEACONRY_FIX_ENABLED` is unset (default), tapping [🔧 Fix now] shows "⚙️ Fix execution coming in a later story — <cve> left as `open`" and does not run any Docker action. A future BC-NNN flips the default to enable real fix execution.
 - **verified by:**
   - `poc/tests/unit/test_hub_helpers.py`
 
@@ -106,6 +106,24 @@ Enforcement: `poc/scripts/verify_traceability.py` runs as part of `make check`. 
 - **description:** DD-TGD gains step 6a "Pre-ship audit". Each plan doc carries a `Shipping evidence` table listing every Gherkin scenario + plan goal with a pointer (test name, log line, or dated manual verification). A story moves to `shipped` only when every row has non-empty evidence. Three audit lenses: Gherkin coverage, data-model symmetry, self-consistency.
 - **verified by:**
   - `poc/tests/integration/test_BC_008_pre_ship_audit.py`
+
+### CAP-B007: Operator snoozes/accepts findings and the system respects the decision across runs
+- **type:** business
+- **status:** aspirational
+- **origin:** BC-003
+- **design:** memory/telegram-patterns.md
+- **description:** Tapping [⏰ Snooze 4h] updates the finding's status in the dev DB to `snoozed`; tapping [✅ Accept risk] sets it to `accepted`. Subsequent `make demo` runs skip these findings via `save_finding`'s dedup (status != open ⇒ already in DB with final status). Automated via callback-data validation + idempotence (CAP-T028/T029); live-verified via the Phase 3 tap session in BC-003.
+- **verified by:**
+  - `poc/tests/unit/test_hub_helpers.py`
+
+### CAP-B008: Fix-now button is honest about its stub state until BC-004
+- **type:** business
+- **status:** aspirational
+- **origin:** BC-003
+- **design:** memory/telegram-patterns.md
+- **description:** With `BEACONRY_FIX_ENABLED` unset (default), tapping [🔧 Fix now] edits the message to "⚙️ Fix execution coming in a later story — <cve> left as `open`". DB status unchanged. Operator never sees a silent no-op. Live-verified via the Phase 3 tap session in BC-003.
+- **verified by:**
+  - `poc/tests/unit/test_hub_helpers.py`
 
 ### CAP-B006: Operator has a clear development process to contribute
 - **type:** business
@@ -359,6 +377,26 @@ Enforcement: `poc/scripts/verify_traceability.py` runs as part of `make check`. 
 - **supports:** CAP-B013
 - **verified by:**
   - `poc/tests/integration/test_BC_004_traceability.py`
+
+### CAP-T028: Callback_data validation rejects malformed input
+- **type:** technical
+- **status:** active
+- **origin:** BC-003
+- **design:** memory/telegram-patterns.md
+- **description:** `on_button_click` compares `query.data` against `^(fix|snooze|ack):[a-f0-9]{16}(?::\d+)?$` before any DB access. Non-matching callbacks (crafted payloads, future-format drift) get an "⚠️ Invalid request — malformed callback data." edit, a warning in logs, and no DB mutation.
+- **supports:** CAP-B007, CAP-B008
+- **verified by:**
+  - `poc/tests/unit/test_hub_helpers.py`
+
+### CAP-T029: Button handlers are idempotent on double-tap
+- **type:** technical
+- **status:** active
+- **origin:** BC-003
+- **design:** memory/telegram-patterns.md
+- **description:** For Snooze and Accept, `on_button_click` queries the current DB status via `get_status` and, if it already matches the intent, edits the message to "ℹ️ Already <status> — <cve>" and returns without re-writing. Prevents redundant SQL updates and matches Telegram's expectation that `edit_message_text` with identical content fails; the "already" variant is distinct from the first-tap edit.
+- **supports:** CAP-B007
+- **verified by:**
+  - `poc/tests/unit/test_hub_helpers.py`
 
 ### CAP-T022: Fix/feat branches without a plan doc fail the gate
 - **type:** technical

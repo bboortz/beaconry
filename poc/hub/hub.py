@@ -11,6 +11,7 @@ import hashlib
 import json
 import logging
 import os
+import re
 import sqlite3
 import tempfile
 import time
@@ -135,6 +136,14 @@ def set_status(finding_id: str, status: str) -> None:
     con.execute("UPDATE findings SET status=? WHERE id=?", (status, finding_id))
     con.commit()
     con.close()
+
+
+def get_status(finding_id: str) -> str | None:
+    """Return the current status for a finding id, or None if the row is missing."""
+    con = sqlite3.connect(DB_PATH)
+    row = con.execute("SELECT status FROM findings WHERE id=?", (finding_id,)).fetchone()
+    con.close()
+    return row[0] if row else None
 
 
 # ── CVE matching ──────────────────────────────────────────────────────────────
@@ -340,11 +349,20 @@ async def notify(finding: Finding) -> None:
     )
 
 
+CALLBACK_RE = re.compile(r"^(fix|snooze|ack):[a-f0-9]{16}(?::\d+)?$")
+
+
 async def on_button_click(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     query = update.callback_query
     if query is None or query.data is None:
         return
     await query.answer()
+
+    # BC-003: reject malformed callback_data before any DB access.
+    if not CALLBACK_RE.match(query.data):
+        log.warning("Rejected malformed callback_data: %r", query.data[:100])
+        await query.edit_message_text("⚠️ Invalid request — malformed callback data.")
+        return
 
     parts = query.data.split(":")
     action, finding_id = parts[0], parts[1]
@@ -359,10 +377,21 @@ async def on_button_click(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
     def _esc(s: str) -> str:
         return html.escape(s, quote=False)
 
+    # BC-003: idempotence — if a Snooze/Accept tap lands on a finding already in
+    # that state, show the current state and no-op the DB write.
+    status_targets = {"snooze": "snoozed", "ack": "accepted"}
+    if action in status_targets and get_status(finding_id) == status_targets[action]:
+        label = status_targets[action]
+        await query.edit_message_text(
+            f"ℹ️ Already {label} — <code>{_esc(finding.cve_id)}</code>",
+            parse_mode="HTML",
+        )
+        return
+
     if action == "fix":
         if not FIX_ENABLED:
             await query.edit_message_text(
-                f"⚙️ Fix execution coming in BC-003 — <code>{_esc(finding.cve_id)}</code> "
+                f"⚙️ Fix execution coming in a later story — <code>{_esc(finding.cve_id)}</code> "
                 f"left as <code>open</code>",
                 parse_mode="HTML",
             )

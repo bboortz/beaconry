@@ -11,6 +11,8 @@ Covers:
     - CAP-T019: Compose stack brings up hub + scout with :ro socket mount, healthchecks, env propagation
     - CAP-T020: Hub import suppresses noisy HTTP client loggers so bot tokens don't leak
     - CAP-T021: Hub /scan endpoint applies dedup + cap across the full inventory
+    - CAP-T028: Callback_data validation rejects malformed input
+    - CAP-T029: Button handlers are idempotent on double-tap
 """
 
 from __future__ import annotations
@@ -97,6 +99,109 @@ def test_format_notification_truncates_description_to_160_chars() -> None:
     italic_line = next(line for line in text.splitlines() if line.startswith("<i>"))
     inner = italic_line[len("<i>") : -len("</i>")]
     assert len(inner) == 160
+
+
+class _FakeQuery:
+    """Minimal CallbackQuery stub for exercising on_button_click."""
+
+    def __init__(self, data: str) -> None:
+        self.data = data
+        self.answered = False
+        self.edits: list[dict[str, object]] = []
+
+    async def answer(self) -> None:
+        self.answered = True
+
+    async def edit_message_text(self, text: str, **kwargs: object) -> None:
+        self.edits.append({"text": text, **kwargs})
+
+
+class _FakeUpdate:
+    def __init__(self, data: str) -> None:
+        self.callback_query = _FakeQuery(data)
+
+
+async def test_on_button_click_rejects_malformed_callback(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """BC-003: a crafted callback_data must be rejected before any DB access."""
+    hub.init_db()
+
+    load_calls: list[str] = []
+
+    def _spy_load(finding_id: str) -> object:  # pragma: no cover - should not run
+        load_calls.append(finding_id)
+        return None
+
+    monkeypatch.setattr(hub, "load_finding", _spy_load)
+
+    update = _FakeUpdate("'; DROP TABLE findings; --")
+    await hub.on_button_click(update, context=None)  # type: ignore[arg-type]
+
+    assert load_calls == [], "malformed callback must not reach load_finding"
+    assert len(update.callback_query.edits) == 1
+    assert "invalid" in str(update.callback_query.edits[0]["text"]).lower()
+
+
+async def test_on_button_click_accepts_well_formed_callback() -> None:
+    """Shape sanity: a valid snooze:<16hex>:4 payload must reach the handler."""
+    hub.init_db()
+    hub.save_finding(_finding(id="deadbeefcafe0001", cve_id="CVE-OK"))
+
+    update = _FakeUpdate("snooze:deadbeefcafe0001:4")
+    await hub.on_button_click(update, context=None)  # type: ignore[arg-type]
+
+    import sqlite3
+
+    con = sqlite3.connect(hub.DB_PATH)
+    row = con.execute("SELECT status FROM findings WHERE id=?", ("deadbeefcafe0001",)).fetchone()
+    con.close()
+    assert row is not None and row[0] == "snoozed"
+
+
+async def test_double_tap_snooze_is_idempotent(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """BC-003: a second Snooze tap on an already-snoozed finding must not re-write
+    and must respond with an 'already' message."""
+    hub.init_db()
+    hub.save_finding(_finding(id="deadbeefcafe0002", cve_id="CVE-DOUBLE"))
+    hub.set_status("deadbeefcafe0002", "snoozed")
+
+    set_status_calls: list[tuple[str, str]] = []
+
+    def _spy_set(fid: str, status: str) -> None:
+        set_status_calls.append((fid, status))
+
+    monkeypatch.setattr(hub, "set_status", _spy_set)
+
+    update = _FakeUpdate("snooze:deadbeefcafe0002:4")
+    await hub.on_button_click(update, context=None)  # type: ignore[arg-type]
+
+    assert set_status_calls == [], "double-tap must not re-write the DB"
+    assert len(update.callback_query.edits) == 1
+    assert "already" in str(update.callback_query.edits[0]["text"]).lower()
+
+
+async def test_double_tap_accept_is_idempotent(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    hub.init_db()
+    hub.save_finding(_finding(id="deadbeefcafe0003", cve_id="CVE-DBL-ACC"))
+    hub.set_status("deadbeefcafe0003", "accepted")
+
+    set_status_calls: list[tuple[str, str]] = []
+
+    def _spy_set(fid: str, status: str) -> None:
+        set_status_calls.append((fid, status))
+
+    monkeypatch.setattr(hub, "set_status", _spy_set)
+
+    update = _FakeUpdate("ack:deadbeefcafe0003")
+    await hub.on_button_click(update, context=None)  # type: ignore[arg-type]
+
+    assert set_status_calls == []
+    assert "already" in str(update.callback_query.edits[0]["text"]).lower()
 
 
 def test_hub_import_silences_noisy_http_loggers() -> None:

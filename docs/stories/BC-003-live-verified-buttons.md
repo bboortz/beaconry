@@ -1,7 +1,7 @@
 ---
 id: BC-003
 title: Live-verified Telegram button handling
-status: draft
+status: in-progress
 created: 2026-10-29
 ---
 
