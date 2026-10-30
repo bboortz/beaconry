@@ -684,6 +684,16 @@ Enforcement: `poc/scripts/verify_traceability.py` runs as part of `make check`. 
 - **verified by:**
   - `poc/tests/integration/test_BC_007_findings_cli.py`
 
+### CAP-T053: `make verify-docs-drift` catches help/README enumerations that no longer match code
+- **type:** technical
+- **status:** active
+- **origin:** BC-016
+- **design:** memory/workflow.md § Blocking gates (must pass to merge to `dev`)
+- **description:** `poc/scripts/verify_docs_drift.py` cross-checks three enumeration classes between docs (`Makefile` `help:` block + `README.md`) and code: `make <target>` references must exist in `.PHONY` (bidirectional — .PHONY entries also need help lines); `STATUS=foo|bar|...` enumerations must match `STATUS_ORDER` in `poc/scripts/findings.py` (and must be complete when enumerated); `BEACONRY_<NAME>` references must correspond to `os.environ.get("BEACONRY_...")` reads in `poc/`. Each violation includes file source + copy-pasteable fix hint. README matching requires inline-code `` `make foo` `` to avoid prose false positives like "GNU make convention". Hooked into `make check` fast tier.
+- **supports:** CAP-B011
+- **verified by:**
+  - `poc/tests/unit/test_docs_drift_guard.py`
+
 ### CAP-T017: Orphan tests fail the gate with a copy-pasteable template
 - **type:** technical
 - **status:** active

@@ -1,4 +1,4 @@
-.PHONY: help lint format type test check check-full demo smoke clean install-hooks verify-traceability verify-dockerfile-health-copy verify-memory-drift verify-compose-env-propagation findings status
+.PHONY: help lint format type test check check-full demo smoke clean install-hooks verify-traceability verify-dockerfile-health-copy verify-memory-drift verify-compose-env-propagation verify-docs-drift findings status
 
 PYTHON ?= python3
 PYTEST_ARGS ?=
@@ -13,8 +13,10 @@ help:
 	@echo "  make type                       pyright (basic mode)"
 	@echo "  make test                       pytest + coverage"
 	@echo "  make verify-traceability        docs/CAPABILITIES.md ↔ tests bidirectional check"
-	@echo "  make verify-dockerfile-health-copy   services importing beaconry_health COPY it (BC-012)"
+	@echo "  make verify-dockerfile-health-copy      services importing beaconry_health COPY it (BC-012)"
 	@echo "  make verify-memory-drift        memory/*.md matches shipped reality (BC-015)"
+	@echo "  make verify-compose-env-propagation     every BEACONRY_* env read by code is in docker-compose.yml (BC-011)"
+	@echo "  make verify-docs-drift          Makefile help + README match code enumerations (BC-016)"
 	@echo "  make smoke                      bash poc/demo.sh --smoke (non-interactive mock, CI)"
 	@echo ""
 	@echo "Tiers:"
@@ -23,7 +25,9 @@ help:
 	@echo ""
 	@echo "Operator CLIs:"
 	@echo "  make status                     one-line-per-service health table (BC-013)"
-	@echo "  make findings                   read-only CLI view of findings DB (STATUS=open|snoozed|accepted|fixed)"
+	@echo "  make findings                   read-only CLI view of findings DB"
+	@echo "                                  STATUS=open|verification_failed|snoozed|accepted|fixed|fixed_verified"
+	@echo "                                  BEACONRY_FINDINGS_LOCAL=1 forces local .beaconry-cache DB over compose volume"
 	@echo ""
 	@echo "Demo:"
 	@echo "  make demo                       docker compose up (real pipeline, host inventory)"
@@ -60,7 +64,10 @@ verify-memory-drift:
 verify-compose-env-propagation:
 	$(PYTHON) -m poc.scripts.verify_compose_env_propagation
 
-check: lint type test verify-traceability verify-dockerfile-health-copy verify-memory-drift verify-compose-env-propagation smoke
+verify-docs-drift:
+	$(PYTHON) -m poc.scripts.verify_docs_drift
+
+check: lint type test verify-traceability verify-dockerfile-health-copy verify-memory-drift verify-compose-env-propagation verify-docs-drift smoke
 	@echo ""
 	@echo "✓ Fast tier (make check) passed"
 
