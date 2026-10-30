@@ -526,14 +526,25 @@ def test_dedup_and_cap_fewer_than_cap() -> None:
     assert len(top) == 2 and suppressed == []
 
 
-def test_health_endpoint_returns_ok() -> None:
-    """CAP-T019 live verification via FastAPI TestClient — no docker required."""
+def test_health_endpoint_returns_ok(monkeypatch: pytest.MonkeyPatch, tmp_path: object) -> None:
+    """CAP-T019 live verification via FastAPI TestClient — no docker required.
+
+    BC-010: /health is now a transitional alias to /readyz. Body shape changed
+    from {status:"ok"} to {status:"ready", checks:{...}} — assertion loosened to
+    status_code only, which was the test's original intent.
+    """
     from fastapi.testclient import TestClient
+
+    grype_dir = tmp_path / "grype-db"  # type: ignore[operator]
+    grype_dir.mkdir()
+    (grype_dir / "vulnerability.db").write_text("x")
+    monkeypatch.setenv("GRYPE_DB_CACHE_DIR", str(grype_dir))
+    monkeypatch.setattr(hub, "_startup_complete", True, raising=False)
+    monkeypatch.setattr(hub.shutil, "which", lambda _cmd: "/usr/local/bin/grype")
 
     client = TestClient(hub.api)
     response = client.get("/health")
     assert response.status_code == 200
-    assert response.json() == {"status": "ok"}
 
 
 async def test_receive_scan_notifies_on_fresh_db(

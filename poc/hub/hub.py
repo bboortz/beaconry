@@ -12,6 +12,7 @@ import json
 import logging
 import os
 import re
+import shutil
 import sqlite3
 import tempfile
 import time
@@ -22,7 +23,7 @@ import uvicorn
 from executor.base import ExecutorPlugin, Finding
 from executor.docker_adapter import DockerAdapter
 from executor.manual_adapter import ManualAdapter
-from fastapi import FastAPI
+from fastapi import FastAPI, Response
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import Application, CallbackQueryHandler, ContextTypes
 
@@ -55,6 +56,13 @@ DB_PATH = DATA_DIR / "beaconry.db"
 EXECUTORS: list[ExecutorPlugin] = [DockerAdapter(), ManualAdapter()]
 
 tg_app: Application | None = None
+
+# BC-010: health-check state. `_startup_complete` flips True once lifespan has
+# finished grype DB update (even if update warned). `_last_scan_ts` is updated
+# by receive_scan so /healthz can report liveness-in-practice.
+_startup_complete: bool = False
+_last_scan_ts: int = 0
+HUB_VERSION = "0.1.0"
 
 
 # ── Database ──────────────────────────────────────────────────────────────────
@@ -472,12 +480,13 @@ async def on_button_click(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 
 @asynccontextmanager
 async def lifespan(app: FastAPI):
-    global tg_app
+    global tg_app, _startup_complete
 
     init_db()
 
     if MOCK:
         log.info("MOCK mode — skipping grype DB update and Telegram startup")
+        _startup_complete = True
         yield
         return
 
@@ -494,6 +503,7 @@ async def lifespan(app: FastAPI):
         log.warning("grype db update warning: %s", stderr.decode()[:200])
     else:
         log.info("Grype vulnerability database ready")
+    _startup_complete = True
 
     _app = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
     _app.add_handler(CallbackQueryHandler(on_button_click))
@@ -516,9 +526,112 @@ async def lifespan(app: FastAPI):
 api = FastAPI(title="Beaconry Hub", version="0.1.0", lifespan=lifespan)
 
 
+def _check_db() -> str:
+    """BC-010 /readyz probe — DB file writable. Does NOT read; a dead row shouldn't matter."""
+    try:
+        con = sqlite3.connect(DB_PATH)
+        con.execute("SELECT 1").fetchone()
+        con.close()
+        return "ok"
+    except (sqlite3.Error, OSError):
+        return "unavailable"
+
+
+def _check_grype_binary() -> str:
+    return "ok" if shutil.which("grype") else "missing"
+
+
+def _check_grype_db() -> str:
+    """grype DB dir exists and is non-empty."""
+    cache = Path(os.environ.get("GRYPE_DB_CACHE_DIR", "/data/grype-db"))
+    if not cache.exists():
+        return "missing"
+    try:
+        return "ok" if any(cache.iterdir()) else "empty"
+    except OSError:
+        return "unavailable"
+
+
+def _check_telegram() -> str:
+    if MOCK:
+        return "mock"
+    return "polling" if tg_app is not None else "not_running"
+
+
+def _collect_checks() -> dict:
+    return {
+        "db": _check_db(),
+        "grype_db": _check_grype_db(),
+        "grype_binary": _check_grype_binary(),
+        "telegram": _check_telegram(),
+        "last_scan_ts": _last_scan_ts,
+    }
+
+
+@api.get("/livez")
+async def livez() -> dict:
+    """Liveness: process alive and the event loop responds. NO external deps.
+
+    If a dead DB or Telegram token failed /livez, Docker would restart the
+    container in a loop (restart would not fix those failures). See
+    `memory/health-checks.md § The restart-loop trap`.
+    """
+    return {"status": "alive"}
+
+
+@api.get("/readyz")
+async def readyz(response: Response) -> dict:
+    """Readiness: local prereqs satisfied — ready to accept a /scan POST.
+
+    Checks DB writable, grype binary present, grype DB file populated.
+    Does NOT check Telegram (that's a notify-degradation, visible in
+    /healthz; failing /readyz on it would restart-loop).
+    """
+    checks = {
+        "db": _check_db(),
+        "grype_db": _check_grype_db(),
+        "grype_binary": _check_grype_binary(),
+    }
+    failed = [k for k, v in checks.items() if v not in ("ok", "mock")]
+    if failed:
+        response.status_code = 503
+        return {"status": "not_ready", "failed": failed, "checks": checks}
+    return {"status": "ready", "checks": checks}
+
+
+@api.get("/startupz")
+async def startupz(response: Response) -> dict:
+    """First-run gate — only 200 once lifespan has finished grype DB update."""
+    if not _startup_complete:
+        response.status_code = 503
+        return {"status": "starting"}
+    return {"status": "started"}
+
+
+@api.get("/healthz")
+async def healthz() -> dict:
+    """Operator-facing summary. Side-effect free. Always 200.
+
+    Returns {status: ok|degraded, version, checks: {...}} — degradation
+    surfaces here even for failures that must NOT fail /livez or /readyz
+    (e.g. Telegram token revoked).
+    """
+    checks = _collect_checks()
+    boolean_check_values = [v for k, v in checks.items() if k != "last_scan_ts"]
+    degraded = any(v not in ("ok", "polling", "mock") for v in boolean_check_values)
+    return {
+        "status": "degraded" if degraded else "ok",
+        "version": HUB_VERSION,
+        "checks": checks,
+    }
+
+
 @api.get("/health")
-async def health() -> dict:
-    return {"status": "ok"}
+async def health(response: Response) -> dict:
+    """Legacy alias — kept as a transitional compat endpoint for pre-BC-010
+    monitors. Behavior now mirrors /readyz instead of returning blind 200.
+    """
+    return await readyz(response)
 
 
 def dedup_and_cap(findings: list[Finding], cap: int) -> tuple[list[Finding], list[Finding]]:
@@ -556,6 +669,12 @@ async def send_digest(suppressed: list[Finding]) -> None:
         log.warning("digest message failed: %s", e)
 
 
+def _mark_scan_now() -> None:
+    """BC-010: bump the last-scan timestamp surfaced via /healthz."""
+    global _last_scan_ts
+    _last_scan_ts = int(time.time())
+
+
 @api.post("/scan")
 async def receive_scan(payload: dict) -> dict:
     """BC-005: apply CVE dedup + per-run cap across the whole inventory before notifying.
@@ -567,6 +686,7 @@ async def receive_scan(payload: dict) -> dict:
     BEACONRY_MAX_FINDINGS_PER_RUN (default 5), and sends a single digest for
     the rest.
     """
+    _mark_scan_now()
     host = payload.get("host", "unknown")
     sboms: list[dict] = payload.get("sboms", [])
     log.info("Scan from %s: %d SBOM(s)", host, len(sboms))

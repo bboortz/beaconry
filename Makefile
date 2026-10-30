@@ -1,4 +1,4 @@
-.PHONY: help lint format type test check check-full demo smoke clean install-hooks verify-traceability findings
+.PHONY: help lint format type test check check-full demo smoke clean install-hooks verify-traceability findings status
 
 PYTHON ?= python3
 PYTEST_ARGS ?=
@@ -72,3 +72,6 @@ install-hooks:
 clean:
 	rm -rf .pytest_cache .ruff_cache .pyright .coverage coverage.xml htmlcov
 	find . -type d -name __pycache__ -exec rm -rf {} +
+
+status:
+	@$(PYTHON) -m poc.scripts.status

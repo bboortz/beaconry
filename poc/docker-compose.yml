@@ -17,7 +17,7 @@ services:
     ports:
       - "127.0.0.1:8000:8000"
     healthcheck:
-      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]
+      test: ["CMD", "python3", "-c", "import urllib.request,sys;sys.exit(0 if urllib.request.urlopen('http://localhost:8000/readyz').status==200 else 1)"]
       interval: 60s
       start_interval: 2s
       timeout: 10s
@@ -44,9 +44,17 @@ services:
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
       - /var/lib/pacman:/host/var/lib/pacman:ro
+      - beaconry-data:/data
     depends_on:
       hub:
         condition: service_healthy
+    healthcheck:
+      test: ["CMD-SHELL", "test -f /data/scout.ready && [ $$(stat -c %Y /data/scout.live) -gt $$(( $$(date +%s) - 300 )) ]"]
+      interval: 60s
+      start_interval: 2s
+      timeout: 5s
+      start_period: 60s
+      retries: 3
     logging:
       driver: json-file
       options:

@@ -129,6 +129,34 @@ Full detail in [`memory/workflow.md`](memory/workflow.md).
 
 ---
 
+## Service health observability (BC-010)
+
+Every beaconry service follows the four-endpoint convention from `memory/health-checks.md`:
+
+| Endpoint | Question | Fail reaction |
+|---|---|---|
+| `/livez` | process alive, not deadlocked? | compose restarts the container |
+| `/readyz` | ready to accept work? (local prereqs OK) | compose marks unhealthy; dependents wait |
+| `/startupz` | first-run boot done? (grype DB downloaded) | gates `/livez`/`/readyz` during start_period |
+| `/healthz` | operator-facing JSON summary; always 200 | — (read by `make status`, future dashboards) |
+
+Compose healthcheck targets `/readyz`. The restart-loop trap is explicit: a dead Telegram token or missing DB **must not** fail `/livez` — restarting won't fix those failures. Degradation surfaces in `/healthz` instead.
+
+**One-command status check:**
+
+```bash
+make status
+# hub: healthy (grype_db ok, telegram polling, last scan 42s ago) · scout: healthy (last scan 42s ago, 11 images)
+```
+
+Exits 0 all-healthy, non-zero on any degradation. Sibling to `make findings` (BC-007).
+
+**Hub `/health` kept** as a transitional 200-alias for pre-BC-010 monitors; body shape changed from `{"status":"ok"}` to `{"status":"ready", "checks":{...}}`.
+
+See `memory/health-checks.md` for the full convention and the new-container checklist.
+
+---
+
 ## Repository layout
 
 ```

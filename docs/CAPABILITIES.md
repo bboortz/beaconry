@@ -134,6 +134,15 @@ Enforcement: `poc/scripts/verify_traceability.py` runs as part of `make check`. 
 - **verified by:**
   - `poc/tests/unit/test_hub_helpers.py`
 
+### CAP-B015: Operator always knows if beaconry itself is working
+- **type:** business
+- **status:** active
+- **origin:** BC-010
+- **design:** memory/health-checks.md
+- **description:** `make status` prints a one-line summary of every beaconry service's health, naming any degraded check explicitly. Operators who ran `docker compose up` and walked away can tell at a glance whether scanning is actually happening or something's quietly broken (grype DB missing, Telegram token revoked, scout stalled). Exit 0 all-healthy, non-zero otherwise. Sibling CLI to `make findings` (CAP-B012); both are read-only, docker-free views of live state. Future surfaces (web dashboard, Prometheus metrics) will also deliver this capability without needing a new business CAP.
+- **verified by:**
+  - `poc/tests/unit/test_status_cli.py`
+
 ### CAP-B006: Operator has a clear development process to contribute
 - **type:** business
 - **status:** active
@@ -466,6 +475,56 @@ Enforcement: `poc/scripts/verify_traceability.py` runs as part of `make check`. 
 - **supports:** CAP-B003, CAP-B014
 - **verified by:**
   - `poc/tests/unit/test_hub_helpers.py`
+
+### CAP-T035: Hub implements the four-endpoint health convention
+- **type:** technical
+- **status:** active
+- **origin:** BC-010
+- **design:** memory/health-checks.md
+- **description:** Hub exposes `/livez`, `/readyz`, `/startupz`, `/healthz` per the k8s-origin convention adopted BC-010. `/livez`: no external deps, trivially 200. `/readyz`: DB writable + grype binary present + grype DB directory populated; 503 with `{"failed":[...]}` body naming the failing check. `/startupz`: 503 before lifespan finishes grype DB update, 200 after. `/healthz`: side-effect-free JSON `{status, version, checks}` always 200, with `status: degraded` when any sub-check fails. `/health` kept as transitional alias to `/readyz`.
+- **supports:** CAP-B015, CAP-B009
+- **verified by:**
+  - `poc/tests/unit/test_hub_health.py`
+
+### CAP-T036: Scout implements the four-endpoint health convention via file-sentinels
+- **type:** technical
+- **status:** active
+- **origin:** BC-010
+- **design:** memory/health-checks.md
+- **description:** Scout — a pure loop with no HTTP server — writes four files to `/data/` on each loop iteration: `scout.live` (mtime-liveness, bumped every loop), `scout.ready` (one-shot after first Docker socket probe succeeds), `scout.started` (one-shot after first successful `/scan` POST), and `scout.healthz.json` (overwritten each loop with `{status, last_scan_ts, images_seen, bytes_posted}`). Compose healthcheck reads `scout.live + scout.ready`; `make status` reads `scout.healthz.json`. The standard permits an HTTP server alternative; file-sentinels chosen for V1 simplicity.
+- **supports:** CAP-B015, CAP-B009
+- **verified by:**
+  - `poc/tests/unit/test_scout_health.py`
+
+### CAP-T037: Compose startup ordering uses depends_on: service_healthy
+- **type:** technical
+- **status:** active
+- **origin:** BC-010 (wiring existed pre-BC-010; health signal becomes meaningful here)
+- **design:** memory/health-checks.md § `depends_on: service_healthy` — compose startup ordering
+- **description:** `poc/docker-compose.yml` declares `scout.depends_on.hub.condition: service_healthy` so scout stays in `created` state until hub's `/readyz`-backed healthcheck reports healthy. Combined with CAP-T035 (hub `/readyz` reflects real prereqs, not blind 200), this eliminates the race where scout's first `/scan` POST hit a hub whose grype DB was still downloading. Measured cold-start delta: ~60s on first run (grype DB download), <5s on warm restart.
+- **supports:** CAP-B015, CAP-B009
+- **verified by:**
+  - `poc/tests/integration/test_BC_010_compose_health_chain.py`
+
+### CAP-T038: Hub /livez and /readyz survive degraded external dependencies without restart-looping
+- **type:** technical
+- **status:** active
+- **origin:** BC-010
+- **design:** memory/health-checks.md § The restart-loop trap (do not step in it)
+- **description:** The classic healthcheck trap: embed DB / Telegram / external deps in liveness → external failure → container restart loop (restart doesn't fix the DB). Explicitly tested: `/livez` returns 200 when `sqlite3.connect` raises `OSError`, when `tg_app` is `None`, when any shell binary is missing. `/readyz` tolerates `tg_app = None` (Telegram failure is degradation, surfaces in `/healthz`, not readiness). Compose healthcheck targets `/readyz`, so Telegram token revocation cannot trigger a container restart.
+- **supports:** CAP-T035, CAP-B015
+- **verified by:**
+  - `poc/tests/unit/test_hub_health.py`
+
+### CAP-T039: `make status` prints an operator-readable summary of all beaconry services
+- **type:** technical
+- **status:** active
+- **origin:** BC-010
+- **design:** memory/health-checks.md
+- **description:** `poc/scripts/status.py` fetches hub `/healthz` via `urllib.request` (localhost:8000 for local dev, override via `BEACONRY_HUB_HEALTHZ_URL`), reads scout's `scout.healthz.json` from the shared `/data` volume (located via `docker volume inspect` for the Compose path), formats one line per service (`hub: healthy (grype_db ok, telegram polling, last scan 2m ago) · scout: healthy (last scan 2m ago, 11 images)`), and exits 0 all-healthy, non-zero on any degradation. Sibling to CAP-T025 (`make findings`); both are read-only CLIs over the live Compose stack. New Makefile target added to `.PHONY`.
+- **supports:** CAP-B015
+- **verified by:**
+  - `poc/tests/unit/test_status_cli.py`
 
 ### CAP-T017: Orphan tests fail the gate with a copy-pasteable template
 - **type:** technical

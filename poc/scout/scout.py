@@ -23,6 +23,13 @@ import docker
 import docker.errors
 import requests
 
+try:
+    # Container path: scout.py runs standalone, health.py sits next to it on /app
+    import health as scout_health
+except ImportError:
+    # Host test path: imported as poc.scout.scout
+    from poc.scout import health as scout_health
+
 logging.basicConfig(
     level=logging.INFO,
     format="%(asctime)s [scout] %(levelname)s %(message)s",
@@ -33,6 +40,7 @@ HUB_URL = os.environ.get("HUB_URL", "http://hub:8000")
 SCAN_INTERVAL = int(os.environ.get("SCAN_INTERVAL", "300"))
 HOST_NAME = os.environ.get("HOST_NAME", os.uname().nodename)
 PACMAN_DB = os.environ.get("PACMAN_DB", "/host/var/lib/pacman")
+DATA_DIR = Path(os.environ.get("SCOUT_DATA_DIR", "/data"))
 
 # BC-005 defaults — demo-safe allowlist, no excludes by default.
 DEFAULT_INCLUDE_GLOBS = "nginx*,redis*,postgres*"
@@ -220,12 +228,18 @@ def scan_open_ports() -> list[dict]:
 
 def collect_and_post(once: bool = False):
     log.info("Scan starting — host: %s", HOST_NAME)
+    scout_health.write_live(DATA_DIR)
     sboms: list[dict] = []
+    images_seen = 0
+    bytes_posted = 0
 
     try:
         docker_sboms = scan_docker_images()
         sboms.extend(docker_sboms)
+        images_seen = len(docker_sboms)
         log.info("Docker: %d image(s) scanned", len(docker_sboms))
+        if docker_sboms:
+            scout_health.write_ready(DATA_DIR)
     except Exception as e:
         log.error("Docker scan error: %s", e)
 
@@ -249,6 +263,13 @@ def collect_and_post(once: bool = False):
 
     if not sboms:
         log.warning("No SBOMs collected — nothing to send")
+        scout_health.write_healthz(
+            DATA_DIR,
+            status="degraded",
+            last_scan_ts=int(time.time()),
+            images_seen=0,
+            bytes_posted=0,
+        )
         return
 
     payload = {
@@ -257,14 +278,28 @@ def collect_and_post(once: bool = False):
         "sboms": sboms,
         "open_ports": open_ports,
     }
-
+    post_ok = False
     try:
-        resp = requests.post(f"{HUB_URL}/scan", json=payload, timeout=120)
+        body = json.dumps(payload)
+        bytes_posted = len(body)
+        resp = requests.post(
+            f"{HUB_URL}/scan", data=body, headers={"Content-Type": "application/json"}, timeout=120
+        )
         resp.raise_for_status()
         data = resp.json()
         log.info("Hub response: %d new finding(s)", data.get("findings", 0))
+        post_ok = True
+        scout_health.write_started(DATA_DIR)
     except requests.RequestException as e:
         log.error("Failed to post to hub: %s", e)
+
+    scout_health.write_healthz(
+        DATA_DIR,
+        status="ok" if post_ok else "degraded",
+        last_scan_ts=int(time.time()),
+        images_seen=images_seen,
+        bytes_posted=bytes_posted,
+    )
 
 
 def main():

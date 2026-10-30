@@ -7,6 +7,7 @@ Full design: `DESIGN.md`
 
 @memory/design-decisions.md
 @memory/docker-standard.md
+@memory/health-checks.md
 @memory/telegram-patterns.md
 @memory/code-quality.md
 @memory/workflow.md

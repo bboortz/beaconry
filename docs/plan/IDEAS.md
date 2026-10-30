@@ -88,6 +88,12 @@ Running list of ideas and discussions that may become future BC-NNN stories.
   Current code: `new_image = f"{base}:latest"` in `poc/hub/executor/docker_adapter.py`. Candidate approaches: (1) **same-track pull** — preserve the suffix (`postgres:16-alpine` → next `:16.X-alpine` tag), likely by querying Docker Hub registry API for tags matching a pattern; (2) **operator-approved diff** — show "16.3-alpine → 16.9-alpine, these packages change: …" in Telegram before pulling; (3) **grype-fixed-version mapping** — grype returns `fixed_version`, map it back to image tag (not 1:1 for base images); (4) **operator-configured tag policy** per image (`BEACONRY_TAG_POLICY=postgres:16-alpine,nginx:1.24-alpine`). Default pick: #1 (minimal surprise, preserves variant). Interacts with "KEV auto-fix is scary" (digest pinning) and "Rollback as a first-class ExecutorPlugin method".
   links: BC-009 (hardcoded `:latest` shipped there), KEV-auto-fix entry below.
 
+- **BC-011 — Target container health check waterfall (post-fix verification)**
+  trigger: user 2026-10-30 health-check discussion. Design-decisions.md already specifies the four-level waterfall for the containers *beaconry restarts* (Docker HEALTHCHECK → HTTP probe → systemd stability window → operator-defined). BC-009 shipped `verify_fix` using only `syft + grype` to re-check CVE presence — strong for "is the CVE gone" but silent on "did my service come back up cleanly". A target container that pulled `:latest`, started, but immediately crashlooped would currently flip to `fixed` in beaconry's DB.
+  priority: soon
+  Scope sketch: per-service `required_health_level` config (0 = no check, 1-4 as the waterfall), auto-detect by probing `/readyz` → `/healthz` → `ss -tlnp`-discovered HTTP → `systemctl is-active`. If chosen level fails post-pull, flip finding to `verification-failed` and emit "⚠️ Pulled but health check failed — rollback with `docker tag <base>:rollback <base>:latest`". Depends on BC-010 landing the beaconry-side convention first (so target probing and our own probing share vocabulary). Also unlocks the "always confirm" relaxation for KEV auto-fix below (silent auto-fix only if level ≥ 3 passes).
+  links: BC-009 (verify_fix today), BC-010 (vocabulary), KEV-auto-fix entry below (dependency), "Rollback as first-class ExecutorPlugin method" entry (needs the state-machine extension `verification-failed`).
+
 - **KEV auto-fix is scary (even "safe class")**
   trigger: virtual-user panel 2026-10-29 (security-conscious operator persona)
   priority: soon
@@ -130,6 +136,35 @@ Running list of ideas and discussions that may become future BC-NNN stories.
 ---
 
 ## Development / tooling
+
+- **BC-012 — Shared `poc/beaconry_health/` package (centralize the four-endpoint convention)**
+  trigger: user 2026-10-30 after BC-010 shipped — `find . -name health.py` returned only `scout/health.py`, surfacing the asymmetry that hub's endpoints are inline in `hub.py` while scout's writers live in `scout/health.py`. One convention, two shapes. A third container would reinvent either shape.
+  priority: now
+  Scope sketch:
+    - `poc/beaconry_health/` package with: `endpoints.py` (FastAPI router factory `build_router(checks_provider, startup_flag_getter)`), `sentinels.py` (`SentinelWriter` class — current scout/health.py generalized), `checks.py` (reusable probes: `check_db`, `check_grype_db`, `check_binary`, `check_http`), `trap.py` (typed `LivezProvider` / `ReadyzProvider` stubs so the restart-loop trap is syntactically unreachable, not just memory-enforced).
+    - Migrate hub endpoints to `api.include_router(build_router(hub_checks))` preserving current behavior; existing `test_hub_health.py` must pass unchanged.
+    - Scout: `writer = SentinelWriter(DATA_DIR, checks=scout_checks)`; `scout/health.py` becomes a thin config module naming the scout-specific checks.
+    - Each container Dockerfile adds `COPY beaconry_health/ ./beaconry_health/` next to its own entry file. Needs a lint/test rule guarding this ("every container Dockerfile that serves health must COPY the package") to catch forgetfulness at merge time, not at container-start time.
+    - Update `memory/health-checks.md § Checklist` to lead with "Step 1: `COPY beaconry_health/` in your Dockerfile" instead of "implement the four endpoints".
+  **The key win**: the restart-loop trap moves from "memory rule enforced by vigilance" to "typed interface — passing a DB-dependent probe to the `/livez` slot is a type error". That's the 2026-era shift from docs-as-guardrail to compiler-as-guardrail.
+  links: BC-010 (the asymmetry this fixes), BC-011 (target-container waterfall should consume the same shared probes), lours.me sidecar pattern (parked — overkill for POC).
+
+- **BC-013 — Scout live-probe HTTP endpoints (end the pull-vs-snapshot asymmetry)**
+  trigger: user 2026-10-30 after BC-010 shipped — observed that `make status` queries hub via live HTTP (`/healthz`) but reads scout from a snapshot file (`scout.healthz.json`). Current staleness guard is `scout.live` mtime vs `SCOUT_LIVE_MAX_AGE_S` (300s), so a dead scout is caught — but only within 5 minutes. Within that window, "scanning happily" and "SIGKILL'd 2 minutes ago" are indistinguishable from the host.
+  priority: soon  (BC-012 is a prerequisite — do that first and this becomes ~10 lines)
+  Scope sketch:
+    - Promote scout from file-sentinel to HTTP probe. Scout runs a tiny asyncio HTTP server (stdlib `http.server` or aiohttp) on an internal-only port, exposing `/livez /readyz /startupz /healthz` with the same shape hub does.
+    - `make status` queries both services identically — one code path, one timeout, one failure mode. Delete the `_fetch_scout_body_via_docker` branch and the `SCOUT_LIVE_MAX_AGE_S` env knob (both become unnecessary once scout answers live).
+    - Keep file-sentinel writers as a fallback readable by compose healthcheck (compose healthcheck can still `test -f /data/scout.ready && stat scout.live` — don't need to break that).
+    - Scout Dockerfile: expose internal port (not published to host, only in Compose network).
+    - Compose: `make status`'s scout URL defaults to `http://scout:8001/healthz` when run inside the network; from host, needs port-forward or `docker exec curl` (document the tradeoff).
+  **Expected wins**:
+    - Scout crash detection latency: 5min → ~1s
+    - Deadlock detection: no → yes (HTTP won't respond even if scout.live is current)
+    - "Slow scan >5min" false-positive degraded: eliminated
+    - Code uniformity: parallels hub tests shape; same `build_router()` factory from BC-012
+  **Depends on**: BC-012 (shared `beaconry_health/` package) — without the shared factory this is a bespoke 80-line scout HTTP server; after BC-012 it's `include_router(build_router(scout_checks))`.
+  links: BC-010 (the asymmetry this closes), BC-012 (prerequisite), BC-011 (the target-container waterfall will also want HTTP probes — same shape).
 
 - **DI refactor to replace env-flag mocking**
   trigger: BC-001 plan 2026-10-29 — explicit "pragmatic debt" called out

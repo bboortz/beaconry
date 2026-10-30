@@ -39,9 +39,12 @@ volumes:
 
 ## Healthcheck patterns for beaconry services
 
-- **Hub (FastAPI)**: `["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]`
-- **Scout (no HTTP)**: `["CMD-SHELL", "grep -q scout.py /proc/*/cmdline 2>/dev/null"]`
-- **Process check**: `["CMD-SHELL", "pgrep -f scout.py > /dev/null"]`
+**Point every service's compose healthcheck at `/readyz` per `memory/health-checks.md`** (the four-endpoint convention adopted BC-010). The single-`/health` style below is retained as a transitional reference only; new services must adopt `/livez` + `/readyz` + `/startupz` + `/healthz` from day one.
+
+- **Hub (FastAPI, canonical)**: `["CMD", "python3", "-c", "import urllib.request,sys;sys.exit(0 if urllib.request.urlopen('http://localhost:8000/readyz').status==200 else 1)"]`
+- **Scout (file-sentinel analogue)**: `["CMD-SHELL", "test -f /data/scout.ready && [ $(stat -c %Y /data/scout.live) -gt $(( $(date +%s) - 300 )) ]"]`
+- **Legacy single `/health` (hub, pre-BC-010)**: `["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]`
+- **Legacy process check (do not use for new services)**: `["CMD-SHELL", "pgrep -f scout.py > /dev/null"]`
 
 ## Dockerfile template (Python service)
 

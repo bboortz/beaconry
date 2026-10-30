@@ -14,5 +14,6 @@ One-line status board for operator scenarios. Full stories in `BC-NNN-<slug>.md`
 | BC-007 | `make findings` CLI view of CVE state  | shipped     | — (merged to dev)                   |
 | BC-008 | Pre-ship audit protocol (DD-TGD 6a)    | shipped     | — (merged to dev)                   |
 | BC-009 | Real fix execution via Telegram        | shipped     | — (merged to dev)                   |
+| BC-010 | Container health observability (4 endpoints) | shipped     | — (merged to dev)                   |
 
 Lifecycle: `draft → ready → in-progress → shipped`. Status matches each story's frontmatter.

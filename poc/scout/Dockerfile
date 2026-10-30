@@ -9,6 +9,6 @@ RUN curl -sSfL https://raw.githubusercontent.com/anchore/syft/main/install.sh \
 WORKDIR /app
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
-COPY scout.py .
+COPY scout.py health.py ./
 
 CMD ["python3", "-u", "scout.py"]
