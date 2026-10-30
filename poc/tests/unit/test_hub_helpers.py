@@ -720,3 +720,70 @@ async def test_malformed_verify_callback_rejected(monkeypatch: pytest.MonkeyPatc
     await hub.on_button_click(update, context=None)  # type: ignore[arg-type]
     final = str(update.callback_query.edits[-1]["text"])
     assert "malformed" in final.lower() or "invalid" in final.lower()
+
+
+# ── BC-011 close-gap: button-attachment branch coverage ───────────────────────
+
+
+async def test_fix_success_attaches_verify_button_when_policy_matches(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """BC-011 Scenario 1: ✅ Fixed message gets the Verify button only if resolver returns a probe.
+
+    The handler currently emits the terminal state via `query.edit_message_text` with
+    an optional `reply_markup`. This test confirms the keyboard is attached when a
+    policy matches (and `_resolve_probe_for` returns a Probe) and NOT attached
+    when it returns None.
+    """
+    hub.init_db()
+    hub.save_finding(_finding(id="bc11beefcafe0101", source_ref="postgres:16-alpine"))
+    monkeypatch.setattr(hub, "FIX_ENABLED", True, raising=True)
+
+    from poc.hub.executor.base import ExecutionResult
+
+    async def _fake_execute(self: object, f: object) -> ExecutionResult:
+        return ExecutionResult(
+            success=True, message="pulled", command="docker pull postgres:16-alpine"
+        )
+
+    async def _fake_verify(f: object) -> bool:
+        return True
+
+    monkeypatch.setattr(hub.EXECUTORS[0].__class__, "execute", _fake_execute, raising=True)
+    monkeypatch.setattr(hub, "verify_fix", _fake_verify)
+    monkeypatch.setattr(hub, "_resolve_probe_for", lambda _ref: _probe())
+
+    update = _FakeUpdate("fix:bc11beefcafe0101")
+    await hub.on_button_click(update, context=None)  # type: ignore[arg-type]
+    final_edit = update.callback_query.edits[-1]
+    assert "Fixed and verified" in str(final_edit["text"])
+    assert "reply_markup" in final_edit, "verify button must be attached when policy matches"
+
+
+async def test_fix_success_omits_verify_button_when_no_policy(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """BC-011 Scenario 1 (negative): no policy → no Verify button on the Fixed message."""
+    hub.init_db()
+    hub.save_finding(_finding(id="bc11beefcafe0202", source_ref="rare:custom"))
+    monkeypatch.setattr(hub, "FIX_ENABLED", True, raising=True)
+
+    from poc.hub.executor.base import ExecutionResult
+
+    async def _fake_execute(self: object, f: object) -> ExecutionResult:
+        return ExecutionResult(success=True, message="pulled", command="docker pull rare:custom")
+
+    async def _fake_verify(f: object) -> bool:
+        return True
+
+    monkeypatch.setattr(hub.EXECUTORS[0].__class__, "execute", _fake_execute, raising=True)
+    monkeypatch.setattr(hub, "verify_fix", _fake_verify)
+    monkeypatch.setattr(hub, "_resolve_probe_for", lambda _ref: None)
+
+    update = _FakeUpdate("fix:bc11beefcafe0202")
+    await hub.on_button_click(update, context=None)  # type: ignore[arg-type]
+    final_edit = update.callback_query.edits[-1]
+    assert "Fixed and verified" in str(final_edit["text"])
+    assert "reply_markup" not in final_edit, (
+        "no policy → no Verify button; operator shouldn't be prompted to probe nothing"
+    )

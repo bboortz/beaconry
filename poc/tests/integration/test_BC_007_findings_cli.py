@@ -184,7 +184,8 @@ def test_long_fields_truncate_with_ellipsis(tmp_path: Path) -> None:
     assert result.returncode == 0
     assert "…" in result.stdout
     for line in result.stdout.splitlines():
-        assert len(line) <= 110, f"line too long: {line!r}"
+        # BC-011: Status column widened from 9→19 to fit "verification_failed" → 120 chars total.
+        assert len(line) <= 120, f"line too long: {line!r}"
 
 
 def test_unit_format_table_renders_header_and_rows() -> None:
@@ -205,3 +206,82 @@ def test_unit_format_table_renders_header_and_rows() -> None:
     assert "CVE" in output
     assert "CVE-X" in output
     assert "7.5" in output
+
+
+# ── BC-011: new statuses fixed_verified + verification_failed ────────────────
+
+
+def test_bc011_status_filter_accepts_fixed_verified(tmp_path: Path) -> None:
+    """BC-011 close-gap: --status fixed_verified must not be rejected by argparse."""
+    db = _init_dev_db(tmp_path)
+    _insert(
+        db,
+        id="bc11x1",
+        cve_id="CVE-FV",
+        severity="High",
+        cvss=8.0,
+        status="fixed_verified",
+        **_row(),
+    )
+    _insert(db, id="bc11x2", cve_id="CVE-OPEN", severity="High", cvss=8.0, status="open", **_row())
+    result = _run(tmp_path, "--status", "fixed_verified")
+    assert result.returncode == 0, result.stderr
+    assert "CVE-FV" in result.stdout
+    assert "CVE-OPEN" not in result.stdout
+
+
+def test_bc011_status_filter_accepts_verification_failed(tmp_path: Path) -> None:
+    """BC-011 close-gap: --status verification_failed must not be rejected."""
+    db = _init_dev_db(tmp_path)
+    _insert(
+        db,
+        id="bc11x3",
+        cve_id="CVE-VF",
+        severity="Critical",
+        cvss=9.1,
+        status="verification_failed",
+        **_row(),
+    )
+    result = _run(tmp_path, "--status", "verification_failed")
+    assert result.returncode == 0, result.stderr
+    assert "CVE-VF" in result.stdout
+
+
+def test_bc011_sort_rank_puts_verification_failed_near_open(tmp_path: Path) -> None:
+    """verification_failed is an actionable state — should sort before terminal ones."""
+    db = _init_dev_db(tmp_path)
+    _insert(
+        db, id="bc11s1", cve_id="CVE-FIXED", severity="High", cvss=8.0, status="fixed", **_row()
+    )
+    _insert(
+        db,
+        id="bc11s2",
+        cve_id="CVE-VERIFYFAIL",
+        severity="High",
+        cvss=8.0,
+        status="verification_failed",
+        **_row(),
+    )
+    result = _run(tmp_path)
+    assert result.returncode == 0
+    assert result.stdout.index("CVE-VERIFYFAIL") < result.stdout.index("CVE-FIXED"), (
+        "verification_failed must sort before fixed — operator needs to see it first"
+    )
+
+
+def test_bc011_sort_rank_puts_fixed_verified_last(tmp_path: Path) -> None:
+    """fixed_verified is the fully-settled terminal state — sort at the bottom."""
+    db = _init_dev_db(tmp_path)
+    _insert(db, id="bc11s3", cve_id="CVE-OPEN", severity="High", cvss=8.0, status="open", **_row())
+    _insert(
+        db,
+        id="bc11s4",
+        cve_id="CVE-FXV",
+        severity="High",
+        cvss=8.0,
+        status="fixed_verified",
+        **_row(),
+    )
+    result = _run(tmp_path)
+    assert result.returncode == 0
+    assert result.stdout.index("CVE-OPEN") < result.stdout.index("CVE-FXV")

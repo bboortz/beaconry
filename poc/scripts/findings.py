@@ -15,7 +15,16 @@ import sqlite3
 import sys
 from pathlib import Path
 
-STATUS_ORDER = ("open", "snoozed", "accepted", "fixed")
+# BC-011: added fixed_verified + verification_failed. Order defines sort rank —
+# unresolved first, then intermediate, then terminal states grouped together.
+STATUS_ORDER = (
+    "open",
+    "verification_failed",
+    "snoozed",
+    "accepted",
+    "fixed",
+    "fixed_verified",
+)
 STATUS_RANK = {s: i for i, s in enumerate(STATUS_ORDER)}
 
 # (dict-key, header, max_width). Order defines column order.
@@ -28,7 +37,7 @@ COLUMNS: list[tuple[str, str, int]] = [
     ("host", "Host", 14),
     ("source_ref", "Target", 22),
     ("package", "Package", 18),
-    ("status", "Status", 9),
+    ("status", "Status", 19),  # BC-011: fits "verification_failed"
 ]
 SORT_ONLY_COLUMNS = ("tier",)
 
