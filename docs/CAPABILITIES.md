@@ -552,10 +552,11 @@ Enforcement: `poc/scripts/verify_traceability.py` runs as part of `make check`. 
 - **status:** active
 - **origin:** BC-012
 - **design:** memory/health-checks.md § The restart-loop trap (do not step in it)
-- **description:** `beaconry_health.trap` defines `LivezProvider = Callable[[], Literal["alive"]]` and `ReadyzProvider = Callable[[], dict[str, str]]` — incompatible return types. `build_router` accepts them as keyword-only typed arguments. A caller who wires a readyz-shaped provider to the `/livez` slot (reopening the restart-loop trap) gets a pyright error at import time; the trap is syntactically unreachable, not just "documented but trusted". Runtime shadow test asserts the aliases don't collapse to the same object — catches the degenerate refactor where someone unifies them.
+- **description:** `beaconry_health.trap` defines `LivezProvider = Callable[[], Literal["alive"]]` and `ReadyzProvider = Callable[[], dict[str, str]]` — incompatible return types. `build_router` accepts them as keyword-only typed arguments. A caller who wires a readyz-shaped provider to the `/livez` slot (reopening the restart-loop trap) gets a pyright error at import time; the trap is syntactically unreachable, not just "documented but trusted". Enforcement is **actually asserted** by a pyright integration test that writes a misuse fixture and invokes pyright on it (added in post-ship fix branch — the original runtime shadow only caught the trivial case of aliases collapsing to the same object).
 - **supports:** CAP-T038, CAP-T040
 - **verified by:**
   - `poc/tests/unit/test_beaconry_health_trap.py`
+  - `poc/tests/integration/test_BC_012_trap_pyright_enforcement.py`
 
 ### CAP-T042: Dockerfile lint catches forgotten `COPY beaconry_health/` at merge time
 - **type:** technical
