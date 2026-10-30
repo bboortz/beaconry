@@ -773,5 +773,99 @@ async def receive_scan(payload: dict) -> dict:
     return {"status": "ok", "findings": new_findings}
 
 
+# ── BC-017: test-mode endpoints (hard-gated by BEACONRY_TEST_MODE=1) ─────────
+#
+# These endpoints let the e2e test suite drive the handler path without
+# Telegram. ONLY mounted when BEACONRY_TEST_MODE=1 — the guard prevents
+# accidental exposure of DB-write + handler-invoke endpoints in production.
+# See docs/plan/BC-017-e2e-probe-flow-plan.md.
+
+
+if os.environ.get("BEACONRY_TEST_MODE") == "1":
+    log.warning("BC-017 TEST MODE enabled — /__test__/* endpoints mounted")
+
+    # Captured messages from the fake Telegram query. Reset per test via /__test__/reset.
+    _TEST_CAPTURED: list[dict] = []
+
+    class _TestFakeQuery:
+        """Minimal CallbackQuery stub capturing edit_message_text calls."""
+
+        def __init__(self, data: str) -> None:
+            self.data = data
+
+        async def answer(self) -> None:
+            pass
+
+        async def edit_message_text(self, text: str, **kwargs: object) -> None:
+            _TEST_CAPTURED.append({"text": text, **{k: str(v) for k, v in kwargs.items()}})
+
+    class _TestFakeUpdate:
+        def __init__(self, data: str) -> None:
+            self.callback_query = _TestFakeQuery(data)
+
+    @api.post("/__test__/insert-finding")
+    async def test_insert_finding(payload: dict) -> dict:
+        """Write a Finding row to the DB. Fields map to Finding dataclass."""
+        f = Finding(
+            id=payload["id"],
+            host=payload.get("host", "test-host"),
+            cve_id=payload.get("cve_id", "CVE-TEST"),
+            package=payload.get("package", "test-pkg"),
+            version=payload.get("version", "1.0"),
+            fixed_version=payload.get("fixed_version", "1.1"),
+            severity=payload.get("severity", "High"),
+            cvss=float(payload.get("cvss", 8.0)),
+            source_type=payload.get("source_type", "docker"),
+            source_ref=payload.get("source_ref", "test:latest"),
+            description=payload.get("description", "e2e fixture"),
+            tier=int(payload.get("tier", 2)),
+        )
+        init_db()
+        save_finding(f)
+        status = payload.get("status")
+        if status:
+            set_status(f.id, status)
+        return {"ok": True, "id": f.id, "status": get_status(f.id)}
+
+    @api.post("/__test__/invoke-callback")
+    async def test_invoke_callback(payload: dict) -> dict:
+        """Craft a fake Update + call on_button_click. Capture terminal edits."""
+        callback_data = payload["callback_data"]
+        _TEST_CAPTURED.clear()
+        update = _TestFakeUpdate(callback_data)
+        await on_button_click(update, context=None)  # type: ignore[arg-type]
+        return {"ok": True, "edits": list(_TEST_CAPTURED)}
+
+    @api.get("/__test__/messages")
+    async def test_messages() -> dict:
+        return {"edits": list(_TEST_CAPTURED)}
+
+    @api.get("/__test__/status/{finding_id}")
+    async def test_status(finding_id: str) -> dict:
+        return {"id": finding_id, "status": get_status(finding_id)}
+
+    @api.post("/__test__/reset")
+    async def test_reset(payload: dict | None = None) -> dict:
+        _TEST_CAPTURED.clear()
+        wipe_db = (payload or {}).get("wipe_db", False)
+        if wipe_db:
+            con = sqlite3.connect(DB_PATH)
+            con.execute("DELETE FROM findings")
+            con.commit()
+            con.close()
+        return {"ok": True, "wiped": bool(wipe_db)}
+
+    @api.get("/__test__/all-findings")
+    async def test_all_findings() -> dict:
+        con = sqlite3.connect(DB_PATH)
+        rows = con.execute("SELECT id, cve_id, source_ref, status FROM findings").fetchall()
+        con.close()
+        return {
+            "findings": [
+                {"id": r[0], "cve_id": r[1], "source_ref": r[2], "status": r[3]} for r in rows
+            ]
+        }
+
+
 if __name__ == "__main__":
     uvicorn.run("hub:api", host="0.0.0.0", port=8000, log_level="info")

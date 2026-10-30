@@ -1,4 +1,4 @@
-.PHONY: help lint format type test check check-full demo smoke clean install-hooks verify-traceability verify-dockerfile-health-copy verify-memory-drift verify-compose-env-propagation verify-docs-drift findings status
+.PHONY: help lint format type test check check-full demo smoke clean install-hooks verify-traceability verify-dockerfile-health-copy verify-memory-drift verify-compose-env-propagation verify-docs-drift findings status test-e2e
 
 PYTHON ?= python3
 PYTEST_ARGS ?=
@@ -33,6 +33,7 @@ help:
 	@echo "  make demo                       docker compose up (real pipeline, host inventory)"
 	@echo "  BEACONRY_MOCK=1 make demo       local Python mock (fast dev loop)"
 	@echo "  make demo ARGS=--self-test      Telegram canary (mock mode only)"
+	@echo "  make test-e2e                   isolated BC-011 probe e2e (BC-017; no Telegram needed)"
 	@echo ""
 	@echo "Housekeeping:"
 	@echo "  make install-hooks              pre-commit install + pre-push"
@@ -100,6 +101,17 @@ install-hooks:
 clean:
 	rm -rf .pytest_cache .ruff_cache .pyright .coverage coverage.xml htmlcov
 	find . -type d -name __pycache__ -exec rm -rf {} +
+
+test-e2e:
+	@echo "==> BC-017: starting isolated test compose stack (project: beaconry-test)"
+	cd poc && docker compose -p beaconry-test -f docker-compose.test.yml up -d --build
+	@echo "==> waiting for hub-test to be ready…"
+	@until curl -sS http://localhost:9000/livez >/dev/null 2>&1; do sleep 1; done
+	@echo "==> running e2e tests"
+	-$(PYTHON) -m pytest -m e2e poc/tests/e2e/ -v --no-cov; EXIT=$$?; \
+	 echo "==> tearing down test stack"; \
+	 cd poc && docker compose -p beaconry-test -f docker-compose.test.yml down -v; \
+	 exit $$EXIT
 
 status:
 	@$(PYTHON) -m poc.scripts.status

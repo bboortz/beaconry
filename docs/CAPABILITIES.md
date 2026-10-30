@@ -694,6 +694,16 @@ Enforcement: `poc/scripts/verify_traceability.py` runs as part of `make check`. 
 - **verified by:**
   - `poc/tests/unit/test_docs_drift_guard.py`
 
+### CAP-T054: Automated end-to-end BC-011 probe flow via `make test-e2e` (no Telegram)
+- **type:** technical
+- **status:** active
+- **origin:** BC-017
+- **design:** memory/workflow.md § Blocking gates (must pass to merge to `dev`)
+- **description:** `poc/docker-compose.test.yml` under compose project name `beaconry-test` brings up `beaconry-hub-test` (bound 127.0.0.1:9000) + `probe-target-test` (nginx with `/healthy` and `/degraded` routes). Hub runs with `BEACONRY_MOCK=1` + `BEACONRY_TEST_MODE=1`; the test-mode guard mounts `/__test__/*` endpoints (`insert-finding`, `invoke-callback`, `messages`, `status/<id>`, `reset`, `all-findings`) that let `pytest -m e2e` drive the full handler chain without Telegram. Covers all 4 BC-011 terminal states, all 6 finding statuses, 5 image-tag scenarios (`:latest`, `:16-alpine`, `:16.1.3-alpine`, `/image:alpine`, `:X.Y`). `make test-e2e` orchestrates up→wait→test→down. Namespaced containers, network, and volume isolate from the operator's running stack.
+- **supports:** CAP-B018, CAP-B011
+- **verified by:**
+  - `poc/tests/e2e/test_BC_011_probe_flow.py`
+
 ### CAP-T017: Orphan tests fail the gate with a copy-pasteable template
 - **type:** technical
 - **status:** active

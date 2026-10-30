@@ -27,6 +27,15 @@ except ImportError:  # fallback to a tiny regex scan when yaml isn't installed
 ENV_READ_RE = re.compile(r'os\.environ\.(?:get|__getitem__)\(\s*["\']([A-Z0-9_]+)["\']')
 BEACONRY_PREFIX = "BEACONRY_"
 
+# Test-mode env vars that intentionally don't need to be in the production
+# docker-compose.yml — they're only read when a dev / BC-017 e2e test harness
+# sets them explicitly (e.g. via docker-compose.test.yml).
+_TEST_MODE_ALLOWLIST: frozenset[str] = frozenset(
+    {
+        "BEACONRY_TEST_MODE",  # BC-017: enables /__test__/* endpoints
+    }
+)
+
 
 def read_env_vars_in_service(service_dir: Path) -> set[str]:
     """Return the set of BEACONRY_* env vars read by any .py file under the service dir."""
@@ -102,7 +111,7 @@ def check_service(poc_root: Path, service_name: str) -> list[str]:
     if not compose.exists():
         return []
     propagated = propagated_env_vars_for_service(compose, service_name)
-    missing = needed - propagated
+    missing = (needed - propagated) - _TEST_MODE_ALLOWLIST
     if not missing:
         return []
     return [

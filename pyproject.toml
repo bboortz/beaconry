@@ -55,6 +55,7 @@ asyncio_mode = "auto"
 markers = [
     "real_tools: opt-in; requires syft + grype on $PATH and nginx:1.24 pulled",
     "compose: opt-in; requires docker + docker compose available",
+    "e2e: opt-in; requires BC-017 test compose stack up (`make test-e2e` orchestrates)",
 ]
 addopts = [
     "-ra",
@@ -62,7 +63,7 @@ addopts = [
     "--cov=poc",
     "--cov-report=term-missing",
     "--cov-config=pyproject.toml",
-    "-m", "not real_tools and not compose",
+    "-m", "not real_tools and not compose and not e2e",
 ]
 filterwarnings = [
     "ignore::DeprecationWarning:pytest_asyncio.*",
