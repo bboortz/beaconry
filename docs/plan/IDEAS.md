@@ -12,6 +12,20 @@ Running list of ideas and discussions that may become future BC-NNN stories.
 
 ---
 
+## Process lessons learned
+
+- **Live-smoke required before marking a BC story shipped if it changes a container runtime**
+  trigger: BC-005 shipped 2026-10-29, live `make demo` run 2026-10-30 immediately surfaced two in-container regressions (token leak via httpx logs, no cap on /scan endpoint). Unit tests and compose-config tests couldn't catch either because they didn't exercise the actual hub.py entry point under docker runtime.
+  priority: now
+  Rule candidate: any story that modifies code reached when `docker compose up` runs needs a manual live-smoke step before `status: shipped`. Add to DD-TGD step 6 or create a step 6a.
+
+- **"Hypocrisy" audit: new BC story must apply its own template conventions**
+  trigger: BC-004 and BC-005 both shipped missing their own "Capabilities delivered" section updates when fix branches added new CAPs.
+  priority: later
+  Rule candidate: fix branches that add capabilities must update the originating story's Capabilities-delivered section in the same commit.
+
+---
+
 ## BC-002 open gaps (not covered by BC-003 draft)
 
 - **Terminal does not mirror the full notification content**

@@ -87,3 +87,20 @@ def test_tag_without_colon_still_filtered() -> None:
 )
 def test_parse_globs_env(globs_env: str, expected: list[str]) -> None:
     assert scout_filter.parse_globs(globs_env) == expected
+
+
+def test_empty_include_narrows_to_nothing() -> None:
+    """BC-005 close-gaps: empty include = no match (operator must explicitly
+    SCOUT_INCLUDE='*' to scan everything; silent zero isn't accidental)."""
+    tags = ["nginx:1.24", "redis:7"]
+    assert scout_filter.filter_image_tags(tags, include_globs=[], exclude_globs=[]) == []
+
+
+def test_filter_result_empty_with_populated_inventory() -> None:
+    """Operator with an inventory that doesn't match the allowlist gets no result —
+    the fail-friendly log message in scan_docker_images relies on this truthiness."""
+    tags = ["busybox:latest", "alpine:3", "myapp:dev"]
+    result = scout_filter.filter_image_tags(
+        tags, include_globs=["nginx*", "redis*", "postgres*"], exclude_globs=[]
+    )
+    assert result == []  # The warning branch in scan_docker_images triggers on this.

@@ -8,6 +8,7 @@ Covers:
     - CAP-T003: Notification message is Telegram-HTML-safe for adversarial descriptions
     - CAP-T008: Hub persists findings to SQLite with idempotent inserts
     - CAP-T015: Per-run cap caps individual sends and triggers a digest
+    - CAP-T019: Compose stack brings up hub + scout with :ro socket mount, healthchecks, env propagation
     - CAP-T020: Hub import suppresses noisy HTTP client loggers so bot tokens don't leak
     - CAP-T021: Hub /scan endpoint applies dedup + cap across the full inventory
 """
@@ -223,6 +224,67 @@ def test_dedup_and_cap_fewer_than_cap() -> None:
     ]
     top, suppressed = hub.dedup_and_cap(findings, cap=5)
     assert len(top) == 2 and suppressed == []
+
+
+def test_health_endpoint_returns_ok() -> None:
+    """CAP-T019 live verification via FastAPI TestClient — no docker required."""
+    from fastapi.testclient import TestClient
+
+    client = TestClient(hub.api)
+    response = client.get("/health")
+    assert response.status_code == 200
+    assert response.json() == {"status": "ok"}
+
+
+async def test_receive_scan_notifies_on_fresh_db(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: object
+) -> None:
+    """BC-005 close-gaps: prove notify IS called when save_finding returns True.
+    The live run only exercised the dedup-across-runs path (DB had entries).
+    """
+    import sqlite3
+
+    fresh_db = tmp_path / "fresh.db"  # type: ignore[operator]
+    monkeypatch.setattr(hub, "DB_PATH", fresh_db)
+    hub.init_db()
+    # sanity: table empty
+    con = sqlite3.connect(fresh_db)
+    assert con.execute("SELECT COUNT(*) FROM findings").fetchone()[0] == 0
+    con.close()
+
+    async def _fake_process(entry: object, host: str) -> list[Finding]:
+        return [_finding(id="fresh-A", cve_id="CVE-NEW", cvss=9.5, source_ref="img:a")]
+
+    notified: list[Finding] = []
+
+    async def _fake_notify(f: Finding) -> None:
+        notified.append(f)
+
+    async def _fake_digest(_: list[Finding]) -> None:
+        pass
+
+    monkeypatch.setattr(hub, "process_sbom_entry", _fake_process)
+    monkeypatch.setattr(hub, "notify", _fake_notify)
+    monkeypatch.setattr(hub, "send_digest", _fake_digest)
+
+    result = await hub.receive_scan(
+        {"host": "h", "sboms": [{"source_meta": {"type": "docker", "image": "img:a"}, "sbom": {}}]}
+    )
+
+    assert result["findings"] == 1
+    assert len(notified) == 1
+    assert notified[0].cve_id == "CVE-NEW"
+
+
+async def test_receive_scan_empty_sbom_list(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Empty scan payload → 0 findings, no crash."""
+
+    async def _fake_digest(_: list[Finding]) -> None:
+        pass
+
+    monkeypatch.setattr(hub, "send_digest", _fake_digest)
+    result = await hub.receive_scan({"host": "h", "sboms": []})
+    assert result == {"status": "ok", "findings": 0}
 
 
 def test_set_status_updates_the_row() -> None:

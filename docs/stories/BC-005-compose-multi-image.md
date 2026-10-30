@@ -117,6 +117,8 @@ Feature: Compose-based multi-image real pipeline demo
 - **CAP-B010: Scout surveys the full Docker inventory with glob allow/deny filtering** (business, aspirational → active) — new.
 - **CAP-T018: Scout filters image tags by include/exclude glob patterns** (technical, active) — new.
 - **CAP-T019: Compose stack brings up hub + scout with correct :ro socket mount, healthchecks, env propagation** (technical, active) — new.
+- **CAP-T020: Hub import suppresses noisy HTTP client loggers so bot tokens don't leak** (technical, active) — new (added in fix branch after live-run surfaced the leak).
+- **CAP-T021: Hub /scan endpoint applies dedup + cap across the full inventory** (technical, active) — new (added in fix branch after live-run showed ~100-message flood).
 
 Extends: CAP-B002 (notification arrives) now cross-image; CAP-B004 (not flooded) now applies across the full inventory.
 

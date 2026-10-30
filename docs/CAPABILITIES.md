@@ -258,10 +258,11 @@ Enforcement: `poc/scripts/verify_traceability.py` runs as part of `make check`. 
 - **status:** active
 - **origin:** BC-005
 - **design:** memory/docker-standard.md
-- **description:** `poc/docker-compose.yml` declares hub + scout services. Hub owns a healthcheck via `/health`, mounts the Docker socket rw (for pulls), and persists the grype DB in the `beaconry-data` named volume. Scout mounts the Docker socket `:ro` and only reads inventory. BC-005 env vars (`SCOUT_INCLUDE`, `SCOUT_EXCLUDE`, `BEACONRY_MAX_FINDINGS_PER_RUN`, `MIN_CVSS`) propagate via `.env` substitution.
+- **description:** `poc/docker-compose.yml` declares hub + scout services. Hub owns a healthcheck via `/health`, mounts the Docker socket rw (for pulls), and persists the grype DB in the `beaconry-data` named volume. Scout mounts the Docker socket `:ro` and only reads inventory. BC-005 env vars (`SCOUT_INCLUDE`, `SCOUT_EXCLUDE`, `BEACONRY_MAX_FINDINGS_PER_RUN`, `MIN_CVSS`) propagate via `.env` substitution. /health endpoint responds with `{"status":"ok"}` (asserted via FastAPI TestClient in unit tier, via healthcheck config in compose tier).
 - **supports:** CAP-B009
 - **verified by:**
   - `poc/tests/integration/test_BC_005_compose.py`
+  - `poc/tests/unit/test_hub_helpers.py`
 
 ### CAP-T016: verify-traceability enforces bidirectional links
 - **type:** technical
