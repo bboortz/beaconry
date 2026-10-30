@@ -726,6 +726,17 @@ Enforcement: `poc/scripts/verify_traceability.py` runs as part of `make check`. 
   - `poc/tests/e2e/test_BC_011_probe_flow.py`
   - `poc/tests/unit/test_hub_helpers.py`
 
+### CAP-T057: Evidence-pointer lint — every ✓ shipping-evidence row with a test-shaped pointer is grep-verified against actual pytest node ids
+- **type:** technical
+- **status:** active
+- **origin:** BC-019
+- **design:** docs/stories/BC-019-verify-evidence-pointers.md
+- **description:** `poc/scripts/verify_evidence_pointers.py` parses every `docs/plan/BC-*-plan.md § Shipping evidence` table and, for every row whose status cell contains `✓`, extracts test-shaped pointers (`file.py[::test_name][[param-id]]`) and asserts they resolve against the real pytest collection (via `pytest --collect-only -q`). File-only pointers starting with `test_` are also checked for on-disk existence; non-test file refs (`hub.py`, `waterfall.py`, ad-hoc scripts) and prose/make-target/URL pointers are intentionally skipped. Deferred rows (⚠️ ❌) and plans without a `## Shipping evidence` section are grandfathered. Wired into `make check` as a fast-tier blocking gate. Closes the vigilance gap exposed by BC-018 (five ✓ rows pointed at vaporware tests). First retroactive run surfaced 12 historical pointer lies across BC-011/BC-012/BC-013/BC-015 — all fixed in the same branch as free regression data.
+- **supports:** CAP-B006
+- **verified by:**
+  - `poc/tests/integration/test_BC_019_verify_evidence_pointers.py`
+  - `poc/tests/unit/test_verify_evidence_pointers.py`
+
 ### CAP-T017: Orphan tests fail the gate with a copy-pasteable template
 - **type:** technical
 - **status:** active

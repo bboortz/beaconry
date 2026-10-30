@@ -102,7 +102,7 @@ Two drifts in two consecutive stories is a trend. BC-015 adds a growing banned-p
 | Planted BC-014 drift caught with named error | unit test | `test_memory_drift_guard.py::test_bc014_drift_is_caught` | ✓ |
 | Planted BC-013 drift caught | unit test | `test_memory_drift_guard.py::test_bc013_drift_is_caught` | ✓ |
 | Exception_regex excepts a legitimate historical mention | unit test | `test_memory_drift_guard.py::test_exception_regex_passes` | ✓ |
-| TOML loader rejects malformed entries | unit test | `test_memory_drift_guard.py::test_malformed_toml_rejected` | ✓ |
+| TOML loader rejects malformed entries | unit test | `test_memory_drift_guard.py::test_loader_rejects_missing_pattern_field`, `test_memory_drift_guard.py::test_loader_rejects_missing_banned_since` | ✓ |
 | Script hooked into `make check` fast tier | integration test | `make check` output includes `verify-memory-drift` passing | ✓ |
 | Regression proof: real BC-014 drift (via git revert) → script catches it | live manual | 2026-10-30 — reverted BC-014 memory close via `git show 38439bf -- memory/design-decisions.md \| git apply --reverse` → script reported 2 BC-014 violations with file:line, pattern, reason, hint. Restored → script reported "3 patterns, 7 files, 0 drifts". Live-proven. | ✓ |
 | Plan template gets memory-drift Shipping evidence row | self-consistency | `docs/plan/_template.md` diff | ✓ |

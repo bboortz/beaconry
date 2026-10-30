@@ -122,17 +122,17 @@ BC-009's `verify_fix` re-scans the pulled image for CVE presence. If the CVE is 
 
 | Scenario / goal | Evidence type | Pointer | Status |
 |---|---|---|---|
-| Policy parser round-trip + malformed raises | unit test | `test_waterfall.py::test_parse_policies_round_trip`, `::test_parse_malformed_raises` | ✓ |
-| Probe resolver returns matching probe / None | unit test | `test_waterfall.py::test_resolve_probe_matches`, `::test_resolve_probe_no_match` | ✓ |
-| TCP probe passes on open port, fails on closed | unit test | `test_waterfall.py::test_tcp_probe_passes`, `::test_tcp_probe_fails` | ✓ |
-| HTTP probe handles 2xx vs 5xx | unit test | `test_waterfall.py::test_http_probe_2xx_passes`, `::test_http_probe_5xx_fails` | ✓ |
-| docker_healthcheck probe reads Health.Status | unit test | `test_waterfall.py::test_docker_healthcheck_probe` | ✓ |
-| Verify button attached only when policy matches | unit test | `test_hub_helpers.py::test_verify_button_only_appears_when_policy_matches` | ✓ |
+| Policy parser round-trip + malformed raises | unit test | `test_waterfall.py::test_parse_policies_single_tcp`, `test_waterfall.py::test_parse_policies_unknown_probe_type_raises` | ✓ |
+| Probe resolver returns matching probe / None | unit test | `test_waterfall.py::test_resolve_probe_matches_exact_image`, `test_waterfall.py::test_resolve_probe_no_match_returns_none` | ✓ |
+| TCP probe passes on open port, fails on closed | unit test | `test_waterfall.py::test_tcp_probe_passes_on_open_port`, `test_waterfall.py::test_tcp_probe_fails_on_connection_refused` | ✓ |
+| HTTP probe handles 2xx vs 5xx | unit test | `test_waterfall.py::test_http_probe_2xx_passes`, `test_waterfall.py::test_http_probe_5xx_fails` | ✓ |
+| docker_healthcheck probe reads Health.Status | unit test | `test_waterfall.py::test_docker_healthcheck_probe_reads_container_health` | ✓ |
+| Verify button attached only when policy matches | unit test | `test_hub_helpers.py::test_fix_success_attaches_verify_button_when_policy_matches` | ✓ |
 | Verify action success → fixed_verified | unit test | `test_hub_helpers.py::test_verify_action_tcp_pass_sets_fixed_verified` | ✓ |
 | Verify action failure → verification_failed + rollback hint | unit test | `test_hub_helpers.py::test_verify_action_tcp_fail_sets_verification_failed` | ✓ |
 | No policy → skip message | unit test | `test_hub_helpers.py::test_verify_action_no_policy_shows_skip_message` | ✓ |
 | Verify idempotence on fixed_verified | unit test | `test_hub_helpers.py::test_verify_action_is_idempotent_on_fixed_verified` | ✓ |
-| make findings surfaces new statuses | unit test | `test_findings_cli.py` (updated) | ✓ |
+| make findings surfaces new statuses | integration test | `test_BC_007_findings_cli.py` (updated for new statuses) | ✓ |
 | CAP-B018 + CAP-T048/T049/T050 registered | verify-traceability | `make check` traceability green | ✓ |
 | README documents probe button + policy env | README diff | awaits update | ✓ |
 | Memory drift pattern added for post-BC-011 claims | TOML diff | `memory_drift_bans.toml` entry added | ✓ |

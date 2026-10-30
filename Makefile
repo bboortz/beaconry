@@ -1,4 +1,4 @@
-.PHONY: help lint format type test check check-full demo smoke clean install-hooks verify-traceability verify-dockerfile-health-copy verify-memory-drift verify-compose-env-propagation verify-docs-drift findings status test-e2e
+.PHONY: help lint format type test check check-full demo smoke clean install-hooks verify-traceability verify-dockerfile-health-copy verify-memory-drift verify-compose-env-propagation verify-docs-drift verify-evidence-pointers findings status test-e2e
 
 PYTHON ?= python3
 PYTEST_ARGS ?=
@@ -17,6 +17,7 @@ help:
 	@echo "  make verify-memory-drift        memory/*.md matches shipped reality (BC-015)"
 	@echo "  make verify-compose-env-propagation     every BEACONRY_* env read by code is in docker-compose.yml (BC-011)"
 	@echo "  make verify-docs-drift          Makefile help + README match code enumerations (BC-016)"
+	@echo "  make verify-evidence-pointers   plan shipping-evidence pointers resolve to real tests (BC-019)"
 	@echo "  make smoke                      bash poc/demo.sh --smoke (non-interactive mock, CI)"
 	@echo ""
 	@echo "Tiers:"
@@ -68,7 +69,10 @@ verify-compose-env-propagation:
 verify-docs-drift:
 	$(PYTHON) -m poc.scripts.verify_docs_drift
 
-check: lint type test verify-traceability verify-dockerfile-health-copy verify-memory-drift verify-compose-env-propagation verify-docs-drift smoke
+verify-evidence-pointers:
+	$(PYTHON) -m poc.scripts.verify_evidence_pointers
+
+check: lint type test verify-traceability verify-dockerfile-health-copy verify-memory-drift verify-compose-env-propagation verify-docs-drift verify-evidence-pointers smoke
 	@echo ""
 	@echo "✓ Fast tier (make check) passed"
 

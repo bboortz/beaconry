@@ -118,6 +118,7 @@ Two tiers (BC-006). Fast tier (`make check`) runs pre-push + the merge gate; ful
 | Memory drift (BC-013/014/… bans) | `make verify-memory-drift` | fast | `make check` |
 | Compose env propagation (`BEACONRY_*` reads ↔ `docker-compose.yml`) | `make verify-compose-env-propagation` | fast | `make check` |
 | Docs drift (Makefile help + README ↔ code enumerations) | `make verify-docs-drift` | fast | `make check` |
+| Evidence-pointer drift (plan shipping-evidence table ↔ pytest collection) | `make verify-evidence-pointers` | fast | `make check` |
 | Smoke | `make smoke` (mocked pipeline) | fast | `make check` |
 | Compose integration | `pytest -m compose` | full | `make check-full` |
 | Real-tools integration | `pytest -m real_tools` | full | `make check-full` |

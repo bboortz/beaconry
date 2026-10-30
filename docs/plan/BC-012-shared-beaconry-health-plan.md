@@ -131,7 +131,7 @@ Purely additive from an operator standpoint. From a developer standpoint:
 |---|---|---|---|
 | Hub mounts endpoints via build_router — behavior unchanged | unit test | test_hub_health.py passes unchanged | ✓ |
 | Scout uses SentinelWriter — behavior unchanged | unit test | test_scout_health.py passes unchanged | ✓ |
-| Typed trap guard rejects dep probes in /livez slot | unit test | `test_beaconry_health_trap.py::test_livez_slot_rejects_readyz_provider` | ✓ |
+| Typed trap guard rejects dep probes in /livez slot | integration test | `test_BC_012_trap_pyright_enforcement.py::test_pyright_rejects_readyz_shaped_fn_in_livez_slot` | ✓ |
 | Dockerfile lint catches forgotten COPY | integration test | `test_BC_012_dockerfile_copy_lint.py` | ✓ |
 | Refactor is behavior-preserving — compose up unchanged | live manual | 2026-10-30 — cold `docker compose up` triggers same chain (`beaconry-hub Healthy` → `beaconry-scout Started`), `make status` prints identical shape to BC-010, `rm -rf /data/grype-db` → `/readyz` 503, `/livez` 200, `make status` → "hub: degraded (failing: grype_db...)" exit 2, hub RestartCount 0→0. Also caught two regressions on first live-verify attempt: scout container ImportError on fastapi (fixed by graceful endpoints import in `__init__.py`); BC-005 compose test used old build context (fixed to use widened poc/ context + -f). Both land in this commit. | ✓ |
 | New-container checklist leads with COPY step | self-consistency | memory/health-checks.md diff | ✓ |

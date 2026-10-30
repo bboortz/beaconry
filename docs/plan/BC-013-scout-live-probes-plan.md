@@ -125,14 +125,14 @@ Detection latency for scout failures is bounded by `SCOUT_LIVE_MAX_AGE_S` (defau
 | Scout /readyz 503 when docker socket probe fails | unit test | `test_scout_http_health.py::test_readyz_reflects_docker_socket` | ✓ |
 | Scout /healthz surfaces last_scan_ts + images_seen | unit test | `test_scout_http_health.py::test_healthz_includes_scan_metrics` | ✓ |
 | Compose scout healthcheck targets /readyz | compose test | `test_BC_010_compose_health_chain.py::test_scout_healthcheck_targets_readyz` (new) | ✓ |
-| Compose scout exposes 127.0.0.1:8001:8001 | compose test | `test_BC_013_compose_scout_port.py` (new) | ✓ |
+| Compose scout exposes 127.0.0.1:8001:8001 | integration test | `test_BC_010_compose_health_chain.py::test_scout_exposes_http_port` | ✓ |
 | make status queries both services via HTTP (no docker exec) | unit test | `test_status_cli.py::test_no_docker_exec_called` | ✓ |
 | make status table shape (NAME/STATE/HEALTH/LAST SCAN/DETAILS) | unit test | `test_status_cli.py::test_table_header_shape` | ✓ |
 | make status all-healthy exit 0 | unit test | `test_status_cli.py::test_exit_0_all_healthy` | ✓ |
-| make status any-degraded exit 1 | unit test | `test_status_cli.py::test_exit_1_degraded` | ✓ |
-| make status any-down exit 2 | unit test | `test_status_cli.py::test_exit_2_down` | ✓ |
+| make status any-degraded exit 1 | unit test | `test_status_cli.py::test_exit_1_hub_degraded` | ✓ |
+| make status any-down exit 2 | unit test | `test_status_cli.py::test_exit_2_hub_down`, `test_status_cli.py::test_exit_2_both_down` | ✓ |
 | make status output contains no raw exception class names | unit test | `test_status_cli.py::test_output_has_no_raw_exception_names` | ✓ |
-| make status partial-up state (hub up, scout down) | unit test | `test_status_cli.py::test_partial_up_state` | ✓ |
+| make status partial-up state (hub up, scout down) | unit test | `test_status_cli.py::test_partial_up_state_hub_up_scout_down` | ✓ |
 | CAP-B017 + CAP-T043/044/045 registered | verify-traceability | `make check` traceability green | ✓ |
 | Live: cold Compose up → make status prints healthy table | live manual | 2026-10-30 — `docker compose up -d` fired `Container beaconry-hub Healthy → beaconry-scout Started` chain; `make status` printed the 5-column table with both services STATE=running HEALTH=healthy; exit 0 | ✓ |
 | Live: scout killed → table shows STATE=stopped within ~2s (not 5min) | live manual | 2026-10-30 — `docker kill beaconry-scout` → next `make status` within 2s showed scout STATE=down DETAILS="container not up"; hub row remained running+healthy independently. BC-010's 5-minute staleness window closed to ~1 second detection latency | ✓ |
