@@ -12,6 +12,15 @@ Running list of ideas and discussions that may become future BC-NNN stories.
 
 ---
 
+## Doc staleness noted (fix opportunistically)
+
+- **CAP-T026 description claims automation is deferred, but CAP-T027 shipped it**
+  trigger: BC-008 audit 2026-10-30. CAP-T026 says "Template-based for now; automated enforcement is a future follow-up". CAP-T027 then landed exactly that automation (parse Shipping evidence tables, fail gate on placeholder/non-✓).
+  priority: later
+  Update CAP-T026 to reference CAP-T027 and remove the "future follow-up" note. Fold into the next change that touches CAPABILITIES.md near those entries — not worth a dedicated branch.
+
+---
+
 ## Process lessons learned
 
 - **Live-smoke required before marking a BC story shipped if it changes a container runtime**
