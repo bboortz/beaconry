@@ -37,6 +37,8 @@ make check           # lint + type + test
 
 Fast tier runs every commit cycle; full tier runs before pushing a feat/fix branch for review (and CI, when it exists). Full-tier opt-in markers skip gracefully when their prerequisites (docker compose, syft+grype) aren't available.
 
+> **First-time `make check-full`?** On a laptop without `docker compose` or `syft`+`grype`, you'll see output like `8 passed, 1 skipped` — that's expected: the opt-in tests mark themselves `skipif` on missing prereqs. The gate still exits 0. Install the prereqs (see POC quickstart below) to activate the full coverage.
+
 ---
 
 ## POC quickstart

@@ -61,3 +61,35 @@ def test_check_full_recipe_invokes_opt_in_markers() -> None:
         f"`make check-full` recipe must invoke pytest with 'compose' + 'real_tools' markers; "
         f"got:\n{recipe}"
     )
+
+
+def test_opt_in_markers_collect_without_error_regardless_of_prereqs() -> None:
+    """BC-006 close-gaps: `pytest -m "compose or real_tools" --collect-only` must
+    succeed even on hosts that lack docker / syft / grype. If collection raises
+    (e.g. a skipif helper crashes instead of returning False), check-full would
+    fail with a non-zero exit — the opposite of the Gherkin "graceful skip"."""
+    import subprocess
+    import sys
+
+    repo_root = MAKEFILE.parent
+    result = subprocess.run(
+        [
+            sys.executable,
+            "-m",
+            "pytest",
+            "-m",
+            "compose or real_tools",
+            "--collect-only",
+            "--no-cov",
+            "-q",
+        ],
+        capture_output=True,
+        text=True,
+        cwd=repo_root,
+        timeout=30,
+    )
+    assert result.returncode == 0, (
+        f"pytest --collect-only exited {result.returncode} for opt-in markers; "
+        f"should be 0 regardless of prereqs.\nstderr:\n{result.stderr}\n"
+        f"stdout:\n{result.stdout}"
+    )
