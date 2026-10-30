@@ -56,7 +56,7 @@ No behavior change in hub.py or mock_bot.py beyond the import fallback — purel
 | `BEACONRY_MOCK=1` back-compat alias still implies `SKIP_GRYPE_DB` | unit test | `test_hub_helpers.py::test_mock_env_still_implies_skip_grype_db` | ✓ |
 | CAPABILITIES bidirectional traceability | verify-traceability | `make check` | ✓ |
 | Scenario 7 dividend — hub routes to a configurable Telegram base URL instead of api.telegram.org | e2e stack | `make test-e2e` (12 passed) + unit test `test_telegram_base_url_env_overrides_default` | ✓ |
-| Scenario 7 dividend — literal `make demo` + host-run telegram-mock recipe | live manual | ⚠️ **DEFERRED** — needs `BEACONRY_TELEGRAM_BASE_URL` added to `docker-compose.yml` env list + `extra_hosts: host.docker.internal:host-gateway` on the hub service for container→host networking. Tracked in `docs/plan/IDEAS.md` as BC-019 candidate. | ⚠️ |
+| Scenario 7 dividend — literal `make demo` + host-run telegram-mock recipe | live manual | ⚠️ **PARKED (2026-10-31)** — the dividend overlaps `BEACONRY_MOCK=1 make demo` and `make test-e2e`; no unique use case justifies the compose plumbing. Entry moved to `docs/plan/IDEAS.md § Parking lot` as BC-020. | ⚠️ |
 | `make check` fast tier green | multi-gate | run after Phase 3 | ✓ |
 
 ---
@@ -76,7 +76,7 @@ Result: hub container crashed with `InvalidToken` from the real `api.telegram.or
 1. `poc/docker-compose.yml` does not propagate `BEACONRY_TELEGRAM_BASE_URL` or `BEACONRY_SKIP_GRYPE_DB` to the hub container (allowlisted in `verify_compose_env_propagation.py` as test-only).
 2. Even propagated, `localhost:9080` inside the hub container does not resolve to the host's telegram-mock. Needs `extra_hosts: host.docker.internal:host-gateway` on the hub service.
 
-The behavioral promise of CAP-T056 (hub routes to a configurable base URL) IS verified — exhaustively via `make test-e2e` + the new unit tests. The dev-ergonomics *literal* recipe is a BC-019 candidate. Added to `docs/plan/IDEAS.md`.
+The behavioral promise of CAP-T056 (hub routes to a configurable base URL) IS verified — exhaustively via `make test-e2e` + the new unit tests. The dev-ergonomics *literal* recipe was first logged as a BC-019 candidate, then (after BC-019 was promoted to the evidence-pointer lint) renumbered to BC-020, then **parked on 2026-10-31**: `BEACONRY_MOCK=1 make demo` already solves the no-real-token case and `make test-e2e` already exercises real python-telegram-bot against the mock. See `docs/plan/IDEAS.md § Parking lot`.
 
 ---
 
