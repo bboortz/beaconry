@@ -11,5 +11,6 @@ One-line status board for operator scenarios. Full stories in `BC-NNN-<slug>.md`
 | BC-004 | Capabilities docs + test traceability  | shipped     | — (merged to dev)                   |
 | BC-005 | Multi-image Compose demo               | shipped     | — (merged to dev)                   |
 | BC-006 | Tighten the shipping gate (tiers)      | shipped     | — (merged to dev)                   |
+| BC-007 | `make findings` CLI view of CVE state  | shipped     | — (merged to dev)                   |
 
 Lifecycle: `draft → ready → in-progress → shipped`. Status matches each story's frontmatter.

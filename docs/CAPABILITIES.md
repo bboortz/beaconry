@@ -89,6 +89,15 @@ Enforcement: `poc/scripts/verify_traceability.py` runs as part of `make check`. 
 - **verified by:**
   - `poc/tests/integration/test_BC_006_gate_tiers.py`
 
+### CAP-B012: Operator reviews current findings state without re-running the pipeline
+- **type:** business
+- **status:** active
+- **origin:** BC-007
+- **design:** DESIGN.md § Architecture
+- **description:** `make findings` prints a formatted table from the dev SQLite DB — CVE, severity, CVSS, host, target image, package, status. Sorted by status (open → snoozed → accepted → fixed) then by -cvss. `make findings STATUS=accepted` filters. Pure read, no network or Docker. Honors `DATA_DIR` env so it works against both local `.beaconry-cache/beaconry.db` and the Compose named volume at `/data`.
+- **verified by:**
+  - `poc/tests/integration/test_BC_007_findings_cli.py`
+
 ### CAP-B006: Operator has a clear development process to contribute
 - **type:** business
 - **status:** active
@@ -310,6 +319,16 @@ Enforcement: `poc/scripts/verify_traceability.py` runs as part of `make check`. 
 - **supports:** CAP-B011
 - **verified by:**
   - `poc/tests/integration/test_BC_006_gate_tiers.py`
+
+### CAP-T025: Findings reporter reads SQLite, formats a table, honors STATUS filter
+- **type:** technical
+- **status:** active
+- **origin:** BC-007
+- **design:** DESIGN.md § Architecture
+- **description:** `poc/scripts/findings.py` opens the dev DB in read-only mode (`?mode=ro` SQLite URI), queries findings (optionally filtered by `--status`), sorts by (status rank, -cvss), and prints via `format_table` — a pure helper that pads/truncates each column with "…". No side effects on the DB file (mtime unchanged after invocation). Exit always 0.
+- **supports:** CAP-B012
+- **verified by:**
+  - `poc/tests/integration/test_BC_007_findings_cli.py`
 
 ### CAP-T022: Fix/feat branches without a plan doc fail the gate
 - **type:** technical

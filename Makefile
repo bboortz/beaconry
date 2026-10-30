@@ -1,4 +1,4 @@
-.PHONY: help lint format type test check check-full demo smoke clean install-hooks verify-traceability
+.PHONY: help lint format type test check check-full demo smoke clean install-hooks verify-traceability findings
 
 PYTHON ?= python3
 PYTEST_ARGS ?=
@@ -14,6 +14,7 @@ help:
 	@echo "  make verify-traceability   docs/CAPABILITIES.md ↔ tests bidirectional check"
 	@echo "  make check         FAST TIER — lint + type + test + verify-traceability + smoke (~7s)"
 	@echo "  make check-full    FULL TIER — check + pytest -m 'compose or real_tools' (~1-2m)"
+	@echo "  make findings                read-only CLI view of findings DB (STATUS=open|snoozed|accepted|fixed)"
 	@echo "  make demo                    docker compose up (real pipeline, host inventory)"
 	@echo "  BEACONRY_MOCK=1 make demo    local Python mock (fast dev loop)"
 	@echo "  make demo ARGS=--self-test   Telegram canary (mock mode only)"
@@ -48,6 +49,9 @@ check-full: check
 	pytest -m "compose or real_tools" --no-cov
 	@echo ""
 	@echo "✓ Full tier (make check-full) passed"
+
+findings:
+	@$(PYTHON) -m poc.scripts.findings $(if $(STATUS),--status $(STATUS))
 
 demo:
 	@if [ "$$BEACONRY_MOCK" = "1" ]; then \

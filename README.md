@@ -32,6 +32,7 @@ make check           # lint + type + test
 | `make test`   | — | `pytest` with coverage | ~3s | pre-push + make check |
 | `make verify-traceability` | — | CAPABILITIES.md ↔ tests + plan-doc enforcement | <1s | make check |
 | `make smoke`  | — | end-to-end pipeline (mocked) | ~2s | make check |
+| `make findings`  | — | print current findings DB (read-only; `STATUS=accepted` filters) | <1s | manual |
 | **`make check`** | **fast** | lint + type + test + verify-traceability + smoke | **~7s** | **pre-push + merge gate** |
 | **`make check-full`** | **full** | `make check` + `pytest -m "compose or real_tools"` | **~1–2m** | **pre-merge sanity + CI** |
 
