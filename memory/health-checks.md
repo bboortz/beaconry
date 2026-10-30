@@ -50,24 +50,26 @@ scout:
       condition: service_healthy
 ```
 
-## Scout analogue (loop services with no HTTP by default)
+## Scout analogue (file-sentinels for HTTP-less loop services)
 
-Scout and future loop-only services may use file-sentinels in `/data/` instead of an HTTP server:
+**Scout itself migrated to HTTP in BC-013** — runs a tiny FastAPI/uvicorn server on port 8001 and uses the same `build_router` factory hub does. The file-sentinel path below is retained for *future* loop-only services that intentionally stay HTTP-less (e.g. a very narrow sidecar where the HTTP server weight isn't worth it). Prefer HTTP; use file-sentinels only when the simplicity is load-bearing.
 
-- `/livez` → `pgrep -f scout.py` and `/data/scout.live` mtime < `SCAN_INTERVAL + 60s`
-- `/readyz` → `/data/scout.ready` exists (written after Docker socket probe succeeds)
-- `/startupz` → `/data/scout.started` exists (written after first full inventory POSTed)
-- `/healthz` → read `/data/scout.healthz.json` (written each loop with last-scan metrics)
+If you choose file-sentinels, use `beaconry_health.SentinelWriter` and map the four indicators to files under a shared `/data/` dir:
 
-HTTP preferred for anything with an existing HTTP server; file-sentinel acceptable for pure-loop services.
+- `/livez` → process check (e.g. `pgrep -f <loop-name>`) and `/data/<svc>.live` mtime < `LOOP_INTERVAL + 60s`
+- `/readyz` → `/data/<svc>.ready` exists (written once local prereqs are satisfied)
+- `/startupz` → `/data/<svc>.started` exists (written once first outbound work completes)
+- `/healthz` → read `/data/<svc>.healthz.json` (overwritten each loop with the summary a consumer like `make status` reads)
+
+Compose healthcheck for a file-sentinel service tests `scout.ready + scout.live` mtime via `CMD-SHELL`. Note: compose healthchecks over file-sentinels can't catch deadlock-with-fresh-mtime (BC-013's lesson) — HTTP probes do.
 
 ## Checklist — adding a new beaconry container
 
 Before PR'ing a new service (BC-012 made step 1 the smallest work and gate-protected):
 
 - [ ] **`COPY beaconry_health/ ./beaconry_health/`** in your Dockerfile. The lint (`make check` → `verify-dockerfile-health-copy`) fails if you forget this and your service `import`s from the package.
-- [ ] Instantiate / configure, don't reimplement: hub-shaped service → `api.include_router(build_router(my_livez, my_readyz_providers, my_startup_flag_getter, my_healthz_summary))`. Loop-only service → `writer = SentinelWriter(DATA_DIR); writer.live()` etc. The restart-loop trap is enforced by `build_router`'s types — passing a dep-checking probe to the `/livez` slot is a pyright error.
-- [ ] Compose service has a healthcheck pointed at `/readyz` (HTTP) or the sentinel-file test (loop services).
+- [ ] Instantiate / configure, don't reimplement: HTTP-capable service (default — includes scout since BC-013) → `api.include_router(build_router(my_livez, my_readyz_providers, my_startup_flag_getter, my_healthz_summary))`. Pure-loop service that chooses the HTTP-less path → `writer = SentinelWriter(DATA_DIR); writer.live()` etc. The restart-loop trap is enforced by `build_router`'s types — passing a dep-checking probe to the `/livez` slot is a pyright error.
+- [ ] Compose service has a healthcheck pointed at `/readyz` (HTTP, preferred — survives deadlock-with-fresh-mtime) or the sentinel-file test (HTTP-less services only).
 - [ ] Any service that depends on this one declares `condition: service_healthy`.
 - [ ] `make status` includes the new service in its one-line summary.
 - [ ] The new container's Dockerfile ships whatever its healthcheck script needs (python / curl / shell — see `memory/docker-standard.md`).

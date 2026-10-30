@@ -39,12 +39,13 @@ volumes:
 
 ## Healthcheck patterns for beaconry services
 
-**Point every service's compose healthcheck at `/readyz` per `memory/health-checks.md`** (the four-endpoint convention adopted BC-010). The single-`/health` style below is retained as a transitional reference only; new services must adopt `/livez` + `/readyz` + `/startupz` + `/healthz` from day one.
+**Point every service's compose healthcheck at `/readyz` per `memory/health-checks.md`** (the four-endpoint convention adopted BC-010). HTTP is now the canonical path for every beaconry service — scout migrated in BC-013. The file-sentinel style below is retained for intentionally HTTP-less loop services only; HTTP is preferred because it survives deadlock-with-fresh-mtime.
 
 - **Hub (FastAPI, canonical)**: `["CMD", "python3", "-c", "import urllib.request,sys;sys.exit(0 if urllib.request.urlopen('http://localhost:8000/readyz').status==200 else 1)"]`
-- **Scout (file-sentinel analogue)**: `["CMD-SHELL", "test -f /data/scout.ready && [ $(stat -c %Y /data/scout.live) -gt $(( $(date +%s) - 300 )) ]"]`
+- **Scout (FastAPI/uvicorn on 8001, canonical since BC-013)**: `["CMD", "python3", "-c", "import urllib.request,sys;sys.exit(0 if urllib.request.urlopen('http://localhost:8001/readyz').status==200 else 1)"]`
+- **File-sentinel path for HTTP-less loop services** (via `beaconry_health.SentinelWriter`): `["CMD-SHELL", "test -f /data/<svc>.ready && [ $(stat -c %Y /data/<svc>.live) -gt $(( $(date +%s) - 300 )) ]"]`
 - **Legacy single `/health` (hub, pre-BC-010)**: `["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]`
-- **Legacy process check (do not use for new services)**: `["CMD-SHELL", "pgrep -f scout.py > /dev/null"]`
+- **Legacy process check (do not use for new services)**: `["CMD-SHELL", "pgrep -f <svc>.py > /dev/null"]`
 
 ## Dockerfile template (Python service)
 
