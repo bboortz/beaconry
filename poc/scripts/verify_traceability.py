@@ -26,8 +26,8 @@ import sys
 from dataclasses import dataclass, field
 from pathlib import Path
 
-CAP_ID_RE = re.compile(r"\bCAP-[A-Za-z0-9]+\b")
-CAP_HEADING_RE = re.compile(r"^###\s+(CAP-[A-Za-z0-9]+)\s*:\s*(.+?)\s*$")
+CAP_ID_RE = re.compile(r"\bCAP-[A-Za-z0-9]+(?:-[A-Za-z0-9]+)*\b")
+CAP_HEADING_RE = re.compile(r"^###\s+(CAP-[A-Za-z0-9]+(?:-[A-Za-z0-9]+)*)\s*:\s*(.+?)\s*$")
 FIELD_RE = re.compile(r"^-\s+\*\*(?P<key>[a-zA-Z_ ]+):\*\*\s*(?P<value>.*?)\s*$")
 VERIFIED_BY_ITEM_RE = re.compile(r"^\s*-\s+`([^`]+)`\s*$")
 STORY_ID_RE = re.compile(r"\bBC-\d+\b")

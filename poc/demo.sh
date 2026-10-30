@@ -19,6 +19,10 @@ if [[ "${1:-}" == "--smoke" ]]; then
     if [[ -x "$REPO_ROOT/.venv/bin/python" ]]; then
         PY="$REPO_ROOT/.venv/bin/python"
     fi
+    # Smoke MUST be mock — never touches real tools, real Docker, or real
+    # Telegram. BC-005's dispatcher otherwise picks real mode when poc/.env
+    # supplies Telegram creds.
+    export BEACONRY_MOCK=1
     exec "$PY" -m poc.demo --non-interactive
 fi
 

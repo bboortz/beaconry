@@ -495,6 +495,57 @@ def test_branch_plan_doc_check_skipped_on_non_feat_fix_branches(
         )
 
 
+def test_dangling_multi_segment_cap_id_is_reported_in_full(
+    tmp_docs_and_tests: tuple[Path, Path],
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    """Regression: CAP-FOO-BAR must appear whole in the error, not truncated to CAP-FOO."""
+    docs, tests = tmp_docs_and_tests
+    (docs / "plan").mkdir()
+    _write_capabilities(docs, "## Business capabilities\n")
+    _write_test(
+        tests,
+        "multi_segment_dangle",
+        '"""Covers:\n    - CAP-DOES-NOT-EXIST: should fail\n"""\n',
+    )
+
+    from poc.scripts.verify_traceability import run
+
+    rc = run(docs=docs, tests=tests, branch="")
+    assert rc != 0
+    err = capsys.readouterr().err
+    assert "CAP-DOES-NOT-EXIST" in err, f"expected full id in error, got: {err!r}"
+
+
+def test_multi_segment_cap_id_resolves_bidirectionally(
+    tmp_docs_and_tests: tuple[Path, Path],
+) -> None:
+    """A CAP heading with hyphens parses correctly and bidirectional lookup matches."""
+    docs, tests = tmp_docs_and_tests
+    (docs / "plan").mkdir()
+    _write_capabilities(
+        docs,
+        """
+### CAP-FOO-BAR: Multi-segment id
+- **type:** business
+- **status:** active
+- **origin:** BC-999
+- **description:** test fixture
+- **verified by:**
+  - `tests/test_multi.py`
+""",
+    )
+    _write_test(
+        tests,
+        "multi",
+        '"""Covers:\n    - CAP-FOO-BAR: Multi-segment id\n"""\n',
+    )
+
+    from poc.scripts.verify_traceability import run
+
+    assert run(docs=docs, tests=tests, branch="") == 0
+
+
 def test_branch_plan_doc_check_skipped_on_detached_head(
     tmp_docs_and_tests: tuple[Path, Path],
 ) -> None:
