@@ -251,7 +251,11 @@ async def process_sbom_entry(entry: dict, host: str) -> list[Finding]:
         artifact = match.get("artifact", {})
         cvss = extract_cvss(vuln)
         cve_id = vuln["id"]
-        is_kev = _kev.is_known_exploited(cve_id)
+        # BC-028: check KEV against primary id + grype's `relatedVulnerabilities`
+        # aliases. Non-CVE primary ids (GO-*, GHSA-*) often have a CVE alias
+        # that is in the KEV catalog; checking only the primary misses them.
+        related_ids = [r.get("id", "") for r in match.get("relatedVulnerabilities", [])]
+        is_kev = _kev.is_known_exploited_any([cve_id, *related_ids])
 
         # BC-023: KEV bypasses MIN_CVSS. The product thesis is "KEV is
         # empirical exploitation signal; CVSS is theoretical severity." A

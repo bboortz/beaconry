@@ -110,6 +110,17 @@ def is_known_exploited(cve_id: str) -> bool:
     return cve_id.upper() in _cve_ids
 
 
+def is_known_exploited_any(cve_ids: list[str] | tuple[str, ...] | set[str]) -> bool:
+    """BC-028: return True if ANY id in the collection is in the KEV catalog.
+
+    Grype emits a `relatedVulnerabilities` list for most matches — a GO-* or
+    GHSA-* primary id often has a CVE-* alias and vice versa. The CISA KEV
+    catalog only uses CVE-* ids, so lookups keyed on the primary alone miss
+    legitimately-exploited vulns whose CVE alias sits in `related`.
+    """
+    return any(is_known_exploited(cid) for cid in cve_ids)
+
+
 def freshness() -> dict[str, int | str]:
     """/healthz-ready summary of KEV cache state.
 

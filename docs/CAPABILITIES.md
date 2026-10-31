@@ -828,6 +828,16 @@ Enforcement: `poc/scripts/verify_traceability.py` runs as part of `make check`. 
 - **verified by:**
   - `poc/tests/unit/test_verify_per_file_coverage.py`
 
+### CAP-T066: KEV lookup resolves grype's `relatedVulnerabilities` aliases
+- **type:** technical
+- **status:** active
+- **origin:** BC-028
+- **description:** `kev.is_known_exploited_any(ids)` returns True if any id in the collection is in the KEV catalog. `process_sbom_entry` now passes `[vuln["id"], *related_ids]` so a Go stdlib finding like `GO-2023-1703` (not in KEV) with its CVE alias `CVE-2023-44487` (in KEV, HTTP/2 Rapid Reset) correctly gets tier=0. The primary id is preserved for display. Pre-BC-028, non-CVE primary ids (`GO-*`, `GHSA-*`) silently missed KEV lookups.
+- **supports:** CAP-B019
+- **verified by:**
+  - `poc/tests/unit/test_kev.py`
+  - `poc/tests/unit/test_hub_helpers.py`
+
 ### CAP-T017: Orphan tests fail the gate with a copy-pasteable template
 - **type:** technical
 - **status:** active

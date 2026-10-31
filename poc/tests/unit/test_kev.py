@@ -2,6 +2,7 @@
 
 Covers:
     - CAP-T058: CISA KEV feed ingestion — fetch, parse, cache, lookup, freshness
+    - CAP-T066: KEV lookup resolves grype's relatedVulnerabilities aliases
 """
 
 from __future__ import annotations
@@ -135,6 +136,24 @@ def test_unreadable_cache_is_treated_as_unfetched(_isolated_kev_state: Path) -> 
     cache.write_text("not valid json {{{")
     _kev.warm_from_cache_if_any()
     assert _kev.freshness()["kev"] == "unfetched"
+
+
+def test_is_known_exploited_any_returns_true_if_any_in_catalog(
+    _isolated_kev_state: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """BC-028: alias lookup — GO-* primary with CVE alias in KEV must return True."""
+    cache = _isolated_kev_state / "kev_cache.json"
+    cache.write_text(json.dumps({"fetched_at": int(time.time()), "cve_ids": ["CVE-2023-44487"]}))
+    _kev.warm_from_cache_if_any()
+
+    # Primary GO-* is not in KEV, but CVE alias is → True.
+    assert _kev.is_known_exploited_any(["GO-2023-1703", "CVE-2023-44487"]) is True
+    # Only primary (not in KEV), no alias in KEV → False.
+    assert _kev.is_known_exploited_any(["GO-2023-9999", "GHSA-xxxx-yyyy"]) is False
+    # Empty collection → False.
+    assert _kev.is_known_exploited_any([]) is False
+    # Case-insensitive still works via underlying is_known_exploited.
+    assert _kev.is_known_exploited_any(["cve-2023-44487"]) is True
 
 
 def test_empty_env_feed_url_falls_back_to_default(

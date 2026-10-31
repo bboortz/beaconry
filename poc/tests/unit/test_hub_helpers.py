@@ -27,6 +27,7 @@ Covers:
     - CAP-T060: Notification format inserts a KEV header line for tier 0 findings
     - CAP-T062: Digest format surfaces KEV markers for suppressed findings
     - CAP-T063: KEV findings bypass MIN_CVSS filter in hub ingest
+    - CAP-T066: KEV lookup resolves grype's relatedVulnerabilities aliases
 """
 
 from __future__ import annotations
@@ -1092,3 +1093,37 @@ async def test_kev_above_min_cvss_still_tier_0(monkeypatch: pytest.MonkeyPatch) 
     assert len(findings) == 1
     assert findings[0].tier == 0
     assert findings[0].kev is True
+
+
+# ── BC-028: KEV lookup resolves grype's relatedVulnerabilities aliases ───────
+
+
+async def test_kev_resolved_via_related_alias(monkeypatch: pytest.MonkeyPatch) -> None:
+    """BC-028: GO-* primary id with a CVE alias in KEV → finding gets tier=0.
+
+    Non-CVE primary ids (GO-*, GHSA-*) silently miss KEV lookups when we only
+    key on vuln["id"]. BC-028 extended ingest to check grype's
+    relatedVulnerabilities list too. CVE-2023-44487 (HTTP/2 Rapid Reset) is a
+    real-world case: Go stdlib emits GO-2023-1703 primary with CVE alias."""
+    match_with_alias = {
+        "vulnerability": {
+            "id": "GO-2023-1703",
+            "severity": "High",
+            "cvss": [{"metrics": {"baseScore": 7.5}}],
+            "description": "fixture",
+            "fix": {"versions": ["1.21"]},
+        },
+        "artifact": {"name": "stdlib", "version": "1.20"},
+        "relatedVulnerabilities": [{"id": "CVE-2023-44487"}],
+    }
+    findings = await _ingest(
+        monkeypatch,
+        kev_cves={"CVE-2023-44487"},
+        matches=[match_with_alias],
+        min_cvss=9.0,  # 7.5 < 9.0 — bypasses MIN_CVSS only if KEV detected
+    )
+    assert len(findings) == 1, "KEV via alias must survive the MIN_CVSS filter"
+    f = findings[0]
+    assert f.kev is True, "alias in KEV catalog must set finding.kev=True"
+    assert f.tier == 0
+    assert f.cve_id == "GO-2023-1703", "primary id is preserved for display"
