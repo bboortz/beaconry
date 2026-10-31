@@ -65,6 +65,23 @@ Running list of ideas and discussions that may become future BC-NNN stories.
 
 ## Interactive behavior / UX
 
+- **Open-findings heartbeat ("⏰ CVE-X open since …") — needs BC-034**
+  trigger: 2026-10-31 — operator ran `docker image prune -f` expecting findings "not notified in a while" to re-surface. They didn't. Reason: beaconry notifies ONCE per unique finding (dedup by id); no reminder mechanism for findings that landed in a digest and never got individual airtime. The 42 CVE-2026-* at CVSS 9.8 suppressed into the operator's digest 20 min ago may sit at `status=open` indefinitely without further poke.
+  priority: soon
+  Scope sketch: periodic sweep (hourly? daily?) over `findings WHERE status='open' AND last_seen_ts > now - 7d AND (last_notified_ts IS NULL OR last_notified_ts < now - BEACONRY_HEARTBEAT_INTERVAL)`. For each → emit a reminder notification ("⏰ Open since 2026-10-15: CVE-X on nginx:1.24, CVSS 9.8"). New column `last_notified_ts` + env `BEACONRY_HEARTBEAT_INTERVAL` (default 7d). Opt-out via `BEACONRY_HEARTBEAT_ENABLED=0`.
+  **Prerequisite:** BC-034 (last_seen_ts tracking — shipped 2026-10-31).
+
+- **Digest refresh schedule — needs BC-034**
+  trigger: same user interaction as the heartbeat idea. The individual-notification cap is fine (operator doesn't want 50 messages at once), but the digest message in Telegram is read-once-and-forgotten. If the operator ignores it, the 42 suppressed findings vanish from attention.
+  priority: later (heartbeat is the stronger primitive; digest refresh adds marginal value)
+  Scope sketch: on every scan where suppressed-count > N, if more than K hours since last digest for this host, re-send. Dedup-by-ids so a stable set of suppressed findings doesn't produce identical digests every day — only re-send when the suppressed set has changed meaningfully.
+
+- **Stale-row detection + purge — needs BC-034**
+  trigger: 2026-10-31 operator inspection of DB showed 8 findings; some from scans 7+ hours earlier. If beaconry runs for months, DB accumulates rows for images operator no longer uses. BC-031 reconcile auto-closes `open → fixed_verified` on absence, so the row stays forever — just with a different status.
+  priority: later
+  Scope sketch: `make findings --purge-older-than 90d` + optional nightly job. `DELETE FROM findings WHERE last_seen_ts < now - 90d AND status IN ('fixed_verified', 'accepted')` — only purges resolved rows. Open/snoozed/regressed never purged. Audit log entry per purge for forensics.
+  **Prerequisite:** BC-034.
+
 - ~~**Per-run finding cap + digest mode**~~ **Landed in BC-002 fix branch 2026-10-29**
   `BEACONRY_MAX_FINDINGS_PER_RUN=5` default, top-N by (tier, -cvss), one HTML digest for the rest, CVE-id dedup across packages. Keep as a parked follow-up: *group by package too* (two different CVEs on libexpat1 both surface — reasonable but produces repeat-package UX).
 
