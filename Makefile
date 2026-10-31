@@ -1,4 +1,4 @@
-.PHONY: help lint format type test check check-full demo smoke clean install-hooks verify-traceability verify-dockerfile-health-copy verify-dockerfile-sources verify-memory-drift verify-compose-env-propagation verify-docs-drift verify-evidence-pointers verify-per-file-coverage findings status test-e2e live-rebuild live-status
+.PHONY: help lint format type test check check-full demo smoke clean install-hooks verify-traceability verify-dockerfile-health-copy verify-dockerfile-sources verify-memory-drift verify-compose-env-propagation verify-docs-drift verify-evidence-pointers verify-per-file-coverage findings status test-e2e live-rebuild live-status scan
 
 PYTHON ?= python3
 PYTEST_ARGS ?=
@@ -31,6 +31,8 @@ help:
 	@echo "  make findings                   read-only CLI view of findings DB"
 	@echo "                                  STATUS=regressed|open|verification_failed|snoozed|accepted|fixed|fixed_verified"
 	@echo "                                  BEACONRY_FINDINGS_LOCAL=1 forces local .beaconry-cache DB over compose volume"
+	@echo "  make scan                       trigger an immediate scout scan (BC-037)"
+	@echo "                                  bypasses SCAN_INTERVAL — useful after an out-of-band fix"
 	@echo ""
 	@echo "Demo:"
 	@echo "  make demo                       docker compose up (real pipeline, host inventory)"
@@ -104,6 +106,25 @@ check-full: check
 
 findings:
 	@$(PYTHON) -m poc.scripts.findings $(if $(STATUS),--status $(STATUS))
+
+# BC-037: on-demand scan trigger. Useful after an out-of-band fix
+# (`docker compose pull`, manual rebuild) — operator doesn't want to wait
+# up to SCAN_INTERVAL for the next cycle to re-verify.
+scan:
+	@if ! docker inspect --format='{{.State.Running}}' beaconry-scout 2>/dev/null | grep -q true; then \
+		echo "✗ scout container not running — start the stack with 'make demo' first"; \
+		exit 1; \
+	fi
+	@echo "==> triggering scan via POST http://127.0.0.1:8001/scan/trigger"
+	@response=$$(curl -sS -w '\n%{http_code}' -X POST http://127.0.0.1:8001/scan/trigger); \
+	body=$$(echo "$$response" | head -n 1); \
+	code=$$(echo "$$response" | tail -n 1); \
+	case "$$code" in \
+	  202) echo "✓ scan scheduled — $$body"; echo "   tail scout logs to watch: docker logs -f beaconry-scout" ;; \
+	  409) echo "⚠️  scan already running — $$body"; exit 2 ;; \
+	  503) echo "✗ scout 503 — $$body"; exit 3 ;; \
+	  *)   echo "✗ unexpected HTTP $$code — $$body"; exit 4 ;; \
+	esac
 
 demo:
 	@if [ "$$BEACONRY_MOCK" = "1" ]; then \

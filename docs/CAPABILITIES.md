@@ -968,6 +968,26 @@ Enforcement: `poc/scripts/verify_traceability.py` runs as part of `make check`. 
   - `poc/tests/integration/test_BC_030_internet_facing_detection.py`
   - `poc/tests/unit/test_internet_facing_classification.py`
 
+### CAP-B021: Operator verifies out-of-band fixes without waiting on scan cadence
+- **type:** business
+- **status:** active
+- **origin:** BC-037 — homelab operator workflow: manual `docker compose pull` then "is it clean now?" verification
+- **description:** `make scan` triggers an immediate full scout cycle via `POST /scan/trigger` on the scout HTTP server. BC-033 covers single-image verification through the Fix button; BC-037 covers the multi-service manual-remediation path. Return within ~1s with 202 Accepted + started_at; a concurrent trigger returns 409 Conflict (lock held); Docker socket unavailable → 503. The scheduled SCAN_INTERVAL loop is unaffected — manual triggers share the mutex, not the schedule.
+- **supports:** CAP-B018
+- **verified by:**
+  - `poc/tests/integration/test_BC_037_on_demand_scan.py`
+  - `poc/tests/integration/test_BC_031_scan_reconciliation.py`
+
+### CAP-T081: On-demand scan trigger — POST /scan/trigger with concurrent-run guard
+- **type:** technical
+- **status:** active
+- **origin:** BC-037
+- **description:** Scout exposes a POST route that acquires `_scan_in_progress` synchronously in the HTTP handler (so the very next request sees the flag) and schedules the actual `collect_and_post` work via `asyncio.create_task`. The guard lives in `_try_acquire_scan_lock` / `_release_scan_lock` — a bool suffices for scout's single-threaded event loop. Loop + manual trigger share the same guard — one path can never double-scan. Timer independence: manual trigger does NOT shift the next scheduled loop tick.
+- **supports:** CAP-B021
+- **verified by:**
+  - `poc/tests/unit/test_scan_trigger.py`
+  - `poc/tests/integration/test_BC_037_on_demand_scan.py`
+
 ### CAP-T080: Digest cadence throttle with content-hash fallback
 - **type:** technical
 - **status:** active

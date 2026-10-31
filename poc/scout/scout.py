@@ -68,6 +68,11 @@ _images_seen: int = 0
 _bytes_posted: int = 0
 SCOUT_VERSION = "0.1.0"
 
+# BC-037: on-demand scan trigger. Single-threaded event loop → a bool is a
+# sufficient mutex. Loop + manual trigger share this guard so a concurrent
+# trigger short-circuits with 409 instead of double-scanning the inventory.
+_scan_in_progress: bool = False
+
 
 def parse_globs(env: str) -> list[str]:
     """Parse a comma-separated glob list from an env var. Whitespace tolerated. Empty → []."""
@@ -433,13 +438,62 @@ def _scout_healthz_summary() -> dict:
 # ── FastAPI app + background scan task ───────────────────────────────────────
 
 
+def _try_acquire_scan_lock() -> bool:
+    """BC-037: synchronous flag flip, usable by the HTTP handler so the
+    `_scan_in_progress=True` state is visible to the very next request even
+    before the background task runs. Returns True if we got the lock."""
+    global _scan_in_progress
+    if _scan_in_progress:
+        return False
+    _scan_in_progress = True
+    return True
+
+
+def _release_scan_lock() -> None:
+    global _scan_in_progress
+    _scan_in_progress = False
+
+
+async def _run_scan_once(reason: str) -> str:
+    """BC-037: single guarded entry point for both the scheduled loop and the
+    manual trigger. Returns one of:
+      - "ran"            — scan executed, flag released
+      - "already_running" — another scan was in progress; this call no-op'd
+    `reason` is only used in logs — distinguishes "loop" vs "manual" ingest."""
+    if not _try_acquire_scan_lock():
+        log.info("Scan skipped (%s): another scan already in progress", reason)
+        return "already_running"
+    log.info("Scan triggered: %s", reason)
+    try:
+        await asyncio.to_thread(collect_and_post)
+    except Exception as e:
+        log.error("Scan cycle error (%s): %s", reason, e)
+    finally:
+        _release_scan_lock()
+    return "ran"
+
+
+async def _run_already_held(reason: str) -> None:
+    """BC-037: run `collect_and_post` with the lock ALREADY held by the caller.
+    Used by the HTTP trigger — the handler acquires sync, the background task
+    just does the work and releases. Must not re-check the lock."""
+    log.info("Scan triggered: %s", reason)
+    try:
+        await asyncio.to_thread(collect_and_post)
+    except Exception as e:
+        log.error("Scan cycle error (%s): %s", reason, e)
+    finally:
+        _release_scan_lock()
+
+
 async def _scan_loop_forever() -> None:  # pragma: no cover - infinite async loop; tested live
-    """Background task: run collect_and_post every SCAN_INTERVAL seconds."""
+    """Background task: run `_run_scan_once` every SCAN_INTERVAL seconds.
+
+    The sleep is independent of scan duration — a long scan does not postpone
+    the next tick, and a BC-037 manual trigger does not shift this timer
+    (they share the mutex, not the schedule)."""
     while True:
-        try:
-            await asyncio.to_thread(collect_and_post)
-        except Exception as e:
-            log.error("Scan cycle error: %s", e)
+        await _run_scan_once(reason="loop")
         log.info("Next scan in %ds", SCAN_INTERVAL)
         await asyncio.sleep(SCAN_INTERVAL)
 
@@ -461,6 +515,41 @@ app.include_router(
         healthz_summary_getter=_scout_healthz_summary,
     )
 )
+
+
+@app.post("/scan/trigger")
+async def trigger_scan() -> "_FastAPIResponseOrDict":
+    """BC-037: operator-triggered scan cycle. Returns 202 Accepted with a
+    background task running `_run_scan_once`; concurrent trigger → 409."""
+    from fastapi import HTTPException
+    from fastapi.responses import JSONResponse
+
+    now_ts = int(time.time())
+    if not _docker_socket_ok:
+        raise HTTPException(
+            status_code=503,
+            detail="Docker socket unavailable — cannot run scan. Check scout logs.",
+        )
+    # Synchronous lock-acquire: flip the flag HERE so the very next request
+    # — even before our background task starts — sees `_scan_in_progress=True`
+    # and gets 409. Deferring the flip to inside the task would race.
+    if not _try_acquire_scan_lock():
+        return JSONResponse(
+            status_code=409,
+            content={"status": "already_running", "started_at": now_ts},
+        )
+    # Fire-and-forget — handler returns immediately, scan runs in the background.
+    # The background task releases the lock in its finally.
+    asyncio.create_task(_run_already_held(reason="manual"))
+    return JSONResponse(
+        status_code=202,
+        content={"status": "scheduled", "started_at": now_ts},
+    )
+
+
+# Pure type alias; keeps the return annotation parseable without pulling in
+# fastapi.Response at module import time.
+_FastAPIResponseOrDict = object  # noqa: N816
 
 
 def main():  # pragma: no cover - uvicorn + asyncio entry; tested live
