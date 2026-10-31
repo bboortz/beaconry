@@ -32,6 +32,7 @@ try:
     # Container path: beaconry_health COPY'd next to hub.py on /app
     import audit as _audit
     import kev as _kev
+    import notifiers as _notifiers_pkg
     import urgency as _urgency
     import waterfall as _waterfall
     from beaconry_health import build_router, check_binary, check_db, check_dir_populated
@@ -46,6 +47,7 @@ except ImportError:
     from poc.beaconry_health import build_router, check_binary, check_db, check_dir_populated
     from poc.hub import audit as _audit
     from poc.hub import kev as _kev
+    from poc.hub import notifiers as _notifiers_pkg
     from poc.hub import urgency as _urgency
     from poc.hub import waterfall as _waterfall
     from poc.hub.notifiers import TelegramAdapter
@@ -843,9 +845,7 @@ def _mock_print(label: str, text: str) -> None:
 
 async def notify_regression(finding: Finding, last_fixed_ts: int) -> None:
     """BC-031: 🔥 FIX REGRESSED. Dispatched to all enabled notification adapters."""
-    from poc.hub import notifiers as _n
-
-    if MOCK and not _n.enabled_adapters():
+    if MOCK and not _notifiers_pkg.enabled_adapters():
         _mock_print("Regression", format_regression(finding, last_fixed_ts))
         return
     await _dispatch_regression(finding, last_fixed_ts)
@@ -853,9 +853,7 @@ async def notify_regression(finding: Finding, last_fixed_ts: int) -> None:
 
 async def notify(finding: Finding) -> None:
     """BC-003: first-fire notification. Dispatched to all enabled adapters."""
-    from poc.hub import notifiers as _n
-
-    if MOCK and not _n.enabled_adapters():
+    if MOCK and not _notifiers_pkg.enabled_adapters():
         _mock_print("Notification", format_notification(finding))
         return
     await _dispatch_finding(finding)
@@ -863,9 +861,7 @@ async def notify(finding: Finding) -> None:
 
 async def notify_heartbeat(finding: Finding, open_since_ts: int) -> None:
     """BC-035: periodic reminder. Dispatched to all enabled adapters."""
-    from poc.hub import notifiers as _n
-
-    if MOCK and not _n.enabled_adapters():
+    if MOCK and not _notifiers_pkg.enabled_adapters():
         _mock_print("Heartbeat", format_heartbeat(finding, open_since_ts))
         return
     await _dispatch_heartbeat(finding, open_since_ts)

@@ -198,7 +198,8 @@ con = sqlite3.connect(f'file:{db}?mode=ro', uri=True)
 cols = {r[1] for r in con.execute('PRAGMA table_info(findings)')}
 tier_sort = ', tier' if 'tier' in cols else ''
 kev_col = ', kev' if 'kev' in cols else ''
-sql = f'SELECT cve_id,severity,cvss,host,source_ref,package,status{tier_sort}{kev_col} FROM findings'
+if_col = ', internet_facing' if 'internet_facing' in cols else ''
+sql = f'SELECT cve_id,severity,cvss,host,source_ref,package,status{tier_sort}{kev_col}{if_col} FROM findings'
 if status:
     sql += ' WHERE status=?'
     rows = con.execute(sql, (status,)).fetchall()
@@ -207,22 +208,25 @@ else:
 if not rows:
     msg = f'No findings' + (f\" with status='{status}'\" if status else '') + f' in {db}.'
     print(msg); sys.exit(0)
-# positional indexes: [cve,sev,cvss,host,target,pkg,status,(tier?),(kev?)]
+# positional indexes: [cve,sev,cvss,host,target,pkg,status,(tier?),(kev?),(if?)]
 tier_idx = 7 if tier_sort else None
 kev_idx = (7 + bool(tier_sort)) if kev_col else None
+if_idx = (7 + bool(tier_sort) + bool(kev_col)) if if_col else None
 rows = sorted(rows, key=lambda r: (STATUS_RANK.get(r[6], 99), r[tier_idx] if tier_idx and len(r) > tier_idx else 99, -(r[2] or 0.0)))
-widths = [3, 20, 10, 5, 14, 22, 18, 19]
-headers = ['KEV', 'CVE', 'Severity', 'CVSS', 'Host', 'Target', 'Package', 'Status']
-def fmt(v, w, kev=False):
-    if kev: s = '✓' if v else '—'
-    else:   s = f'{v:.1f}' if isinstance(v, float) else ('' if v is None else str(v))
+widths = [3, 3, 20, 10, 5, 14, 22, 18, 19]
+headers = ['KEV', 'NET', 'CVE', 'Severity', 'CVSS', 'Host', 'Target', 'Package', 'Status']
+def fmt(v, w, kev=False, exposed=False):
+    if kev:        s = '✓' if v else '—'
+    elif exposed:  s = '🌐' if v else '—'
+    else:          s = f'{v:.1f}' if isinstance(v, float) else ('' if v is None else str(v))
     return (s[:w-1] + '…' if len(s) > w else s).ljust(w)
 print('  '.join(h.ljust(w) for h,w in zip(headers, widths)))
 print('  '.join('-'*w for w in widths))
 for r in rows:
     kev_val = r[kev_idx] if kev_idx is not None and len(r) > kev_idx else None
-    display = [kev_val, r[0], r[1], r[2], r[3], r[4], r[5], r[6]]
-    print('  '.join(fmt(display[i], widths[i], kev=(i==0)) for i in range(8)))
+    if_val  = r[if_idx]  if if_idx  is not None and len(r) > if_idx  else None
+    display = [kev_val, if_val, r[0], r[1], r[2], r[3], r[4], r[5], r[6]]
+    print('  '.join(fmt(display[i], widths[i], kev=(i==0), exposed=(i==1)) for i in range(9)))
 """
 
 
