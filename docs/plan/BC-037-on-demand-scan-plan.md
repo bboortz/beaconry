@@ -123,7 +123,7 @@ Additive. On upgrade, operators who do nothing see no change — background loop
 | Loop + manual trigger share the same guard | unit | `test_scan_trigger.py::test_loop_and_manual_share_guard` | ✓ |
 | Manual trigger does NOT shift the scheduled loop timer | unit | `test_scan_trigger.py::test_manual_trigger_does_not_shift_loop_timer` | ✓ |
 | Docker socket missing → 503 | integration | `test_BC_037_on_demand_scan.py::test_trigger_503_when_docker_unavailable` | ✓ |
-| `make scan` surfaces errors when scout container down | manual | post-merge live run with scout stopped | ✓ |
+| `make scan` surfaces errors when scout container down | manual | verified 2026-10-31: `docker stop beaconry-scout && make scan` → exit 1 + "✗ scout container not running" | ✓ |
 | CAP-T081 + CAP-B021 registered + bidirectional | verify-traceability | `docs/CAPABILITIES.md` diff | ✓ |
 | Makefile help lists `scan` | lint | `make help` output; `verify-docs-drift` | ✓ |
 | make check green | multi-gate | `make check` | ✓ |
