@@ -197,6 +197,16 @@ Running list of ideas and discussions that may become future BC-NNN stories.
 
 ---
 
+## Operator action items (research + fix tasks on the live system — not product features)
+
+- **Look up AVG-2909 in the Arch Security Tracker, decide what to do**
+  trigger: 2026-10-31 — first real-world fire. Beaconry told me via Telegram that my own `homelab-dev` has `php 8.5.12-0.1` affected by `AVG-2909` (arbitrary code execution, KEV-flagged via CVE alias), fixed in `8.5.12-1`.
+  status: open — manual action required (ManualAdapter path; fix cmd `sudo pacman -Syu php` shown but not auto-executed)
+  action: (1) visit https://security.archlinux.org/AVG-2909 to confirm the CVE alias + exploit name; (2) decide: upgrade now (`sudo pacman -S php`) OR snooze if there's a reason to wait; (3) rescan to confirm clean. Audit log at `/data/audit.log` has the ingestion event with timestamp.
+  blocked on: nothing — operator action.
+
+---
+
 ## Decisions parked for review
 
 See per-decision review dates in `memory/`:
@@ -212,10 +222,10 @@ See per-decision review dates in `memory/`:
   priority: later (both are marginal; verdict in the trade-off discussion was "not worth the churn")
   Scope: scan — split per drift check if we add a 5th check and CC jumps above 15. parse_capabilities — swap to markdown-it-py if we ever add a new field or shape. Both are "touch when you have to" candidates.
 
-- **Surface KEV-alias context in notifications when a non-CVE primary is tier-0**
-  trigger: BC-028 audit 2026-10-31 — resolve of `GO-2023-1703` → `CVE-2023-44487` works at tier scoring but the Telegram body only shows the primary id. Operator sees `🚨 GO-2023-1703` with no connection to "oh, this is HTTP/2 Rapid Reset" that they've read about.
-  priority: later
-  Scope sketch: in `format_notification`, if `finding.kev` and primary looks like `GO-*`/`GHSA-*`, append a tiny second line: `<i>KEV via CVE-2023-44487</i>` (store the alias at ingest time; new `Finding.kev_cve_alias: str | None` field — DB migration + schema change).
+- **BC-031 candidate — Surface KEV-alias context in notifications when a non-CVE primary is tier-0**
+  trigger: BC-028 audit 2026-10-31 flagged this as a theoretical UX gap. 2026-10-31 real-world fire **confirmed it live**: operator's phone received `🚨 KEV — EXPLOITED IN THE WILD · AVG-2909` with no indication of which CVE alias triggered the KEV match. The description field says "arbitrary code execution" but there's no public exploit name the operator can grep for.
+  priority: soon (promoted from "later" after live confirmation)
+  Scope sketch: in `format_notification`, if `finding.kev` and primary doesn't start with `CVE-`, append a tiny second line: `<i>KEV via CVE-...</i>`. Requires storing the alias at ingest time → new `Finding.kev_cve_alias: str | None` field + DB migration. ~0.5 day. Audit log entry gains the field for free via `**details`.
 
 - **`make audit` CLI to view the audit log**
   trigger: BC-029 shipped 2026-10-31 — log lands at `/data/audit.log` as JSONL. Operators have to `docker exec beaconry-hub tail -f /data/audit.log` to view. Adding a `make audit` would mirror `make findings` + `make status` ergonomics.
