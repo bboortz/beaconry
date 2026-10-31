@@ -928,6 +928,7 @@ Enforcement: `poc/scripts/verify_traceability.py` runs as part of `make check`. 
 - **verified by:**
   - `poc/tests/unit/test_notification_adapters.py`
   - `poc/tests/unit/test_telegram_adapter.py`
+  - `poc/tests/unit/test_hub_env_helpers.py`
 
 ### CAP-T079: Heartbeat sweep reminds operators about stale open findings
 - **type:** technical

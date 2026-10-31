@@ -90,18 +90,29 @@ FIX_ENABLED = os.environ.get("BEACONRY_FIX_ENABLED", "1") != "0"
 # for self-hosted scenarios where the long-term diff feels like surveillance,
 # or when the DB holds historical state the operator doesn't want touched.
 RECONCILE_ENABLED = os.environ.get("BEACONRY_RECONCILE_ENABLED", "1") != "0"
+
+
+def _int_env(key: str, default: int) -> int:
+    """Read `key` as int; treat unset AND empty-string as default.
+
+    Compose's `${VAR:-}` fallback resolves to "" (not unset) when the operator
+    hasn't exported the var, which breaks a bare `int(os.environ.get(key, "N"))`.
+    This helper swallows that gap.
+    """
+    raw = os.environ.get(key, "").strip()
+    return int(raw) if raw else default
+
+
 # BC-035: periodic reminder for findings sitting at status=open for too long.
 # Default ON — the whole point is that silent-forever findings are a bug.
 HEARTBEAT_ENABLED = os.environ.get("BEACONRY_HEARTBEAT_ENABLED", "1") != "0"
 # How long a finding sits before heartbeat re-pokes. Default 7 days.
-HEARTBEAT_INTERVAL_S = int(os.environ.get("BEACONRY_HEARTBEAT_INTERVAL_S", str(7 * 86400)))
+HEARTBEAT_INTERVAL_S = _int_env("BEACONRY_HEARTBEAT_INTERVAL_S", 7 * 86400)
 # How often the sweep runs internally. Default 1h — cheap, catches new-stale.
-HEARTBEAT_SWEEP_INTERVAL_S = int(os.environ.get("BEACONRY_HEARTBEAT_SWEEP_INTERVAL_S", "3600"))
+HEARTBEAT_SWEEP_INTERVAL_S = _int_env("BEACONRY_HEARTBEAT_SWEEP_INTERVAL_S", 3600)
 # BC-035: a finding whose last_seen_ts is older than this window is considered
 # gone from inventory — no heartbeat (BC-031 reconcile will auto-close it).
-HEARTBEAT_LIVENESS_WINDOW_S = int(
-    os.environ.get("BEACONRY_HEARTBEAT_LIVENESS_WINDOW_S", str(7 * 86400))
-)
+HEARTBEAT_LIVENESS_WINDOW_S = _int_env("BEACONRY_HEARTBEAT_LIVENESS_WINDOW_S", 7 * 86400)
 
 DATA_DIR.mkdir(parents=True, exist_ok=True)
 DB_PATH = DATA_DIR / "beaconry.db"
