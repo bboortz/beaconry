@@ -211,13 +211,6 @@ See per-decision review dates in `memory/`:
 
 ---
 
-- **Lint: every hub-local .py is COPY'd by the hub Dockerfile**
-  trigger: BC-020 live-smoke 2026-10-31 — `kev.py` and `urgency.py` landed in `poc/hub/` and were imported by hub.py, but the Dockerfile's explicit `COPY hub/hub.py hub/waterfall.py ./` line didn't carry them. `make check` was green; only `make test-e2e` surfaced the `ModuleNotFoundError`. Same class of regression as BC-012 (which solved it for `beaconry_health/` specifically via `verify-dockerfile-health-copy`).
-  priority: soon
-  Scope sketch: a `make verify-hub-sources-coped` lint that enumerates `poc/hub/*.py` and asserts every file (except `__init__.py` and sibling test files) is present in a `COPY hub/*.py` line in `poc/hub/Dockerfile`. Wire into `make check`.
-  Alternative: switch to `COPY hub/*.py ./` (glob) and lose the explicit list — simpler, but loses the intent-visible signal of "exactly these files ship."
-  links: BC-012 (prior art — same class of guard, different directory), BC-019 (same "move vigilance to lint" ethos).
-
 - **e2e DB fixtures: use hub.init_db() instead of raw CREATE TABLE**
   trigger: BC-020 live-smoke 2026-10-31 — the BC-011 e2e test seeds findings via positional `INSERT INTO findings VALUES (?,?,...)` inside a `docker exec` snippet. BC-020 added a column (`kev`) → the snippet broke silently (`table has 15 columns but 14 values were supplied`). The fixture duplicates the schema; schema changes diverge both copies.
   priority: later

@@ -778,6 +778,17 @@ Enforcement: `poc/scripts/verify_traceability.py` runs as part of `make check`. 
   - `poc/tests/integration/test_BC_020_kev_ingest.py`
   - `poc/tests/unit/test_hub_helpers.py`
 
+### CAP-T061: Dockerfile-sources lint — every service-local .py is COPY'd by its Dockerfile
+- **type:** technical
+- **status:** active
+- **origin:** BC-021 (generalizes BC-012's narrow `verify-dockerfile-health-copy`)
+- **design:** docs/stories/BC-021-dockerfile-copy-lint.md
+- **description:** `poc/scripts/verify_dockerfile_sources.py` enumerates every non-`__init__.py`, non-`test_*.py` file in `poc/<service>/` and asserts it is matched by at least one COPY source in the service's Dockerfile. Three COPY syntaxes supported: explicit filename, glob (`*.py`), and dir (`service/`). Service dirs without a Dockerfile are skipped. Catches BC-020-class ship-time packaging regressions where a new `.py` is imported by the entrypoint but omitted from the explicit `COPY` list.
+- **supports:** CAP-B006
+- **verified by:**
+  - `poc/tests/integration/test_BC_021_dockerfile_sources.py`
+  - `poc/tests/unit/test_verify_dockerfile_sources.py`
+
 ### CAP-T017: Orphan tests fail the gate with a copy-pasteable template
 - **type:** technical
 - **status:** active
