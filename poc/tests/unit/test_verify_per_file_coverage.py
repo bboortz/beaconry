@@ -34,15 +34,15 @@ def test_fails_when_any_file_below_default_floor(tmp_path: Path) -> None:
 
 
 def test_allowlisted_file_held_to_lower_floor(tmp_path: Path) -> None:
-    """scout.py is allowlisted at 30%; 35% passes, 25% fails."""
-    assert "poc/scout/scout.py" in ALLOWLIST
-    scout_floor, _reason = ALLOWLIST["poc/scout/scout.py"]
-    assert scout_floor < 65.0
+    """Pick any allowlisted entry and verify its floor is honored."""
+    assert ALLOWLIST, "allowlist must have at least one entry for this test"
+    sample_path, (sample_floor, _reason) = next(iter(ALLOWLIST.items()))
+    assert sample_floor < 65.0, "allowlisted floors should be below the default"
 
-    cov = _write_cov(tmp_path, {"poc/scout/scout.py": scout_floor + 5})
+    cov = _write_cov(tmp_path, {sample_path: sample_floor + 5})
     assert check_coverage(cov) == []
 
-    cov = _write_cov(tmp_path, {"poc/scout/scout.py": scout_floor - 5})
+    cov = _write_cov(tmp_path, {sample_path: sample_floor - 5})
     errors = check_coverage(cov)
     assert len(errors) == 1
     assert "allowlisted floor" in errors[0]

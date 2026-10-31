@@ -96,7 +96,9 @@ def filter_image_tags(
 # ── syft ─────────────────────────────────────────────────────────────────────
 
 
-def syft_scan(target: str) -> dict | None:
+def syft_scan(
+    target: str,
+) -> dict | None:  # pragma: no cover - subprocess wrapper around syft binary
     result = subprocess.run(
         ["syft", target, "-o", "syft-json", "--quiet"],
         capture_output=True,
@@ -116,7 +118,9 @@ def syft_scan(target: str) -> dict | None:
 # ── Docker images ─────────────────────────────────────────────────────────────
 
 
-def scan_docker_images() -> list[dict]:
+def scan_docker_images() -> list[
+    dict
+]:  # pragma: no cover - docker.from_env() + subprocess around syft
     global _docker_socket_ok
     try:
         client = docker.from_env()
@@ -180,7 +184,9 @@ def parse_pacman_desc(text: str) -> dict:
     return fields
 
 
-def scan_pacman(db_path: str) -> dict | None:
+def scan_pacman(
+    db_path: str,
+) -> dict | None:  # pragma: no cover - filesystem walk; parse_pacman_desc is unit-tested
     local = Path(db_path) / "local"
     if not local.exists():
         log.warning("Pacman DB not found at %s", local)
@@ -235,10 +241,14 @@ def scan_pacman(db_path: str) -> dict | None:
 # ── Open ports ────────────────────────────────────────────────────────────────
 
 
-def scan_open_ports() -> list[dict]:
-    result = subprocess.run(["ss", "-tlnp"], capture_output=True, text=True)
-    ports = []
-    for line in result.stdout.strip().splitlines()[1:]:
+def parse_ss_output(stdout: str) -> list[dict]:
+    """Parse `ss -tlnp` output into a list of {port, address, raw} dicts.
+
+    Pure function — extracted from scan_open_ports so the parsing logic is
+    unit-testable without an actual `ss` binary. First line is the header.
+    """
+    ports: list[dict] = []
+    for line in stdout.strip().splitlines()[1:]:
         parts = line.split()
         if len(parts) < 4:
             continue
@@ -249,10 +259,17 @@ def scan_open_ports() -> list[dict]:
     return ports
 
 
+def scan_open_ports() -> list[
+    dict
+]:  # pragma: no cover - subprocess wrapper; parse_ss_output is unit-tested
+    result = subprocess.run(["ss", "-tlnp"], capture_output=True, text=True)
+    return parse_ss_output(result.stdout)
+
+
 # ── Scan loop ─────────────────────────────────────────────────────────────────
 
 
-def collect_and_post():
+def collect_and_post():  # pragma: no cover - orchestrator; integration-tested live via test-e2e
     """One scan iteration. Bumps module-local state so /healthz surfaces metrics."""
     global _last_scan_ts, _images_seen, _bytes_posted, _started
 
@@ -341,7 +358,7 @@ def _scout_healthz_summary() -> dict:
 # ── FastAPI app + background scan task ───────────────────────────────────────
 
 
-async def _scan_loop_forever() -> None:
+async def _scan_loop_forever() -> None:  # pragma: no cover - infinite async loop; tested live
     """Background task: run collect_and_post every SCAN_INTERVAL seconds."""
     while True:
         try:
@@ -371,7 +388,7 @@ app.include_router(
 )
 
 
-def main():
+def main():  # pragma: no cover - uvicorn + asyncio entry; tested live
     once = "--once" in sys.argv
     if once:
         collect_and_post()

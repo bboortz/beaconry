@@ -106,3 +106,60 @@ def test_filter_result_empty_with_populated_inventory() -> None:
         tags, include_globs=["nginx*", "redis*", "postgres*"], exclude_globs=[]
     )
     assert result == []  # The warning branch in scan_docker_images triggers on this.
+
+
+# ── BC-025: parse_pacman_desc + parse_ss_output ──────────────────────────────
+
+
+def test_parse_pacman_desc_extracts_fields() -> None:
+    desc_text = """%NAME%
+openssl
+
+%VERSION%
+3.0.1-1
+
+%ARCH%
+x86_64
+"""
+    out = scout_filter.parse_pacman_desc(desc_text)
+    assert out == {"NAME": "openssl", "VERSION": "3.0.1-1", "ARCH": "x86_64"}
+
+
+def test_parse_pacman_desc_handles_empty_input() -> None:
+    assert scout_filter.parse_pacman_desc("") == {}
+
+
+def test_parse_pacman_desc_skips_malformed_blocks() -> None:
+    """Line that looks like a value without a preceding key is skipped."""
+    desc_text = "orphan-value\n%NAME%\nfoo\n"
+    out = scout_filter.parse_pacman_desc(desc_text)
+    assert out == {"NAME": "foo"}
+
+
+def test_parse_ss_output_extracts_listening_ports() -> None:
+    stdout = """State    Recv-Q   Send-Q   Local Address:Port   Peer Address:Port
+LISTEN   0        128      0.0.0.0:22           0.0.0.0:*
+LISTEN   0        4096     127.0.0.1:5432       0.0.0.0:*
+"""
+    out = scout_filter.parse_ss_output(stdout)
+    assert len(out) == 2
+    assert out[0]["port"] == "22"
+    assert out[0]["address"] == "0.0.0.0:22"
+    assert out[1]["port"] == "5432"
+    assert out[1]["address"] == "127.0.0.1:5432"
+
+
+def test_parse_ss_output_skips_short_rows() -> None:
+    stdout = "header\nfoo bar\n"
+    assert scout_filter.parse_ss_output(stdout) == []
+
+
+def test_parse_ss_output_skips_non_numeric_port() -> None:
+    """`ss -tlnp` can emit `*:ssh` for named ports; we only emit numeric ports."""
+    stdout = "header\nLISTEN   0   128   0.0.0.0:ssh   *:*\n"
+    assert scout_filter.parse_ss_output(stdout) == []
+
+
+def test_parse_ss_output_empty_input() -> None:
+    assert scout_filter.parse_ss_output("") == []
+    assert scout_filter.parse_ss_output("single-header-only\n") == []

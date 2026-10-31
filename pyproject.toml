@@ -95,12 +95,8 @@ source = ["poc"]
 omit = [
     "poc/tests/*",
     "poc/*/Dockerfile",
-    # Integration-shell modules: subprocess, filesystem, interactive main loops.
-    # These are covered by live tests (make demo + make test-e2e + smoke); their
-    # inclusion in pytest-cov metrics would require fake-mocking that doesn't
-    # improve correctness. Pure helpers that CAN be unit-tested live in sibling
-    # modules (e.g. scout filter functions → test_scout_filter.py).
-    "poc/scout/scout.py",       # syft/grype/pacman subprocess wrappers
+    # Integration-shell modules: interactive main loops where pytest-cov
+    # metrics would require fake-mocking without correctness value.
     "poc/demo.py",              # interactive mock-pipeline orchestrator
 ]
 

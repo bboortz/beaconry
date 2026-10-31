@@ -22,12 +22,6 @@ DEFAULT_MIN_PCT = 65.0
 # Allowlist: {relative_path: (floor_pct, reason)}. Explicit, auditable, small.
 # Any file not in this dict is held to DEFAULT_MIN_PCT.
 ALLOWLIST: dict[str, tuple[float, str]] = {
-    "poc/scout/scout.py": (
-        30.0,
-        "scout is primarily subprocess + filesystem shell for syft/grype/pacman; "
-        "pure functions live in test_scout_filter.py; integration surface tested "
-        "live via make demo + test-e2e. See IDEAS.md 'unit-test scout.py'.",
-    ),
     "poc/demo.py": (
         60.0,
         "interactive main loop + mock-pipeline orchestrator; smoke-tested via "
