@@ -847,6 +847,42 @@ Enforcement: `poc/scripts/verify_traceability.py` runs as part of `make check`. 
 - **verified by:**
   - `poc/tests/unit/test_audit.py`
 
+### CAP-B021: Operator sees regression alerts — a previously-fixed CVE that returns raises a loud alarm
+- **type:** business
+- **status:** active
+- **origin:** BC-031 — operator feedback 2026-10-31: "A fix it button should not be a 'forget it'"
+- **description:** Beaconry's Fix action is not fire-and-forget. Every finding marked `fixed` / `fixed_verified` stays under surveillance; subsequent scout cycles reconcile against the DB. A finding that returns to scan after being fixed transitions to a new `regressed` status and triggers a 🔥 FIX REGRESSED Telegram notification distinct from the first-fire. Operator can opt out via `BEACONRY_RECONCILE_ENABLED=0` for self-hosted scenarios where the long-term diff feels like surveillance.
+- **supports:** CAP-B018
+- **verified by:**
+  - `poc/tests/integration/test_BC_031_scan_reconciliation.py`
+
+### CAP-T071: Scan reconciliation diffs current scan against DB open+fixed rows
+- **type:** technical
+- **status:** active
+- **origin:** BC-031
+- **description:** `hub.reconcile_scan(host, scanned_ids)` queries findings with status in `{open, fixed, fixed_verified, regressed}` for the given host, applies transition rules (open absent → fixed_verified, fixed present → regressed, regressed absent → fixed_verified, snoozed/accepted untouched), writes audit events, returns `(regressed, auto_closed)` lists. Called from `receive_scan` after `process_sbom_entry`. Scoped per-host so a scan from `host-a` cannot touch `host-b` findings. Opt-out via `BEACONRY_RECONCILE_ENABLED=0`.
+- **supports:** CAP-B021
+- **verified by:**
+  - `poc/tests/integration/test_BC_031_scan_reconciliation.py`
+
+### CAP-T072: `regressed` DB status with distinct Telegram notification format
+- **type:** technical
+- **status:** active
+- **origin:** BC-031
+- **description:** New DB status value `regressed` + new `last_fixed_ts` column (idempotent migration). `set_status(..., "fixed"/"fixed_verified")` writes the ts automatically. `format_regression(f, last_fixed_ts)` renders a 🔥 FIX REGRESSED body including the prior-fix date for operator diffing against change logs. Keyboard offers Re-fix + Accept risk. `make findings` surfaces regressed as highest priority in STATUS_ORDER.
+- **supports:** CAP-B021
+- **verified by:**
+  - `poc/tests/integration/test_BC_031_scan_reconciliation.py`
+
+### CAP-T073: Audit log carries `auto_closed`, `regressed` event types
+- **type:** technical
+- **status:** active
+- **origin:** BC-031 (extends CAP-T067)
+- **description:** `audit.append()` is called from `reconcile_scan` with two new event types: `auto_closed` (finding absent from scan → fixed_verified; prev_status + cve_id in details) and `regressed` (fixed finding returned; prev_status + last_fixed_ts + regressed_ts). Operators can grep `/data/audit.log` to see every reconciliation decision beaconry has made over the lifetime of the DB.
+- **supports:** CAP-B021, CAP-T067
+- **verified by:**
+  - `poc/tests/integration/test_BC_031_scan_reconciliation.py`
+
 ### CAP-T017: Orphan tests fail the gate with a copy-pasteable template
 - **type:** technical
 - **status:** active

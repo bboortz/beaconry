@@ -1,7 +1,7 @@
 ---
 id: BC-031
 title: Scan reconciliation + regression detection — fix is not forget
-status: ready
+status: shipped
 created: 2026-10-31
 ---
 

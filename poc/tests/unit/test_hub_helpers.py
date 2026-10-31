@@ -599,15 +599,21 @@ async def test_receive_scan_notifies_on_fresh_db(
     assert notified[0].cve_id == "CVE-NEW"
 
 
-async def test_receive_scan_empty_sbom_list(monkeypatch: pytest.MonkeyPatch) -> None:
+async def test_receive_scan_empty_sbom_list(
+    monkeypatch: pytest.MonkeyPatch, tmp_path: object
+) -> None:
     """Empty scan payload → 0 findings, no crash."""
 
     async def _fake_digest(_: list[Finding]) -> None:
         pass
 
+    # Isolate DB so BC-031 reconcile_scan doesn't collide with other tests'
+    # DB state. (Reconcile queries findings table on every scan.)
+    monkeypatch.setattr(hub, "DB_PATH", tmp_path / "receive-scan-empty.db")  # type: ignore[operator]
+    hub.init_db()
     monkeypatch.setattr(hub, "send_digest", _fake_digest)
     result = await hub.receive_scan({"host": "h", "sboms": []})
-    assert result == {"status": "ok", "findings": 0}
+    assert result == {"status": "ok", "findings": 0, "regressed": 0, "auto_closed": 0}
 
 
 def test_set_status_updates_the_row() -> None:

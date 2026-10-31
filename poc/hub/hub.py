@@ -73,6 +73,11 @@ MIN_CVSS = float(os.environ.get("MIN_CVSS", "7.0"))
 # BC-009: real fix execution is on by default; operator can opt out with
 # BEACONRY_FIX_ENABLED=0 (e.g. for demos or safety-conscious exploration).
 FIX_ENABLED = os.environ.get("BEACONRY_FIX_ENABLED", "1") != "0"
+# BC-031: scan reconciliation. Default ON because the whole point is that
+# "fix is not forget". Operator can opt out with BEACONRY_RECONCILE_ENABLED=0
+# for self-hosted scenarios where the long-term diff feels like surveillance,
+# or when the DB holds historical state the operator doesn't want touched.
+RECONCILE_ENABLED = os.environ.get("BEACONRY_RECONCILE_ENABLED", "1") != "0"
 
 DATA_DIR.mkdir(parents=True, exist_ok=True)
 DB_PATH = DATA_DIR / "beaconry.db"
@@ -119,7 +124,8 @@ def init_db() -> None:
             found_at     INTEGER,
             status       TEXT DEFAULT 'open',
             tier         INTEGER DEFAULT 3,
-            kev          INTEGER DEFAULT 0
+            kev          INTEGER DEFAULT 0,
+            last_fixed_ts INTEGER DEFAULT 0
         )
     """)
     # Idempotent migrations for DBs created before each column existed.
@@ -127,6 +133,11 @@ def init_db() -> None:
         con.execute("ALTER TABLE findings ADD COLUMN tier INTEGER DEFAULT 3")
     with contextlib.suppress(sqlite3.OperationalError):
         con.execute("ALTER TABLE findings ADD COLUMN kev INTEGER DEFAULT 0")
+    # BC-031: last_fixed_ts tracks when a finding first transitioned to fixed/
+    # fixed_verified, so reconcile_scan can show "regressed since <date>" context
+    # in the loud alarm. 0 = never fixed yet.
+    with contextlib.suppress(sqlite3.OperationalError):
+        con.execute("ALTER TABLE findings ADD COLUMN last_fixed_ts INTEGER DEFAULT 0")
     con.commit()
     con.close()
 
@@ -193,11 +204,102 @@ def load_finding(finding_id: str) -> Finding | None:
 
 def set_status(finding_id: str, status: str) -> None:
     con = sqlite3.connect(DB_PATH)
-    con.execute("UPDATE findings SET status=? WHERE id=?", (status, finding_id))
+    # BC-031: record when the fix landed so reconcile_scan can display
+    # "regressed since <date>" if the finding ever reappears.
+    if status in ("fixed", "fixed_verified"):
+        con.execute(
+            "UPDATE findings SET status=?, last_fixed_ts=? WHERE id=?",
+            (status, int(time.time()), finding_id),
+        )
+    else:
+        con.execute("UPDATE findings SET status=? WHERE id=?", (status, finding_id))
     con.commit()
     con.close()
     # BC-029: every operator-visible state transition lands in the audit log.
     _audit.append("status_change", finding_id=finding_id, status=status)
+
+
+def reconcile_scan(host: str, scanned_ids: set[str]) -> tuple[list[Finding], list[Finding]]:
+    """BC-031: diff current scan against DB. Return (regressed, auto_closed).
+
+    State transitions applied:
+      - open      + absent  → fixed_verified  (auto-close, silent happy path)
+      - regressed + absent  → fixed_verified  (re-fix held)
+      - fixed     + present → regressed       (loud alarm, caller sends notification)
+      - fixed_verified + present → regressed  (same)
+      - snoozed / accepted  → unchanged (operator-decided, respect it)
+
+    `scanned_ids` is the set of finding IDs produced by this scout cycle.
+    If RECONCILE_ENABLED is False, returns ([], []) without touching the DB.
+    """
+    if not RECONCILE_ENABLED:
+        return [], []
+    con = sqlite3.connect(DB_PATH)
+    try:
+        rows = con.execute(
+            "SELECT id, host, cve_id, package, version, fixed_version, severity, cvss, "
+            "source_type, source_ref, description, tier, kev, status, last_fixed_ts "
+            "FROM findings WHERE host=? AND status IN "
+            "('open', 'fixed', 'fixed_verified', 'regressed')",
+            (host,),
+        ).fetchall()
+    except sqlite3.OperationalError:
+        # Cold boot / init_db hasn't run yet — nothing to reconcile.
+        con.close()
+        return [], []
+
+    regressed: list[Finding] = []
+    auto_closed: list[Finding] = []
+    now = int(time.time())
+
+    for row in rows:
+        fid = row[0]
+        status = row[13]
+        last_fixed_ts = row[14] or 0
+        in_scan = fid in scanned_ids
+        finding = Finding(
+            id=row[0],
+            host=row[1],
+            cve_id=row[2],
+            package=row[3],
+            version=row[4],
+            fixed_version=row[5],
+            severity=row[6],
+            cvss=row[7],
+            source_type=row[8],
+            source_ref=row[9],
+            description=row[10] or "",
+            tier=row[11],
+            kev=bool(row[12]),
+        )
+
+        if status in ("open", "regressed") and not in_scan:
+            con.execute(
+                "UPDATE findings SET status='fixed_verified', last_fixed_ts=? WHERE id=?",
+                (now, fid),
+            )
+            auto_closed.append(finding)
+            _audit.append(
+                "auto_closed",
+                finding_id=fid,
+                prev_status=status,
+                cve_id=finding.cve_id,
+            )
+        elif status in ("fixed", "fixed_verified") and in_scan:
+            con.execute("UPDATE findings SET status='regressed' WHERE id=?", (fid,))
+            regressed.append(finding)
+            _audit.append(
+                "regressed",
+                finding_id=fid,
+                prev_status=status,
+                cve_id=finding.cve_id,
+                last_fixed_ts=last_fixed_ts,
+                regressed_ts=now,
+            )
+
+    con.commit()
+    con.close()
+    return regressed, auto_closed
 
 
 def get_status(finding_id: str) -> str | None:
@@ -406,6 +508,64 @@ def _render_mock_telegram(text: str) -> str:
     body = "\n".join(f"    │ {line.ljust(width - 1)}│" for line in text.splitlines())
     buttons = "      Inline keyboard: [🔧 Fix now] [⏰ Snooze 4h] [✅ Accept risk]"
     return "\n".join([top, body, bot, buttons])
+
+
+def format_regression(finding: Finding, last_fixed_ts: int) -> str:
+    """BC-031: distinct 🔥 message for a previously-fixed CVE that returned.
+
+    Loud by design — operator thought this was handled months ago; now it's
+    back. Shows the prior-fix timestamp so operator can diff against their
+    change log."""
+    import datetime
+    import html
+
+    def esc(s: str) -> str:
+        return html.escape(s, quote=False)
+
+    fixed_date = (
+        datetime.datetime.fromtimestamp(last_fixed_ts).strftime("%Y-%m-%d")
+        if last_fixed_ts
+        else "unknown"
+    )
+    lines = [
+        "🔥 <b>FIX REGRESSED</b>",
+        f"<b>{esc(finding.cve_id)}</b> is back after being fixed on <code>{fixed_date}</code>.",
+        f"Target: <code>{esc(finding.source_ref)}</code> ({esc(finding.source_type)})",
+        f"Package: <code>{esc(finding.package)} {esc(finding.version)}</code>",
+        "",
+        "<i>Something reinstalled or rolled back the vulnerable version. "
+        "Investigate before re-fixing — the root cause will come back again otherwise.</i>",
+    ]
+    return "\n".join(lines)
+
+
+async def notify_regression(finding: Finding, last_fixed_ts: int) -> None:
+    """BC-031: send the 🔥 FIX REGRESSED alarm. Keyboard offers Investigate +
+    Re-fix + Accept risk — operator chooses between "look first" and "patch
+    again now"."""
+    text = format_regression(finding, last_fixed_ts)
+    if MOCK:
+        print("    [mock] telegram send: regression notification dispatched")
+        print("    ==> Regression")
+        print(_render_mock_telegram(text))
+        return
+    if tg_app is None:
+        log.warning("Telegram app not ready — skipping regression notification")
+        return
+    keyboard = InlineKeyboardMarkup(
+        [
+            [
+                InlineKeyboardButton("🔧 Re-fix", callback_data=f"fix:{finding.id}"),
+                InlineKeyboardButton("✅ Accept risk", callback_data=f"ack:{finding.id}"),
+            ]
+        ]
+    )
+    await tg_app.bot.send_message(
+        chat_id=TELEGRAM_CHAT_ID,
+        text=text,
+        parse_mode="HTML",
+        reply_markup=keyboard,
+    )
 
 
 async def notify(finding: Finding) -> None:
@@ -895,7 +1055,33 @@ async def receive_scan(payload: dict) -> dict:
     if suppressed:
         await send_digest(suppressed)
 
-    return {"status": "ok", "findings": new_findings}
+    # BC-031: reconcile this scan against DB — auto-close findings no longer
+    # present, raise 🔥 FIX REGRESSED alarms for findings that returned after
+    # being marked fixed. Fire-and-forget: a failed notification must not
+    # block the scan response.
+    scanned_ids = {c.id for c in candidates}
+    regressed, auto_closed = reconcile_scan(host, scanned_ids)
+    if regressed:
+        log.warning("BC-031: %d regression(s) detected on %s", len(regressed), host)
+    for f in regressed:
+        # Load the last_fixed_ts from the DB (set_status wrote it on the fix).
+        con = sqlite3.connect(DB_PATH)
+        row = con.execute("SELECT last_fixed_ts FROM findings WHERE id=?", (f.id,)).fetchone()
+        con.close()
+        last_fixed_ts = (row[0] if row else 0) or 0
+        try:
+            await notify_regression(f, last_fixed_ts)
+        except Exception as e:  # noqa: BLE001
+            log.warning("notify_regression failed for %s: %s", f.cve_id, e)
+    if auto_closed:
+        log.info("BC-031: %d auto-close(s) on %s", len(auto_closed), host)
+
+    return {
+        "status": "ok",
+        "findings": new_findings,
+        "regressed": len(regressed),
+        "auto_closed": len(auto_closed),
+    }
 
 
 if __name__ == "__main__":

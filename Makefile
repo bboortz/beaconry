@@ -29,7 +29,7 @@ help:
 	@echo "Operator CLIs:"
 	@echo "  make status                     one-line-per-service health table (BC-013)"
 	@echo "  make findings                   read-only CLI view of findings DB"
-	@echo "                                  STATUS=open|verification_failed|snoozed|accepted|fixed|fixed_verified"
+	@echo "                                  STATUS=regressed|open|verification_failed|snoozed|accepted|fixed|fixed_verified"
 	@echo "                                  BEACONRY_FINDINGS_LOCAL=1 forces local .beaconry-cache DB over compose volume"
 	@echo ""
 	@echo "Demo:"
