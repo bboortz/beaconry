@@ -30,6 +30,7 @@ Covers:
     - CAP-T066: KEV lookup resolves grype's relatedVulnerabilities aliases
     - CAP-T074: Notification body carries a fix-viability indicator
     - CAP-T075: Regression notification body shows `fixed in X`
+    - CAP-T076: verify_fix scans the operator's actual source_ref (not hardcoded `:latest`)
 """
 
 from __future__ import annotations
@@ -1256,6 +1257,80 @@ def test_format_notification_handles_no_upstream_fix_gracefully() -> None:
     assert "fixed in not available" not in body
     assert "fixed in <code>not available</code>" not in body
     assert "no upstream fix available yet" in body
+
+
+async def test_verify_fix_scans_source_ref_not_latest(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """BC-033: verify_fix must scan the operator's actual tag, not a hardcoded
+    `:latest`. Pre-BC-033 this scanned `nginx:latest` even when operator ran
+    `nginx:1.24` — misleading verification signal."""
+    captured_args: list[tuple[str, ...]] = []
+
+    class _FakeProc:
+        returncode = 0
+
+        async def communicate(self) -> tuple[bytes, bytes]:
+            return b'{"artifacts": []}', b""
+
+    async def _spy_create_subprocess_exec(*args: str, **kwargs: object) -> _FakeProc:
+        captured_args.append(args)
+        return _FakeProc()
+
+    async def _fake_grype(_sbom: dict) -> list[dict]:
+        return []  # no matches → verify_fix returns True
+
+    monkeypatch.setattr(hub, "MOCK", False)
+    monkeypatch.setattr(hub.asyncio, "create_subprocess_exec", _spy_create_subprocess_exec)
+    monkeypatch.setattr(hub, "run_grype", _fake_grype)
+
+    f = _finding(source_type="docker", source_ref="nginx:1.24")
+    result = await hub.verify_fix(f)
+
+    assert result is True
+    assert len(captured_args) == 1
+    syft_call = captured_args[0]
+    # The important assertion: syft was called with the actual source_ref,
+    # not a hardcoded `nginx:latest`.
+    assert syft_call[0] == "syft"
+    assert syft_call[1] == "nginx:1.24", (
+        f"BC-033: syft must scan the actual source_ref 'nginx:1.24', "
+        f"not 'nginx:latest'. Got: {syft_call[1]!r}"
+    )
+
+
+async def test_verify_fix_scans_source_ref_for_custom_tags(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Regression guard: works for any tag shape, not just numeric semver."""
+    captured: list[str] = []
+
+    class _FakeProc:
+        returncode = 0
+
+        async def communicate(self) -> tuple[bytes, bytes]:
+            return b'{"artifacts": []}', b""
+
+    async def _spy(*args: str, **_kwargs: object) -> _FakeProc:
+        captured.append(args[1])
+        return _FakeProc()
+
+    async def _fake_grype(_sbom: dict) -> list[dict]:
+        return []
+
+    monkeypatch.setattr(hub, "MOCK", False)
+    monkeypatch.setattr(hub.asyncio, "create_subprocess_exec", _spy)
+    monkeypatch.setattr(hub, "run_grype", _fake_grype)
+
+    for ref in ("postgres:16-alpine", "nginxproxy/nginx-proxy:latest", "myapp:prod-sha-abc123"):
+        f = _finding(source_type="docker", source_ref=ref)
+        await hub.verify_fix(f)
+
+    assert captured == [
+        "postgres:16-alpine",
+        "nginxproxy/nginx-proxy:latest",
+        "myapp:prod-sha-abc123",
+    ]
 
 
 def test_format_regression_handles_no_upstream_fix_gracefully() -> None:

@@ -901,6 +901,15 @@ Enforcement: `poc/scripts/verify_traceability.py` runs as part of `make check`. 
 - **verified by:**
   - `poc/tests/unit/test_hub_helpers.py`
 
+### CAP-T076: verify_fix scans the operator's actual source_ref (not hardcoded `:latest`)
+- **type:** technical
+- **status:** active
+- **origin:** BC-033 — operator 2026-10-31 discovered that tapping Re-fix on a frozen tag would (if the handler had fired) scan the wrong image
+- **description:** Pre-BC-033 `verify_fix` hardcoded `syft {base}:latest` for the post-fix re-scan. This was correct for the pre-BC-014 fix flow (which pulled `:latest`) but became wrong when BC-014 switched to same-track pulls. Result: operator who tapped Fix on `nginx:1.24` got verification against `nginx:latest` — potentially telling them "✅ Fixed" when `nginx:1.24` was still vulnerable, or "⚠️ CVE still present" based on the wrong image's contents. Post-BC-033: `syft {finding.source_ref}` scans the actual tag. Pairs with BC-032's viability indicator — for frozen tags where upstream has no fix, verify_fix now reliably returns False, honest signal end-to-end.
+- **supports:** CAP-B018
+- **verified by:**
+  - `poc/tests/unit/test_hub_helpers.py`
+
 ### CAP-T017: Orphan tests fail the gate with a copy-pasteable template
 - **type:** technical
 - **status:** active

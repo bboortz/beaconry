@@ -430,19 +430,29 @@ async def process_sbom_entry(entry: dict, host: str) -> list[Finding]:
 
 
 async def verify_fix(finding: Finding) -> bool:
-    """Re-scan after fix. Returns True if the CVE is no longer present."""
+    """Re-scan after fix. Returns True if the CVE is no longer present.
+
+    BC-033: scans the SAME source_ref the operator ran — not a hardcoded
+    `:latest`. Pre-BC-033 this hardcoded `:latest` was correct because the
+    pre-BC-014 fix flow pulled `:latest` as "the fix". BC-014 switched to
+    same-track pull (`nginx:1.24` stays `nginx:1.24`), but verify_fix wasn't
+    updated. Result: operator who tapped Fix on `nginx:1.24` got verification
+    against `nginx:latest` — misleading signal, often outright wrong.
+
+    Post-BC-033: `syft <source_ref>` + grype match the actual tag the operator
+    is running. For frozen tags where upstream has no fix, this will reliably
+    return False (CVE still present) — honest signal that pairs with BC-032's
+    `❌ unlikely` viability indicator.
+    """
     if MOCK:
         return True
 
     if finding.source_type != "docker":
         return True  # can't auto-verify non-docker in POC
 
-    base = finding.source_ref.split(":")[0]
-    new_image = f"{base}:latest"
-
     proc = await asyncio.create_subprocess_exec(
         "syft",
-        new_image,
+        finding.source_ref,
         "-o",
         "syft-json",
         "--quiet",

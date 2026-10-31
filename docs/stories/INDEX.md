@@ -34,5 +34,6 @@ One-line status board for operator scenarios. Full stories in `BC-NNN-<slug>.md`
 | BC-030 | internet_facing detection → Tier 1 fires | ready       | (next session)                      |
 | BC-031 | Scan reconciliation + regression detection — fix is not forget | shipped     | — (merged to dev)                   |
 | BC-032 | Fix viability indicator — "fixed in X" + will-this-work signal | shipped     | — (merged to dev)                   |
+| BC-033 | verify_fix scans operator's actual source_ref (not hardcoded :latest) | shipped     | — (merged to dev)                   |
 
 Lifecycle: `draft → ready → in-progress → shipped`. Status matches each story's frontmatter.
