@@ -103,11 +103,6 @@ Running list of ideas and discussions that may become future BC-NNN stories.
   priority: soon
   Current design: Tier 0 KEV + container = auto-fix with no operator confirmation. Pulling `:latest` is unversioned and a supply-chain-attack vector. Candidate change: always require operator confirmation (even for KEV), OR pin to specific SHA256 digests proposed in the notification.
 
-- **Append-only audit log of remediation actions**
-  trigger: virtual-user panel 2026-10-29 (compliance / "I've been bitten" sysadmin)
-  priority: soon
-  When auto-patches run at 3am, operator needs provenance for review. Append-only JSON log of every action (notification sent, button tapped, docker pull, verify result) with timestamps + initiator.
-
 - **Hub docker socket attack surface**
   trigger: virtual-user panel 2026-10-29
   priority: later

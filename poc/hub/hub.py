@@ -30,6 +30,7 @@ from telegram.ext import Application, CallbackQueryHandler, ContextTypes
 
 try:
     # Container path: beaconry_health COPY'd next to hub.py on /app
+    import audit as _audit
     import kev as _kev
     import urgency as _urgency
     import waterfall as _waterfall
@@ -37,6 +38,7 @@ try:
 except ImportError:
     # Host test path: imported as poc.hub.hub, package at poc.beaconry_health
     from poc.beaconry_health import build_router, check_binary, check_db, check_dir_populated
+    from poc.hub import audit as _audit
     from poc.hub import kev as _kev
     from poc.hub import urgency as _urgency
     from poc.hub import waterfall as _waterfall
@@ -157,9 +159,21 @@ def save_finding(f: Finding) -> bool:
         )
         new_row = con.execute("SELECT changes()").fetchone()[0] > 0
         con.commit()
-        return new_row
     finally:
         con.close()
+    # BC-029: new finding → audit entry. Idempotent inserts don't double-log.
+    if new_row:
+        _audit.append(
+            "finding_ingested",
+            finding_id=f.id,
+            cve_id=f.cve_id,
+            host=f.host,
+            source_ref=f.source_ref,
+            tier=f.tier,
+            kev=f.kev,
+            cvss=f.cvss,
+        )
+    return new_row
 
 
 def load_finding(finding_id: str) -> Finding | None:
@@ -182,6 +196,8 @@ def set_status(finding_id: str, status: str) -> None:
     con.execute("UPDATE findings SET status=? WHERE id=?", (status, finding_id))
     con.commit()
     con.close()
+    # BC-029: every operator-visible state transition lands in the audit log.
+    _audit.append("status_change", finding_id=finding_id, status=status)
 
 
 def get_status(finding_id: str) -> str | None:

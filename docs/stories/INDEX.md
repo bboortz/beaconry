@@ -30,5 +30,6 @@ One-line status board for operator scenarios. Full stories in `BC-NNN-<slug>.md`
 | BC-023 | KEV findings bypass MIN_CVSS filter | shipped     | — (merged to dev)                   |
 | BC-024 | verify-traceability enforces reverse direction | shipped     | — (merged to dev)                   |
 | BC-028 | KEV lookup resolves grype related aliases | shipped     | — (merged to dev)                   |
+| BC-029 | Append-only audit log of operator-visible state changes | shipped     | — (merged to dev)                   |
 
 Lifecycle: `draft → ready → in-progress → shipped`. Status matches each story's frontmatter.

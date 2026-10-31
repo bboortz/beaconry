@@ -838,6 +838,15 @@ Enforcement: `poc/scripts/verify_traceability.py` runs as part of `make check`. 
   - `poc/tests/unit/test_kev.py`
   - `poc/tests/unit/test_hub_helpers.py`
 
+### CAP-T067: Append-only audit log of operator-visible state changes
+- **type:** technical
+- **status:** active
+- **origin:** BC-029
+- **description:** `poc/hub/audit.py` writes JSONL events to `${DATA_DIR}/audit.log`. Every status transition (`set_status`) and every new finding (`save_finding`) appends one line. Fire-and-forget: an audit write failure logs a warning but never raises — audit is observability, not control-flow. Append-only by design: never truncates, rewrites, or deletes. `read_events(limit=N)` returns newest-first for operator consumption. Shells grep well: `grep CVE-2023-44487 audit.log` surfaces every event for a specific CVE weeks later.
+- **supports:** CAP-B011, CAP-B018
+- **verified by:**
+  - `poc/tests/unit/test_audit.py`
+
 ### CAP-T017: Orphan tests fail the gate with a copy-pasteable template
 - **type:** technical
 - **status:** active
