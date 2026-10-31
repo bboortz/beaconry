@@ -22,6 +22,8 @@ Covers:
     - CAP-T056: Hub configurable Telegram API base URL via `BEACONRY_TELEGRAM_BASE_URL`
     - CAP-T059: Hub ingest path wires urgency.classify_tier → DB tier column
     - CAP-T060: Notification format inserts a KEV header line for tier 0 findings
+    - CAP-T062: Digest format surfaces KEV markers for suppressed findings
+    - CAP-T063: KEV findings bypass MIN_CVSS filter in hub ingest
 """
 
 from __future__ import annotations

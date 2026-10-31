@@ -9,7 +9,7 @@ metadata:
 
 ## Urgency tiers
 
-*Implemented in BC-020. Pre-BC-020 all findings stored tier=3 (DB default) because `urgency.classify_tier` was never called. BC-020 wired `kev.is_known_exploited` + `classify_tier` into `process_sbom_entry`. `internet_facing` remains hard-coded False pending a future story.*
+*Implemented in BC-020 + BC-023. Pre-BC-020 all findings stored tier=3 (DB default) because `urgency.classify_tier` was never called. BC-020 wired `kev.is_known_exploited` + `classify_tier` into `process_sbom_entry`. BC-023 fixed an ordering bug: pre-BC-023 the MIN_CVSS filter dropped KEV CVEs before the KEV check could flag them (CVE-2023-44487 HTTP/2 Rapid Reset at CVSS 7.5 was silently invisible with MIN_CVSS=9.0). Post-BC-023, KEV CVEs bypass MIN_CVSS. `internet_facing` remains hard-coded False pending a future story.*
 
 ```
 Tier 0 — CISA KEV entry
