@@ -292,66 +292,68 @@ def _rel(path: Path, base: Path) -> str:
         return str(path)
 
 
-def run(docs: Path, tests: Path, *, branch: str | None = None) -> int:  # noqa: C901, PLR0912, PLR0915 — orchestrates 10+ independent lint gates; refactoring to a registry of checker functions is logged in IDEAS.md
-    """Verify bidirectional traceability. Return 0 on success, 1 on any error.
-
-    When `branch` is None, the current git branch is detected automatically.
-    Pass a string to force a specific branch (for tests).
-    """
+def _check_shipping_evidence_all(docs: Path) -> list[str]:
+    """BC-008 pre-ship audit — every shipped story's plan has complete evidence."""
     errors: list[str] = []
-
-    # Branch-plan-doc check (fast, runs first so a missing plan surfaces early).
-    resolved_branch = branch if branch is not None else get_current_branch()
-    errors.extend(check_branch_plan_doc(resolved_branch, docs))
-
-    # BC-008 pre-ship audit — for every shipped story, assert its plan's
-    # Shipping evidence table is complete (no placeholders, every row ✓).
     stories_dir = docs / "stories"
     plans_dir = docs / "plan"
-    if stories_dir.is_dir() and plans_dir.is_dir():
-        for story_file in stories_dir.glob("BC-*.md"):
-            # Match story slug to plan slug by stripping the "BC-NNN-" prefix.
-            slug = story_file.stem  # e.g. BC-008-pre-ship-audit
-            plan_file = plans_dir / f"{slug}-plan.md"
-            errors.extend(check_shipping_evidence(story_file, plan_file))
+    if not (stories_dir.is_dir() and plans_dir.is_dir()):
+        return errors
+    for story_file in stories_dir.glob("BC-*.md"):
+        slug = story_file.stem
+        plan_file = plans_dir / f"{slug}-plan.md"
+        errors.extend(check_shipping_evidence(story_file, plan_file))
+    return errors
 
-    cap_file = docs / "CAPABILITIES.md"
-    caps = parse_capabilities(cap_file)
-    test_files = iter_test_files(tests)
 
+def _collect_test_covers(
+    tests: Path,
+) -> tuple[dict[Path, list[str]], list[str]]:
+    """Parse Covers: blocks for every test file. Returns (covers, orphan_errors)."""
+    errors: list[str] = []
     test_covers: dict[Path, list[str]] = {}
-    for test_path in test_files:
+    for test_path in iter_test_files(tests):
         covers = parse_covers_block(test_path)
         if covers is None:
             errors.append(ORPHAN_TEMPLATE.format(path=_rel(test_path, tests)))
             continue
         test_covers[test_path] = covers
+    return test_covers, errors
 
-    for test_path, cap_ids in test_covers.items():
-        for cap_id in cap_ids:
-            if cap_id not in caps:
-                errors.append(
-                    f"{_rel(test_path, tests)}: references {cap_id} but it is not in "
-                    f"docs/CAPABILITIES.md"
-                )
 
+def _check_dangling_cap_refs(
+    test_covers: dict[Path, list[str]], caps: dict[str, Capability], tests: Path
+) -> list[str]:
+    """Covers block references a cap id that doesn't exist in CAPABILITIES.md."""
+    return [
+        f"{_rel(test_path, tests)}: references {cap_id} but it is not in docs/CAPABILITIES.md"
+        for test_path, cap_ids in test_covers.items()
+        for cap_id in cap_ids
+        if cap_id not in caps
+    ]
+
+
+def _check_verified_by_file_exists(caps: dict[str, Capability], tests: Path) -> list[str]:
+    """Verified-by must list a file that resolves on disk."""
+    errors: list[str] = []
     for cap in caps.values():
         for ref in cap.verified_by:
             candidates = (
                 [Path(ref)]
                 if Path(ref).is_absolute()
-                else [
-                    tests.parent / ref,
-                    tests.parent.parent / ref,
-                    Path.cwd() / ref,
-                ]
+                else [tests.parent / ref, tests.parent.parent / ref, Path.cwd() / ref]
             )
             if not any(c.exists() for c in candidates):
                 errors.append(
                     f"CAPABILITIES.md § {cap.cap_id}: verified_by lists '{ref}' "
                     f"but the file does not exist"
                 )
+    return errors
 
+
+def _check_cap_shape(caps: dict[str, Capability]) -> list[str]:
+    """Active CAPs have verified-by; all CAPs have required fields + a name."""
+    errors: list[str] = []
     for cap in caps.values():
         if cap.status == "active" and not cap.verified_by:
             errors.append(
@@ -372,65 +374,80 @@ def run(docs: Path, tests: Path, *, branch: str | None = None) -> int:  # noqa: 
             errors.append(
                 f"CAPABILITIES.md § {cap.cap_id}: missing human-readable name after the id"
             )
+    return errors
 
+
+def _check_forward_bidirectional(
+    test_covers: dict[Path, list[str]], caps: dict[str, Capability], tests: Path
+) -> list[str]:
+    """Test claims a CAP → the CAP's Verified by must list the test file."""
+    errors: list[str] = []
     for test_path, cap_ids in test_covers.items():
         rel = _rel(test_path, tests.parent)
         for cap_id in cap_ids:
             cap = caps.get(cap_id)
             if cap is None:
                 continue
-            matches = [vb for vb in cap.verified_by if vb.endswith(rel) or rel.endswith(vb)]
-            if not matches:
+            if not any(vb.endswith(rel) or rel.endswith(vb) for vb in cap.verified_by):
                 errors.append(
                     f"CAPABILITIES.md § {cap_id}: test {rel} claims to cover this "
                     f"capability but is not listed in Verified by"
                 )
+    return errors
 
-    # BC-024: reverse-direction bidirectional check.
-    # Pattern: four consecutive feats (BC-018/020/022/023) shipped with
-    # CAPs that listed a test file as verified-by, but the file's Covers:
-    # block didn't claim the CAP id. The forward direction above only
-    # catches "test claims CAP → CAP must list test"; this catches the
-    # reverse "CAP lists test → test's Covers must claim CAP". A file
-    # that doesn't resolve on disk is skipped — pre-existing file-missing
-    # check above already fires, avoiding double-report.
+
+def _check_reverse_bidirectional(
+    test_covers: dict[Path, list[str]], caps: dict[str, Capability], tests: Path
+) -> list[str]:
+    """BC-024: CAP lists a test file → file's Covers must claim the CAP.
+
+    File-missing errors already fire in _check_verified_by_file_exists —
+    this skips those cases to avoid double-report."""
+    errors: list[str] = []
     rels_by_test = {test_path: _rel(test_path, tests.parent) for test_path in test_covers}
     for cap in caps.values():
         for vb in cap.verified_by:
-            # Match the verified-by ref to one of the on-disk test files.
             matched_covers: list[str] | None = None
             for test_path, rel in rels_by_test.items():
                 if vb.endswith(rel) or rel.endswith(vb):
                     matched_covers = test_covers[test_path]
                     break
-            if matched_covers is None:
-                continue  # file-missing error already fires above
-            if cap.cap_id not in matched_covers:
-                errors.append(
-                    f"CAPABILITIES.md § {cap.cap_id} lists {vb} as verified-by, but "
-                    f"that file's Covers: block doesn't claim {cap.cap_id}. "
-                    f"Add '- {cap.cap_id}: ...' to the Covers block, or remove the "
-                    f"file from verified-by."
-                )
+            if matched_covers is None or cap.cap_id in matched_covers:
+                continue
+            errors.append(
+                f"CAPABILITIES.md § {cap.cap_id} lists {vb} as verified-by, but "
+                f"that file's Covers: block doesn't claim {cap.cap_id}. "
+                f"Add '- {cap.cap_id}: ...' to the Covers block, or remove the "
+                f"file from verified-by."
+            )
+    return errors
 
-    # Origin story resolution: each BC-NNN in origin must point to a real story file.
+
+def _check_origin_story_exists(caps: dict[str, Capability], docs: Path) -> list[str]:
+    """Each BC-NNN in a CAP's origin must point to a real docs/stories/BC-NNN-*.md."""
     stories_dir = docs / "stories"
-    if stories_dir.is_dir():
-        story_files = {p.name: p for p in stories_dir.glob("BC-*.md")}
+    if not stories_dir.is_dir():
+        return []
+    story_names = {p.name for p in stories_dir.glob("BC-*.md")}
 
-        def _story_exists(bc_id: str) -> bool:
-            prefix = f"{bc_id}-"
-            return any(name.startswith(prefix) for name in story_files)
+    def _story_exists(bc_id: str) -> bool:
+        prefix = f"{bc_id}-"
+        return any(name.startswith(prefix) for name in story_names)
 
-        for cap in caps.values():
-            for bc_id in STORY_ID_RE.findall(cap.origin):
-                if not _story_exists(bc_id):
-                    errors.append(
-                        f"CAPABILITIES.md § {cap.cap_id}: origin references {bc_id} "
-                        f"but no docs/stories/{bc_id}-*.md was found"
-                    )
+    errors: list[str] = []
+    for cap in caps.values():
+        for bc_id in STORY_ID_RE.findall(cap.origin):
+            if not _story_exists(bc_id):
+                errors.append(
+                    f"CAPABILITIES.md § {cap.cap_id}: origin references {bc_id} "
+                    f"but no docs/stories/{bc_id}-*.md was found"
+                )
+    return errors
 
-    # Design link resolution: file must exist; section (if given) must be a heading.
+
+def _check_design_links(caps: dict[str, Capability], docs: Path) -> list[str]:
+    """Design field file-refs must exist; '§ Heading' refs must match a real heading."""
+    errors: list[str] = []
     repo_root = docs.parent
     for cap in caps.values():
         if not cap.design:
@@ -448,6 +465,35 @@ def run(docs: Path, tests: Path, *, branch: str | None = None) -> int:  # noqa: 
                     f"CAPABILITIES.md § {cap.cap_id}: design references "
                     f"'{file_ref} § {section}' but no such heading exists in that file"
                 )
+    return errors
+
+
+def run(docs: Path, tests: Path, *, branch: str | None = None) -> int:
+    """Verify bidirectional traceability. Return 0 on success, 1 on any error.
+
+    When `branch` is None, the current git branch is detected automatically.
+    Pass a string to force a specific branch (for tests).
+
+    Orchestrates a registry of independent gate checkers — each returns its
+    own list of error strings so that a single failing gate doesn't mask
+    others. Add a new gate by writing `_check_<name>` and appending it to
+    the registry below.
+    """
+    resolved_branch = branch if branch is not None else get_current_branch()
+    caps = parse_capabilities(docs / "CAPABILITIES.md")
+    test_covers, orphan_errors = _collect_test_covers(tests)
+
+    errors: list[str] = []
+    errors.extend(check_branch_plan_doc(resolved_branch, docs))
+    errors.extend(_check_shipping_evidence_all(docs))
+    errors.extend(orphan_errors)
+    errors.extend(_check_dangling_cap_refs(test_covers, caps, tests))
+    errors.extend(_check_verified_by_file_exists(caps, tests))
+    errors.extend(_check_cap_shape(caps))
+    errors.extend(_check_forward_bidirectional(test_covers, caps, tests))
+    errors.extend(_check_reverse_bidirectional(test_covers, caps, tests))
+    errors.extend(_check_origin_story_exists(caps, docs))
+    errors.extend(_check_design_links(caps, docs))
 
     if errors:
         print("verify-traceability: found mismatches:\n", file=sys.stderr)
