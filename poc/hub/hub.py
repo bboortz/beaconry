@@ -90,6 +90,12 @@ FIX_ENABLED = os.environ.get("BEACONRY_FIX_ENABLED", "1") != "0"
 # for self-hosted scenarios where the long-term diff feels like surveillance,
 # or when the DB holds historical state the operator doesn't want touched.
 RECONCILE_ENABLED = os.environ.get("BEACONRY_RECONCILE_ENABLED", "1") != "0"
+# BC-030: internet_facing detection. Default ON because the whole point of
+# BC-030 is making Tier 1 reachable. Set to 0 to force the pre-BC-030 behavior
+# of treating every finding as not internet-facing (Tier 1 unreachable).
+INTERNET_FACING_DETECTION_ENABLED = (
+    os.environ.get("BEACONRY_INTERNET_FACING_DETECTION_ENABLED", "1") != "0"
+)
 
 
 def _int_env(key: str, default: int) -> int:
@@ -162,7 +168,8 @@ def init_db() -> None:
             kev          INTEGER DEFAULT 0,
             last_fixed_ts INTEGER DEFAULT 0,
             last_seen_ts INTEGER DEFAULT 0,
-            last_notified_ts INTEGER DEFAULT 0
+            last_notified_ts INTEGER DEFAULT 0,
+            internet_facing INTEGER DEFAULT 0
         )
     """)
     # Idempotent migrations for DBs created before each column existed.
@@ -203,6 +210,12 @@ def init_db() -> None:
     con.execute(
         "UPDATE findings SET last_notified_ts = found_at WHERE last_notified_ts = 0 AND found_at > 0"
     )
+    # BC-030: internet_facing is 0 (False) for legacy rows — the pre-BC-030
+    # hard-coded value. No backfill: the honest semantic is "unknown exposure,
+    # defaulted conservatively to not-internet-facing", which is what the
+    # legacy classifier assumed anyway.
+    with contextlib.suppress(sqlite3.OperationalError):
+        con.execute("ALTER TABLE findings ADD COLUMN internet_facing INTEGER DEFAULT 0")
     con.commit()
     con.close()
 
@@ -214,8 +227,8 @@ def save_finding(f: Finding) -> bool:
         con.execute(
             """INSERT OR IGNORE INTO findings
                (id, host, cve_id, package, version, fixed_version, severity,
-                cvss, source_type, source_ref, description, found_at, tier, kev)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                cvss, source_type, source_ref, description, found_at, tier, kev, internet_facing)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (
                 f.id,
                 f.host,
@@ -231,6 +244,7 @@ def save_finding(f: Finding) -> bool:
                 int(time.time()),
                 f.tier,
                 1 if f.kev else 0,
+                1 if f.internet_facing else 0,
             ),
         )
         new_row = con.execute("SELECT changes()").fetchone()[0] > 0
@@ -256,15 +270,16 @@ def load_finding(finding_id: str) -> Finding | None:
     con = sqlite3.connect(DB_PATH)
     row = con.execute(
         "SELECT id,host,cve_id,package,version,fixed_version,severity,"
-        "cvss,source_type,source_ref,description,tier,kev FROM findings WHERE id=?",
+        "cvss,source_type,source_ref,description,tier,kev,internet_facing "
+        "FROM findings WHERE id=?",
         (finding_id,),
     ).fetchone()
     con.close()
     if row is None:
         return None
-    # Last column (kev) is INTEGER in SQLite; coerce to bool for the dataclass.
-    *head, kev_int = row
-    return Finding(*head, kev=bool(kev_int))
+    # Last two columns (kev, internet_facing) are INTEGER in SQLite; coerce to bool.
+    *head, kev_int, if_int = row
+    return Finding(*head, kev=bool(kev_int), internet_facing=bool(if_int))
 
 
 def set_status(finding_id: str, status: str) -> None:
@@ -450,9 +465,14 @@ def make_id(host: str, cve_id: str, source_ref: str, package: str) -> str:
     return hashlib.sha256(key.encode()).hexdigest()[:16]
 
 
-async def process_sbom_entry(entry: dict, host: str) -> list[Finding]:
+async def process_sbom_entry(
+    entry: dict,
+    host: str,
+    port_exposure: dict[str, bool] | None = None,
+) -> list[Finding]:
     source_meta = entry.get("source_meta", {})
     sbom = entry.get("sbom", {})
+    port_exposure = port_exposure or {}
 
     matches = await run_grype(sbom)
     findings = []
@@ -486,6 +506,12 @@ async def process_sbom_entry(entry: dict, host: str) -> list[Finding]:
         source_type = source_meta.get("type", "unknown")
         source_ref = source_meta.get("image") or artifact.get("name", "")
         fix_versions = vuln.get("fix", {}).get("versions") or []
+        # BC-030: honour the operator toggle. When disabled, we throw away scout's
+        # exposure data and classify as pre-BC-030 — Tier 1 unreachable, all findings
+        # fall through to the CVSS tier below.
+        is_internet_facing = INTERNET_FACING_DETECTION_ENABLED and bool(
+            port_exposure.get(source_ref, False)
+        )
         # Build a provisional finding so classify_tier gets the real CVSS/severity.
         f = Finding(
             id=make_id(host, cve_id, source_ref, artifact.get("name", "")),
@@ -500,10 +526,11 @@ async def process_sbom_entry(entry: dict, host: str) -> list[Finding]:
             source_ref=source_ref,
             description=(vuln.get("description") or "")[:200],
             kev=is_kev,
+            internet_facing=is_internet_facing,
         )
-        # BC-020: wire the urgency ladder. internet_facing deferred to a later
-        # story — treat as False for V1. KEV presence trumps CVSS per the Tier 0 rule.
-        f.tier = _urgency.classify_tier(f, kev=is_kev, internet_facing=False)
+        # BC-020 + BC-030: wire the urgency ladder with real internet_facing.
+        # KEV presence trumps everything per the Tier 0 rule.
+        f.tier = _urgency.classify_tier(f, kev=is_kev, internet_facing=is_internet_facing)
         findings.append(f)
 
     return findings
@@ -586,6 +613,10 @@ def format_notification(finding: Finding) -> str:
     # BC-020: Tier 0 (KEV) gets a visually distinct header above the severity row.
     if finding.tier == 0:
         lines.append("🚨 <b>KEV — EXPLOITED IN THE WILD</b>")
+    # BC-030: Tier 1 (CVSS≥9 + internet-facing) gets its own header. Falls
+    # below KEV so operator still sees the strongest signal first on Tier 0 rows.
+    if finding.tier == 1:
+        lines.append("🌐 <b>INTERNET-FACING — Tier 1</b>")
     lines.extend(
         [
             f"{emoji} <b>{esc(finding.severity)} — {esc(finding.cve_id)}</b>",
@@ -1368,12 +1399,19 @@ async def receive_scan(payload: dict) -> dict:
     _mark_scan_now()
     host = payload.get("host", "unknown")
     sboms: list[dict] = payload.get("sboms", [])
-    log.info("Scan from %s: %d SBOM(s)", host, len(sboms))
+    # BC-030: optional per-image exposure map from scout — absent on older scouts.
+    port_exposure: dict[str, bool] = payload.get("container_exposure") or {}
+    log.info(
+        "Scan from %s: %d SBOM(s), %d exposed image(s)",
+        host,
+        len(sboms),
+        sum(1 for v in port_exposure.values() if v),
+    )
 
     candidates: list[Finding] = []
     for entry in sboms:
         try:
-            candidates.extend(await process_sbom_entry(entry, host))
+            candidates.extend(await process_sbom_entry(entry, host, port_exposure=port_exposure))
         except Exception as e:  # noqa: BLE001
             log.error("Error processing SBOM entry: %s", e)
 

@@ -1,8 +1,10 @@
 ---
 id: BC-030
 title: internet_facing detection → Tier 1 fires
-status: ready
+status: in-progress
 created: 2026-10-31
+branch: feat/BC-030-internet-facing-detection
+plan: docs/plan/BC-030-internet-facing-detection-plan.md
 ---
 
 # BC-030: internet_facing detection → Tier 1 fires
@@ -67,9 +69,9 @@ Feature: internet_facing detection
 ## Capabilities delivered
 
 - **CAP-T068: Scout emits per-container port-publication map**
-- **CAP-T069: Hub joins finding to port map at ingest; sets Finding.internet_facing**
+- **CAP-T069: Hub joins finding to port map at ingest; sets Finding.internet_facing** — honours `BEACONRY_INTERNET_FACING_DETECTION_ENABLED` (0 = ignore map, force all False)
 - **CAP-T070: `make findings` + Telegram notification surface exposure dimension**
-- **CAP-B020: Operator sees internet-facing CVEs ranked above LAN-only ones (Tier 1 differentiation)**
+- **CAP-B020: Operator sees internet-facing CVEs ranked above LAN-only ones (Tier 1 differentiation)** — opt-out via `BEACONRY_INTERNET_FACING_DETECTION_ENABLED=0`
 
 ## Scope
 

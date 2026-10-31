@@ -74,6 +74,66 @@ def parse_globs(env: str) -> list[str]:
     return [piece.strip() for piece in env.split(",") if piece.strip()]
 
 
+# ── BC-030 — container port publication → internet_facing map ────────────────
+
+# Loopback-only addresses that must NOT count as internet-facing. All other
+# non-empty values (including "0.0.0.0", "::", and any routable host IP) do.
+_LOOPBACK_HOST_IPS: frozenset[str] = frozenset({"127.0.0.1", "::1", "localhost"})
+
+
+def is_container_internet_facing(ports: dict | None) -> bool:
+    """Return True if `ports` (Docker's NetworkSettings.Ports shape) has at
+    least one binding to a non-loopback host IP.
+
+    Shape: ``{"80/tcp": [{"HostIp": "0.0.0.0", "HostPort": "80"}], ...}``.
+    An unpublished port carries `None` or missing bindings → not exposed.
+    Empty HostIp (Docker's default binding) counts as exposed — equivalent to
+    0.0.0.0 for most daemons.
+    """
+    if not ports:
+        return False
+    for bindings in ports.values():
+        if not bindings:
+            continue
+        for b in bindings:
+            host_ip = (b.get("HostIp") or "").strip()
+            if host_ip and host_ip in _LOOPBACK_HOST_IPS:
+                continue
+            # Empty HostIp OR non-loopback IP → routable from outside the host.
+            return True
+    return False
+
+
+def collect_container_ports() -> dict[str, bool]:  # pragma: no cover - docker.from_env wrapper
+    """Return `{image_tag: is_internet_facing}` for every running container.
+
+    If multiple containers share an image and any publishes externally, the
+    image is marked True. Images with no running container simply don't
+    appear — hub treats absence as `False`.
+    """
+    try:
+        client = docker.from_env()
+    except docker.errors.DockerException as e:
+        log.warning("Docker socket unavailable for port collection: %s", e)
+        return {}
+
+    out: dict[str, bool] = {}
+    try:
+        containers = client.containers.list()
+    except docker.errors.DockerException as e:
+        log.warning("Container list failed: %s", e)
+        return {}
+    for container in containers:
+        ports = container.attrs.get("NetworkSettings", {}).get("Ports") or {}
+        exposed = is_container_internet_facing(ports)
+        image = container.image
+        if image is None:
+            continue
+        for tag in image.tags:
+            out[tag] = out.get(tag, False) or exposed
+    return out
+
+
 def filter_image_tags(
     tags: list[str],
     *,
@@ -304,6 +364,20 @@ def collect_and_post():  # pragma: no cover - orchestrator; integration-tested l
     except Exception as e:
         log.error("Port scan error: %s", e)
 
+    # BC-030: {image_tag: is_internet_facing} map from running containers.
+    container_exposure: dict[str, bool] = {}
+    try:
+        container_exposure = collect_container_ports()
+        if container_exposure:
+            exposed = [k for k, v in container_exposure.items() if v]
+            log.info(
+                "Container exposure: %d image(s) tracked, %d internet-facing",
+                len(container_exposure),
+                len(exposed),
+            )
+    except Exception as e:
+        log.error("Container port collection error: %s", e)
+
     _last_scan_ts = int(time.time())
     _images_seen = images_seen
 
@@ -316,6 +390,7 @@ def collect_and_post():  # pragma: no cover - orchestrator; integration-tested l
         "timestamp": int(time.time()),
         "sboms": sboms,
         "open_ports": open_ports,
+        "container_exposure": container_exposure,
     }
     try:
         body = json.dumps(payload)

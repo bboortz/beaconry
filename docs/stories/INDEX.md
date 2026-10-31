@@ -31,7 +31,7 @@ One-line status board for operator scenarios. Full stories in `BC-NNN-<slug>.md`
 | BC-024 | verify-traceability enforces reverse direction | shipped     | — (merged to dev)                   |
 | BC-028 | KEV lookup resolves grype related aliases | shipped     | — (merged to dev)                   |
 | BC-029 | Append-only audit log of operator-visible state changes | shipped     | — (merged to dev)                   |
-| BC-030 | internet_facing detection → Tier 1 fires | ready       | (next session)                      |
+| BC-030 | internet_facing detection → Tier 1 fires | in-progress | `feat/BC-030-internet-facing-detection` |
 | BC-031 | Scan reconciliation + regression detection — fix is not forget | shipped     | — (merged to dev)                   |
 | BC-032 | Fix viability indicator — "fixed in X" + will-this-work signal | shipped     | — (merged to dev)                   |
 | BC-033 | verify_fix scans operator's actual source_ref (not hardcoded :latest) | shipped     | — (merged to dev)                   |

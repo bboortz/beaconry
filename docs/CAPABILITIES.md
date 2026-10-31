@@ -939,6 +939,45 @@ Enforcement: `poc/scripts/verify_traceability.py` runs as part of `make check`. 
 - **verified by:**
   - `poc/tests/unit/test_heartbeat_sweep.py`
 
+### CAP-B020: Operator sees internet-facing CVEs ranked above LAN-only ones (Tier 1 differentiation)
+- **type:** business
+- **status:** active
+- **origin:** BC-030 — first implementation of Tier 1 (promised in `memory/design-decisions.md § Urgency tiers` since BC-000, defeated by hard-coded `internet_facing=False` in BC-020's wiring)
+- **description:** When a finding's `source_ref` matches a running container that publishes any port to a non-loopback host IP, the Telegram notification prepends `🌐 INTERNET-FACING — Tier 1`, the DB stores `tier=1 + internet_facing=1`, and `make findings` surfaces a `NET` column (🌐/—). The sort key `(tier, -cvss)` ranks Tier 1 above Tier 2 so operator at-a-glance distinguishes "exploit reachable from the internet" from "exploit in a LAN-only service." KEV (Tier 0) still wins — regression-guarded by `test_kev_wins_over_internet_facing`. Opt-out: `BEACONRY_INTERNET_FACING_DETECTION_ENABLED=0`.
+- **supports:** CAP-B011, CAP-B018
+- **verified by:**
+  - `poc/tests/integration/test_BC_030_internet_facing_detection.py`
+
+### CAP-T068: Scout emits per-container port-publication map
+- **type:** technical
+- **status:** active
+- **origin:** BC-030
+- **description:** Scout's `collect_container_ports()` inspects every running container's `NetworkSettings.Ports`, folds across multiple containers sharing an image, returns `{image_tag: is_internet_facing}` in the hub POST payload under `container_exposure`. The parse helper `is_container_internet_facing(ports)` treats `0.0.0.0`, `::`, empty `HostIp` (Docker's default), and routable host IPs as exposed; `127.0.0.1`, `::1`, and `localhost` as not exposed. Null bindings and missing dicts safely return False.
+- **supports:** CAP-B020
+- **verified by:**
+  - `poc/tests/unit/test_scout_container_ports.py`
+  - `poc/tests/integration/test_BC_030_internet_facing_detection.py`
+
+### CAP-T069: Hub joins finding to port map at ingest; sets Finding.internet_facing
+- **type:** technical
+- **status:** active
+- **origin:** BC-030
+- **description:** `process_sbom_entry` accepts a `port_exposure: dict[str, bool]` parameter (defaults to empty for backward compatibility), looks up `source_ref` in the map, and passes the real value to `urgency.classify_tier`. Finding dataclass gains `internet_facing: bool = False`; DB schema adds `internet_facing INTEGER DEFAULT 0` via idempotent migration; `save_finding` + `load_finding` round-trip. Toggle `BEACONRY_INTERNET_FACING_DETECTION_ENABLED=0` forces hub to ignore scout's map and classify everything as False (pre-BC-030 behavior). Legacy rows render as not-exposed — honest default since pre-BC-030 we hard-coded that value anyway.
+- **supports:** CAP-B020
+- **verified by:**
+  - `poc/tests/integration/test_BC_030_internet_facing_detection.py`
+  - `poc/tests/unit/test_internet_facing_classification.py`
+
+### CAP-T070: `make findings` + Telegram notification surface exposure dimension
+- **type:** technical
+- **status:** active
+- **origin:** BC-030
+- **description:** `format_notification` prepends `🌐 INTERNET-FACING — Tier 1` for Tier 1 findings (Tier 0 KEV header still wins when both apply — the 🚨 header is the only one rendered). `make findings` CLI adds a 3-char `NET` column rendering 🌐 for exposed, — for LAN-only. Column reads from the schema-aware `load_findings`, so DBs that predate the column still render — gracefully.
+- **supports:** CAP-B020
+- **verified by:**
+  - `poc/tests/integration/test_BC_030_internet_facing_detection.py`
+  - `poc/tests/unit/test_findings_cli_internet_facing.py`
+
 ### CAP-T017: Orphan tests fail the gate with a copy-pasteable template
 - **type:** technical
 - **status:** active

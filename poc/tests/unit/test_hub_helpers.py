@@ -490,7 +490,9 @@ async def test_receive_scan_applies_dedup_and_cap(
     before notifying. Previously it notified per-SBOM, flooding the operator."""
     hub.init_db()
 
-    async def _fake_process(entry: object, host: str) -> list[Finding]:
+    async def _fake_process(
+        entry: object, host: str, *, port_exposure: dict[str, bool] | None = None
+    ) -> list[Finding]:
         # Each SBOM "returns" 3 findings; same CVE ids across SBOMs so dedup matters.
         source = entry.get("source_meta", {}).get("image", "img")  # type: ignore[union-attr]
         return [
@@ -578,7 +580,9 @@ async def test_receive_scan_notifies_on_fresh_db(
     assert con.execute("SELECT COUNT(*) FROM findings").fetchone()[0] == 0
     con.close()
 
-    async def _fake_process(entry: object, host: str) -> list[Finding]:
+    async def _fake_process(
+        entry: object, host: str, *, port_exposure: dict[str, bool] | None = None
+    ) -> list[Finding]:
         return [_finding(id="fresh-A", cve_id="CVE-NEW", cvss=9.5, source_ref="img:a")]
 
     notified: list[Finding] = []
@@ -933,6 +937,32 @@ def test_format_notification_omits_kev_header_for_non_tier_0() -> None:
     f = _finding(tier=2, kev=False, cve_id="CVE-2026-1111", severity="Critical", cvss=9.5)
     body = hub.format_notification(f)
     assert "KEV" not in body
+
+
+def test_format_notification_tier_1_marker() -> None:
+    """BC-030 CAP-T070: Tier 1 findings get the "🌐 INTERNET-FACING — Tier 1" header."""
+    f = _finding(tier=1, internet_facing=True, cvss=9.5, kev=False)
+    body = hub.format_notification(f)
+    first_line = body.splitlines()[0]
+    assert "INTERNET-FACING" in first_line
+    assert "🌐" in first_line
+
+
+def test_format_notification_tier_1_marker_absent_for_lan_only() -> None:
+    """Tier 2 CVSS≥9 finding (not internet-facing) must NOT render the 🌐 header."""
+    f = _finding(tier=2, internet_facing=False, cvss=9.5, kev=False)
+    body = hub.format_notification(f)
+    assert "INTERNET-FACING" not in body
+    assert "🌐" not in body
+
+
+def test_format_notification_tier_0_wins_over_tier_1_marker() -> None:
+    """Tier 0 (KEV) wins — only the 🚨 KEV header fires, not the 🌐 Tier 1 one."""
+    f = _finding(tier=0, kev=True, internet_facing=True, cvss=9.5)
+    body = hub.format_notification(f)
+    assert "KEV" in body.splitlines()[0]
+    # No separate Tier 1 header line should be rendered.
+    assert "INTERNET-FACING" not in body
 
 
 # ── BC-022: digest KEV awareness ─────────────────────────────────────────────

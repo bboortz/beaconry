@@ -35,6 +35,9 @@ STATUS_RANK = {s: i for i, s in enumerate(STATUS_ORDER)}
 # whole product value; operators scanning the table must see it at a glance.
 COLUMNS: list[tuple[str, str, int]] = [
     ("kev", "KEV", 3),
+    # BC-030: 🌐 = internet-facing per the port-publication detector; "—" = LAN-only
+    # or unknown. Column is 3 chars wide to match the ✓/— KEV precedent.
+    ("internet_facing", "NET", 3),
     ("cve_id", "CVE", 20),
     ("severity", "Severity", 10),
     ("cvss", "CVSS", 5),
@@ -54,10 +57,15 @@ def _truncate(value: str, width: int) -> str:
     return value[: width - 1] + "…"
 
 
-def _format_cell(raw: object, width: int, *, is_kev: bool = False) -> str:
+def _format_cell(
+    raw: object, width: int, *, is_kev: bool = False, is_exposure: bool = False
+) -> str:
     if is_kev:
         # kev column: SQLite stores 0/1 ints; render as ✓ / — for scanability.
         text = "✓" if raw else "—"
+    elif is_exposure:
+        # BC-030: internet_facing column — 🌐 for exposed, — for LAN-only/unknown.
+        text = "🌐" if raw else "—"
     elif isinstance(raw, float):
         text = f"{raw:.1f}"
     elif raw is None:
@@ -73,7 +81,15 @@ def format_table(rows: list[dict]) -> str:
     separator = "  ".join("-" * w for _, _, w in COLUMNS)
     body_lines = []
     for row in rows:
-        cells = [_format_cell(row.get(key), w, is_kev=(key == "kev")) for key, _, w in COLUMNS]
+        cells = [
+            _format_cell(
+                row.get(key),
+                w,
+                is_kev=(key == "kev"),
+                is_exposure=(key == "internet_facing"),
+            )
+            for key, _, w in COLUMNS
+        ]
         body_lines.append("  ".join(cells))
     return "\n".join([header, separator, *body_lines])
 

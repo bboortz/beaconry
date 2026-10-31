@@ -19,6 +19,9 @@ class Finding:
     description: str
     tier: int = 3  # urgency tier (0 highest, 3 lowest) — see poc/hub/urgency.py
     kev: bool = False  # True if the CVE is in the CISA KEV catalog (BC-020)
+    internet_facing: bool = (
+        False  # BC-030: True if source_ref's running containers publish non-loopback ports
+    )
 
 
 @dataclass
