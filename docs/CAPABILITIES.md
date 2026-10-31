@@ -1018,6 +1018,33 @@ Enforcement: `poc/scripts/verify_traceability.py` runs as part of `make check`. 
   - `poc/tests/integration/test_BC_038_scenario_harness.py`
   - `poc/tests/unit/test_scenario_runner.py`
 
+### CAP-B023: Developer can review the entire variable surface without greping the codebase
+- **type:** business
+- **status:** active
+- **origin:** BC-039 — developer 2026-10-31: ~30 env vars shipped in two weeks, unmanageable without a single source of truth
+- **description:** `docs/VARIABLES.md` is the one authoritative index of every env variable beaconry reads at runtime. Grouped by concern (Telegram, Scanning, Fix execution, Reconcile, Heartbeat, Digest, Notification adapters, Feeds, Paths, Dev-mode, CLI scripts, Scenario harness). Each row carries name, default, type, where-read, reason (the WHY, not just WHAT), and BC origin.
+- **supports:** CAP-B018
+- **verified by:**
+  - `poc/tests/unit/test_verify_variables_documented.py`
+
+### CAP-T084: `docs/VARIABLES.md` — single source of truth for runtime env variables
+- **type:** technical
+- **status:** active
+- **origin:** BC-039
+- **description:** Markdown table under `<!-- BC-039 BEGIN VARIABLES TABLE -->` / `<!-- END -->` markers. Columns: `Variable | Default | Type | Where read | Reason | Origin`. Parser matches `^\|\s*` + backtick-wrapped-name + remaining cells. Groups reflect operator mental model, not code module layout.
+- **supports:** CAP-B023
+- **verified by:**
+  - `poc/tests/unit/test_verify_variables_documented.py`
+
+### CAP-T085: `verify-variables` lint catches code↔doc drift bidirectionally
+- **type:** technical
+- **status:** active
+- **origin:** BC-039
+- **description:** `poc/scripts/verify_variables_documented.py` scans `poc/<non-tests>/*.py` for three env-read forms (`os.environ.get("X")`, `os.environ["X"]`, `_int_env("X", …)`, class-attribute `env_var = "X"`). Cross-refs with `VARIABLES.md`. Fails on: (1) read without doc row, (2) doc row without reader, (3) row with exact placeholder markers like `*(default)*`, (4) row with fewer than minimum columns, (5) backtick-wrapped names that aren't valid env var identifiers, (6) looks-like-a-var-name text missing backticks. Explicit `TEST_ONLY_ALLOWLIST` for fixture vars. Hooked into `make check` fast tier.
+- **supports:** CAP-B023
+- **verified by:**
+  - `poc/tests/unit/test_verify_variables_documented.py`
+
 ### CAP-T080: Digest cadence throttle with content-hash fallback
 - **type:** technical
 - **status:** active

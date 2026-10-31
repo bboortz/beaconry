@@ -1,4 +1,4 @@
-.PHONY: help lint format type test check check-full demo smoke clean install-hooks verify-traceability verify-dockerfile-health-copy verify-dockerfile-sources verify-memory-drift verify-compose-env-propagation verify-docs-drift verify-evidence-pointers verify-per-file-coverage findings status test-e2e live-rebuild live-status scan test-scenarios
+.PHONY: help lint format type test check check-full demo smoke clean install-hooks verify-traceability verify-dockerfile-health-copy verify-dockerfile-sources verify-memory-drift verify-compose-env-propagation verify-docs-drift verify-evidence-pointers verify-per-file-coverage verify-variables findings status test-e2e live-rebuild live-status scan test-scenarios
 
 PYTHON ?= python3
 PYTEST_ARGS ?=
@@ -20,6 +20,7 @@ help:
 	@echo "  make verify-docs-drift          Makefile help + README match code enumerations (BC-016)"
 	@echo "  make verify-evidence-pointers   plan shipping-evidence pointers resolve to real tests (BC-019)"
 	@echo "  make verify-per-file-coverage   every file ≥ 65% coverage (or allowlisted with reason)"
+	@echo "  make verify-variables           docs/VARIABLES.md ↔ env var reads bidirectional check (BC-039)"
 	@echo "  make smoke                      bash poc/demo.sh --smoke (non-interactive mock, CI)"
 	@echo ""
 	@echo "Tiers:"
@@ -92,7 +93,13 @@ verify-per-file-coverage:
 verify-dockerfile-sources:
 	$(PYTHON) -m poc.scripts.verify_dockerfile_sources
 
-check: lint type test verify-per-file-coverage verify-traceability verify-dockerfile-health-copy verify-dockerfile-sources verify-memory-drift verify-compose-env-propagation verify-docs-drift verify-evidence-pointers smoke
+# BC-039: docs/VARIABLES.md ↔ env-var reads bidirectional check.
+# Fails if a variable is read in code without a documented row, OR if a
+# documented row has no reader. Also catches unfilled `*(placeholder)*` stubs.
+verify-variables:
+	$(PYTHON) -m poc.scripts.verify_variables_documented
+
+check: lint type test verify-per-file-coverage verify-traceability verify-dockerfile-health-copy verify-dockerfile-sources verify-memory-drift verify-compose-env-propagation verify-docs-drift verify-evidence-pointers verify-variables smoke
 	@echo ""
 	@echo "✓ Fast tier (make check) passed"
 
