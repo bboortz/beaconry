@@ -112,7 +112,8 @@ Two tiers (BC-006). Fast tier (`make check`) runs pre-push + the merge gate; ful
 | Format | `ruff format --check` | fast | pre-commit (staged) + `make check` |
 | Type check | `pyright` (basic / default) | fast | pre-commit (staged) + `make check` |
 | Tests | `pytest` | fast | **pre-push** + `make check` |
-| Coverage | `pytest --cov`, threshold ≥ 60% | fast | `make check` |
+| Coverage (global) | `pytest --cov`, threshold ≥ 85% | fast | `make check` |
+| Coverage (per-file) | `make verify-per-file-coverage`, threshold ≥ 65% (allowlist for integration-shell files) | fast | `make check` |
 | Traceability | `make verify-traceability` | fast | `make check` + pre-push |
 | Dockerfile `COPY beaconry_health/` | `make verify-dockerfile-health-copy` | fast | `make check` |
 | Dockerfile `COPY <svc>/*.py` (service-local .py files) | `make verify-dockerfile-sources` | fast | `make check` |

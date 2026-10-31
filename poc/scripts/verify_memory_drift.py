@@ -107,7 +107,7 @@ def format_violation(v: Violation) -> str:
     )
 
 
-def main() -> int:
+def main() -> int:  # pragma: no cover - entry-point wrapper exercised via make check, not pytest
     repo_root = Path(__file__).resolve().parents[2]
     bans_file = repo_root / "poc" / "scripts" / "memory_drift_bans.toml"
     memory_dir = repo_root / "memory"

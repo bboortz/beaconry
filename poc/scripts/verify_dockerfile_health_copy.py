@@ -52,7 +52,7 @@ def check_dockerfile(dockerfile: Path, service_dir: Path) -> list[str]:
     return []
 
 
-def main() -> int:
+def main() -> int:  # pragma: no cover - entry-point wrapper exercised via make check, not pytest
     poc_root = Path(__file__).resolve().parents[1]
     errors: list[str] = []
     for dockerfile in poc_root.glob("*/Dockerfile"):

@@ -125,7 +125,7 @@ def check_service(poc_root: Path, service_name: str) -> list[str]:
     ]
 
 
-def main() -> int:
+def main() -> int:  # pragma: no cover - entry-point wrapper exercised via make check, not pytest
     poc_root = Path(__file__).resolve().parents[1]
     compose = poc_root / "docker-compose.yml"
     if not compose.exists():

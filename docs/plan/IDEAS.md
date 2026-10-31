@@ -218,6 +218,17 @@ See per-decision review dates in `memory/`:
   **The win**: non-CVE primary IDs (GO-*, GHSA-*) no longer silently miss KEV flagging when a CVE alias exists.
   links: BC-020 (KEV lookup), grype's vulnerability match schema (`related` field).
 
+- **Refactor the 4 functions that currently carry complexity `# noqa` markers**
+  trigger: chore/complexity-gates (2026-10-31) enabled C901/PLR0912/PLR0913/PLR0915; 4 shipped functions tripped the gates and got `# noqa` with reason instead of refactoring.
+  priority: later
+  Scope: `hub.on_button_click` (CC 18 — split per callback action), `verify_docs_drift.scan` (CC 13 — split per drift check), `verify_traceability.parse_capabilities` (CC 15 — AST-walker refactor), `verify_traceability.run` (CC 38, 36 branches, 67 stmts — registry of checker functions). All are orchestrators where splitting pays for itself in test-ability.
+  **The win**: coverage targets reach without heroic test-for-coverage effort. Removes 4 outstanding noqa markers.
+
+- **Unit-test scout.py pure functions, pragma the subprocess wrappers**
+  trigger: scout.py is allowlisted at 30% per-file coverage in verify_per_file_coverage.py. Its pure-function parts (filter_image_tags) ARE tested in test_scout_filter.py; the subprocess wrappers (syft_scan, scan_docker_images, scan_pacman) are integration-only.
+  priority: later
+  Scope: refactor scout.py so pure functions sit in sibling modules (scout_filter.py already exists; add scout_pacman_parse.py for the pacman text parser). Add pragma: no cover to subprocess wrappers. Target: raise allowlist floor from 30 → 65%.
+
 ## Parking lot (ideas we discussed but likely won't do)
 
 - **`make demo` works with host-run telegram-mock (BC-018 Scenario 7's literal recipe)**

@@ -107,7 +107,7 @@ def collect_env_reads(poc_root: Path) -> set[str]:
 _INVISIBLE_PHONY_TARGETS: frozenset[str] = frozenset({"help"})
 
 
-def scan(
+def scan(  # noqa: C901 — orchestrates 4 drift checks sequentially; splitting adds indirection without clarity
     makefile: Path,
     readme: Path,
     findings_py: Path,

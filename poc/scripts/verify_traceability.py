@@ -82,7 +82,7 @@ def extract_headings(path: Path) -> set[str]:
     return headings
 
 
-def parse_capabilities(path: Path) -> dict[str, Capability]:
+def parse_capabilities(path: Path) -> dict[str, Capability]:  # noqa: C901 — stateful markdown block parser; refactoring to a proper AST walker is logged in IDEAS.md
     """Parse CAPABILITIES.md into {cap_id: Capability}."""
     if not path.exists():
         return {}
@@ -292,7 +292,7 @@ def _rel(path: Path, base: Path) -> str:
         return str(path)
 
 
-def run(docs: Path, tests: Path, *, branch: str | None = None) -> int:
+def run(docs: Path, tests: Path, *, branch: str | None = None) -> int:  # noqa: C901, PLR0912, PLR0915 — orchestrates 10+ independent lint gates; refactoring to a registry of checker functions is logged in IDEAS.md
     """Verify bidirectional traceability. Return 0 on success, 1 on any error.
 
     When `branch` is None, the current git branch is detected automatically.

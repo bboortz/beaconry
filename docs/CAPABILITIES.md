@@ -819,6 +819,15 @@ Enforcement: `poc/scripts/verify_traceability.py` runs as part of `make check`. 
 - **verified by:**
   - `poc/tests/integration/test_BC_004_traceability.py`
 
+### CAP-T065: Per-file coverage floor (65% default, allowlist for integration-shell modules)
+- **type:** technical
+- **status:** active
+- **origin:** chore/complexity-gates (2026-10-31)
+- **description:** `poc/scripts/verify_per_file_coverage.py` reads `coverage.json` (produced by `pytest --cov-report=json`) and enforces a per-file 65% coverage floor on top of coverage.py's 85% global floor. Reservoir-style global metrics let one high-coverage file mask many low-coverage ones; the per-file floor blocks silent regressions in individual modules. Explicit allowlist (dict in the script) carves out integration-shell files with a lower floor + prose reason (scout.py at 30% because syft/grype subprocess wrappers are live-tested, not unit-tested). Also raised global `fail_under` from 60% → 85% in pyproject.toml and enabled ruff complexity gates C901 / PLR0912 / PLR0913 / PLR0915 with slightly looser thresholds so existing hub.py / verify_traceability.py land cleanly with explicit `# noqa` + follow-up IDEAs.
+- **supports:** CAP-B006
+- **verified by:**
+  - `poc/tests/unit/test_verify_per_file_coverage.py`
+
 ### CAP-T017: Orphan tests fail the gate with a copy-pasteable template
 - **type:** technical
 - **status:** active

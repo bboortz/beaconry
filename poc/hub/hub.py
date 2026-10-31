@@ -421,7 +421,7 @@ async def notify(finding: Finding) -> None:
 CALLBACK_RE = re.compile(r"^(fix|snooze|ack|verify):[a-f0-9]{16}(?::\d+)?$")
 
 
-async def on_button_click(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+async def on_button_click(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:  # noqa: C901, PLR0912, PLR0915 — dispatches 5 Telegram callback actions × state branches; see IDEAS.md 'refactor on_button_click into per-action handlers'
     query = update.callback_query
     if query is None or query.data is None:
         return
@@ -603,7 +603,9 @@ async def on_button_click(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 
 
 @asynccontextmanager
-async def lifespan(app: FastAPI):
+async def lifespan(
+    app: FastAPI,
+):  # pragma: no cover - async Telegram startup/shutdown; exercised live via make demo + make test-e2e
     global tg_app, _startup_complete
 
     init_db()
