@@ -421,7 +421,168 @@ async def notify(finding: Finding) -> None:
 CALLBACK_RE = re.compile(r"^(fix|snooze|ack|verify):[a-f0-9]{16}(?::\d+)?$")
 
 
-async def on_button_click(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:  # noqa: C901, PLR0912, PLR0915 — dispatches 5 Telegram callback actions × state branches; see IDEAS.md 'refactor on_button_click into per-action handlers'
+def _esc(s: str) -> str:
+    import html
+
+    return html.escape(s, quote=False)
+
+
+async def _handle_fix(query, finding: Finding, finding_id: str, parts: list[str]) -> None:  # noqa: ARG001
+    """Fix action: dispatch to executor, verify, edit the message with the terminal state."""
+    if not FIX_ENABLED:
+        await query.edit_message_text(
+            f"⚙️ Fix execution disabled (BEACONRY_FIX_ENABLED=0) — "
+            f"<code>{_esc(finding.cve_id)}</code> left as <code>open</code>",
+            parse_mode="HTML",
+        )
+        return
+
+    await query.edit_message_text(
+        f"⏳ Fixing <code>{_esc(finding.cve_id)}</code> on <code>{_esc(finding.host)}</code>…",
+        parse_mode="HTML",
+    )
+    executor = next((e for e in EXECUTORS if e.can_handle(finding)), ManualAdapter())
+    result = await executor.execute(finding)
+
+    if not result.success:
+        await query.edit_message_text(
+            f"❌ <b>Fix failed</b>: <code>{_esc(result.message)}</code>\n"
+            f"Image unchanged. Rollback tag still exists if you need to inspect.",
+            parse_mode="HTML",
+        )
+        return
+
+    # Non-docker findings: ManualAdapter printed the command; operator runs it,
+    # not beaconry. Status stays open (manual action required).
+    if finding.source_type != "docker":
+        await query.edit_message_text(
+            f"⚙️ <b>Manual action required</b>\n"
+            f"CVE: <code>{_esc(finding.cve_id)}</code>\n"
+            f"Run: <code>{_esc(result.command)}</code>\n"
+            f"<i>Status stays open until you confirm externally.</i>",
+            parse_mode="HTML",
+        )
+        return
+
+    await query.edit_message_text(
+        f"🔍 Fix applied — verifying…\n<code>{_esc(result.command)}</code>",
+        parse_mode="HTML",
+    )
+    clean = await verify_fix(finding)
+
+    if not clean:
+        await query.edit_message_text(
+            f"⚠️ <b>Pulled, but CVE still present upstream</b>\n"
+            f"CVE: <code>{_esc(finding.cve_id)}</code> in "
+            f"<code>{_esc(finding.package)}</code>\n"
+            f"Command: <code>{_esc(result.command)}</code>\n"
+            f"<i>Upstream hasn't patched yet — status stays open.</i>",
+            parse_mode="HTML",
+        )
+        return
+
+    set_status(finding_id, "fixed")
+    # BC-011: attach "🔍 Verify service health" button when a probe policy exists.
+    fixed_text = (
+        f"✅ <b>Fixed and verified</b>\n"
+        f"CVE: <code>{_esc(finding.cve_id)}</code> on "
+        f"<code>{_esc(finding.host)}</code>\n"
+        f"Command: <code>{_esc(result.command)}</code>\n"
+        f"Re-scan: clean ✓"
+    )
+    probe = _resolve_probe_for(finding.source_ref)
+    if probe is None:
+        await query.edit_message_text(fixed_text, parse_mode="HTML")
+        return
+    verify_keyboard = InlineKeyboardMarkup(
+        [
+            [
+                InlineKeyboardButton(
+                    "🔍 Verify service health",
+                    callback_data=f"verify:{finding_id}",
+                )
+            ]
+        ]
+    )
+    fixed_text += "\n\n<i>Restart your container, then tap below to probe the service.</i>"
+    await query.edit_message_text(fixed_text, parse_mode="HTML", reply_markup=verify_keyboard)
+
+
+async def _handle_snooze(query, finding: Finding, finding_id: str, parts: list[str]) -> None:
+    hours = int(parts[2]) if len(parts) > 2 else 4
+    set_status(finding_id, "snoozed")
+    await query.edit_message_text(
+        f"⏰ Snoozed {hours}h — <code>{_esc(finding.cve_id)}</code>",
+        parse_mode="HTML",
+    )
+
+
+async def _handle_ack(query, finding: Finding, finding_id: str, parts: list[str]) -> None:  # noqa: ARG001
+    set_status(finding_id, "accepted")
+    await query.edit_message_text(
+        f"✅ Risk accepted — <code>{_esc(finding.cve_id)}</code>",
+        parse_mode="HTML",
+    )
+
+
+async def _handle_verify(query, finding: Finding, finding_id: str, parts: list[str]) -> None:  # noqa: ARG001
+    """BC-011: operator taps after restarting their service — run the configured probe."""
+    if get_status(finding_id) == "fixed_verified":
+        await query.edit_message_text(
+            f"ℹ️ Already fixed_verified — <code>{_esc(finding.cve_id)}</code>",
+            parse_mode="HTML",
+        )
+        return
+    probe = _resolve_probe_for(finding.source_ref)
+    if probe is None:
+        await query.edit_message_text(
+            f"⏭️ No probe configured for <code>{_esc(finding.source_ref)}</code>\n"
+            f"<i>Set BEACONRY_HEALTH_PROBES to enable post-restart verification.</i>",
+            parse_mode="HTML",
+        )
+        return
+    await query.edit_message_text(
+        f"⏳ Probing <code>{_esc(finding.source_ref)}</code> ({probe.probe_type}:{_esc(probe.probe_arg)})…",
+        parse_mode="HTML",
+    )
+    # BC-011 fix: use the module-level _waterfall binding (dual-mode import
+    # at the top of this file) rather than a fresh `from poc.hub.waterfall ...`
+    # which fails inside the container (no `poc` package at /app).
+    result = await _waterfall.run_probe(probe)
+    if result.ok:
+        set_status(finding_id, "fixed_verified")
+        await query.edit_message_text(
+            f"✅ <b>Service healthy — probe passed</b>\n"
+            f"CVE: <code>{_esc(finding.cve_id)}</code>\n"
+            f"Probe: <code>{_esc(probe.probe_type)}:{_esc(probe.probe_arg)}</code> → "
+            f"{_esc(result.reason)}",
+            parse_mode="HTML",
+        )
+        return
+    set_status(finding_id, "verification_failed")
+    base_name = finding.source_ref.split(":")[0]
+    await query.edit_message_text(
+        f"⚠️ <b>Probe failed:</b> <code>{_esc(result.reason)}</code>\n"
+        f"CVE: <code>{_esc(finding.cve_id)}</code>\n"
+        f"Rollback with: <code>docker tag {base_name}:rollback {_esc(finding.source_ref)}</code>\n"
+        f"<i>Then restart the service and tap again.</i>",
+        parse_mode="HTML",
+    )
+
+
+# Registry of callback-action handlers. Each handler takes (query, finding,
+# finding_id, parts) and edits the message with its terminal state.
+_ACTION_HANDLERS = {
+    "fix": _handle_fix,
+    "snooze": _handle_snooze,
+    "ack": _handle_ack,
+    "verify": _handle_verify,
+}
+
+
+async def on_button_click(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:  # noqa: ARG001
+    """BC-003: Telegram callback dispatcher. Validates, loads the finding,
+    checks idempotence, routes to the per-action handler."""
     query = update.callback_query
     if query is None or query.data is None:
         return
@@ -441,162 +602,19 @@ async def on_button_click(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
         await query.edit_message_text("⚠️ Finding not found or already resolved.")
         return
 
-    import html
-
-    def _esc(s: str) -> str:
-        return html.escape(s, quote=False)
-
     # BC-003: idempotence — if a Snooze/Accept tap lands on a finding already in
     # that state, show the current state and no-op the DB write.
     status_targets = {"snooze": "snoozed", "ack": "accepted"}
     if action in status_targets and get_status(finding_id) == status_targets[action]:
-        label = status_targets[action]
         await query.edit_message_text(
-            f"ℹ️ Already {label} — <code>{_esc(finding.cve_id)}</code>",
+            f"ℹ️ Already {status_targets[action]} — <code>{_esc(finding.cve_id)}</code>",
             parse_mode="HTML",
         )
         return
 
-    if action == "fix":
-        if not FIX_ENABLED:
-            await query.edit_message_text(
-                f"⚙️ Fix execution disabled (BEACONRY_FIX_ENABLED=0) — "
-                f"<code>{_esc(finding.cve_id)}</code> left as <code>open</code>",
-                parse_mode="HTML",
-            )
-            return
-
-        await query.edit_message_text(
-            f"⏳ Fixing <code>{_esc(finding.cve_id)}</code> on <code>{_esc(finding.host)}</code>…",
-            parse_mode="HTML",
-        )
-        executor = next((e for e in EXECUTORS if e.can_handle(finding)), ManualAdapter())
-        result = await executor.execute(finding)
-
-        if not result.success:
-            await query.edit_message_text(
-                f"❌ <b>Fix failed</b>: <code>{_esc(result.message)}</code>\n"
-                f"Image unchanged. Rollback tag still exists if you need to inspect.",
-                parse_mode="HTML",
-            )
-            return
-
-        # Non-docker findings: ManualAdapter printed the command; operator runs it,
-        # not beaconry. Status stays open (manual action required).
-        if finding.source_type != "docker":
-            await query.edit_message_text(
-                f"⚙️ <b>Manual action required</b>\n"
-                f"CVE: <code>{_esc(finding.cve_id)}</code>\n"
-                f"Run: <code>{_esc(result.command)}</code>\n"
-                f"<i>Status stays open until you confirm externally.</i>",
-                parse_mode="HTML",
-            )
-            return
-
-        await query.edit_message_text(
-            f"🔍 Fix applied — verifying…\n<code>{_esc(result.command)}</code>",
-            parse_mode="HTML",
-        )
-        clean = await verify_fix(finding)
-
-        if clean:
-            set_status(finding_id, "fixed")
-            # BC-011: attach "🔍 Verify service health" button when a probe policy exists.
-            fixed_text = (
-                f"✅ <b>Fixed and verified</b>\n"
-                f"CVE: <code>{_esc(finding.cve_id)}</code> on "
-                f"<code>{_esc(finding.host)}</code>\n"
-                f"Command: <code>{_esc(result.command)}</code>\n"
-                f"Re-scan: clean ✓"
-            )
-            probe = _resolve_probe_for(finding.source_ref)
-            if probe is not None:
-                verify_keyboard = InlineKeyboardMarkup(
-                    [
-                        [
-                            InlineKeyboardButton(
-                                "🔍 Verify service health",
-                                callback_data=f"verify:{finding_id}",
-                            )
-                        ]
-                    ]
-                )
-                fixed_text += (
-                    "\n\n<i>Restart your container, then tap below to probe the service.</i>"
-                )
-                await query.edit_message_text(
-                    fixed_text, parse_mode="HTML", reply_markup=verify_keyboard
-                )
-            else:
-                await query.edit_message_text(fixed_text, parse_mode="HTML")
-        else:
-            await query.edit_message_text(
-                f"⚠️ <b>Pulled, but CVE still present upstream</b>\n"
-                f"CVE: <code>{_esc(finding.cve_id)}</code> in "
-                f"<code>{_esc(finding.package)}</code>\n"
-                f"Command: <code>{_esc(result.command)}</code>\n"
-                f"<i>Upstream hasn't patched yet — status stays open.</i>",
-                parse_mode="HTML",
-            )
-
-    elif action == "snooze":
-        hours = int(parts[2]) if len(parts) > 2 else 4
-        set_status(finding_id, "snoozed")
-        await query.edit_message_text(
-            f"⏰ Snoozed {hours}h — <code>{_esc(finding.cve_id)}</code>",
-            parse_mode="HTML",
-        )
-
-    elif action == "ack":
-        set_status(finding_id, "accepted")
-        await query.edit_message_text(
-            f"✅ Risk accepted — <code>{_esc(finding.cve_id)}</code>",
-            parse_mode="HTML",
-        )
-
-    elif action == "verify":
-        # BC-011: operator taps after restarting their service — run the configured probe.
-        if get_status(finding_id) == "fixed_verified":
-            await query.edit_message_text(
-                f"ℹ️ Already fixed_verified — <code>{_esc(finding.cve_id)}</code>",
-                parse_mode="HTML",
-            )
-            return
-        probe = _resolve_probe_for(finding.source_ref)
-        if probe is None:
-            await query.edit_message_text(
-                f"⏭️ No probe configured for <code>{_esc(finding.source_ref)}</code>\n"
-                f"<i>Set BEACONRY_HEALTH_PROBES to enable post-restart verification.</i>",
-                parse_mode="HTML",
-            )
-            return
-        await query.edit_message_text(
-            f"⏳ Probing <code>{_esc(finding.source_ref)}</code> ({probe.probe_type}:{_esc(probe.probe_arg)})…",
-            parse_mode="HTML",
-        )
-        # BC-011 fix: use the module-level _waterfall binding (dual-mode import
-        # at the top of this file) rather than a fresh `from poc.hub.waterfall ...`
-        # which fails inside the container (no `poc` package at /app).
-        result = await _waterfall.run_probe(probe)
-        if result.ok:
-            set_status(finding_id, "fixed_verified")
-            await query.edit_message_text(
-                f"✅ <b>Service healthy — probe passed</b>\n"
-                f"CVE: <code>{_esc(finding.cve_id)}</code>\n"
-                f"Probe: <code>{_esc(probe.probe_type)}:{_esc(probe.probe_arg)}</code> → "
-                f"{_esc(result.reason)}",
-                parse_mode="HTML",
-            )
-        else:
-            set_status(finding_id, "verification_failed")
-            base_name = finding.source_ref.split(":")[0]
-            await query.edit_message_text(
-                f"⚠️ <b>Probe failed:</b> <code>{_esc(result.reason)}</code>\n"
-                f"CVE: <code>{_esc(finding.cve_id)}</code>\n"
-                f"Rollback with: <code>docker tag {base_name}:rollback {_esc(finding.source_ref)}</code>\n"
-                f"<i>Then restart the service and tap again.</i>",
-                parse_mode="HTML",
-            )
+    handler = _ACTION_HANDLERS.get(action)
+    if handler is not None:
+        await handler(query, finding, finding_id, parts)
 
 
 # ── FastAPI + lifespan ────────────────────────────────────────────────────────
