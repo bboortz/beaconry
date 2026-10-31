@@ -76,6 +76,9 @@ New column `last_fixed_ts INTEGER DEFAULT 0`. **Legacy fixed/fixed_verified rows
 | Simulated 2-container regression scenario (user asked for this) | integration test | `test_BC_031_scan_reconciliation.py::test_simulated_regression_two_container_scenario` | ✓ |
 | 🔥 notification body shape | integration test | `test_BC_031_scan_reconciliation.py::test_format_regression_includes_fix_date_and_fire_header` | ✓ |
 | Missing-fix-date rendered gracefully | integration test | `test_BC_031_scan_reconciliation.py::test_format_regression_handles_missing_fix_date_gracefully` | ✓ |
+| In-branch close-gap: legacy `fixed`/`fixed_verified` rows get `last_fixed_ts` backfilled from `found_at` | integration test | `test_BC_031_scan_reconciliation.py::test_init_db_backfills_last_fixed_ts_from_found_at` | ✓ |
+| Backfill idempotence: modern rows with real `last_fixed_ts` are not overwritten | integration test | `test_BC_031_scan_reconciliation.py::test_init_db_backfill_does_not_touch_already_populated_rows` | ✓ |
+| Backfill scope: `open` rows (never fixed) stay at `last_fixed_ts=0` | integration test | `test_BC_031_scan_reconciliation.py::test_init_db_backfill_does_not_touch_open_rows` | ✓ |
 | 4 CAPs registered + bidirectional traceability | verify-traceability | CAPABILITIES.md diff | ✓ |
 | make check green | multi-gate | `make check` | ✓ |
 | Memory drift pattern added if applicable | N/A | no documented behavior deprecated | ✓ |
