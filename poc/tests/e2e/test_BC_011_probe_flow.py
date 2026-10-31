@@ -79,25 +79,35 @@ def _exec_hub(python_code: str) -> str:
 
 
 def _seed_finding(fid: str, cve_id: str, source_ref: str, status: str) -> None:
+    """Seed via hub's own API so schema changes (new columns, new fields)
+    propagate automatically. BC-021 close-gap: replaces the previous raw
+    CREATE TABLE + positional INSERT that silently broke when BC-020 added
+    the `kev` column."""
     _exec_hub(
         f"""
-import sqlite3, time
-con = sqlite3.connect('/data/beaconry.db')
-con.execute('''
-    CREATE TABLE IF NOT EXISTS findings (
-        id TEXT PRIMARY KEY, host TEXT, cve_id TEXT, package TEXT,
-        version TEXT, fixed_version TEXT, severity TEXT, cvss REAL,
-        source_type TEXT, source_ref TEXT, description TEXT,
-        found_at INTEGER, status TEXT DEFAULT 'open', tier INTEGER DEFAULT 3,
-        kev INTEGER DEFAULT 0)
-''')
-con.execute(
-    'INSERT OR REPLACE INTO findings VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
-    ('{fid}', 'test-host', '{cve_id}', 'pkg', '1.0', '1.1',
-     'High', 8.0, 'docker', '{source_ref}', 'e2e fixture',
-     int(time.time()), '{status}', 2, 0)
+import sys; sys.path.insert(0, '/app')
+import hub
+from executor.base import Finding
+hub.init_db()
+f = Finding(
+    id={fid!r},
+    host='test-host',
+    cve_id={cve_id!r},
+    package='pkg',
+    version='1.0',
+    fixed_version='1.1',
+    severity='High',
+    cvss=8.0,
+    source_type='docker',
+    source_ref={source_ref!r},
+    description='e2e fixture',
+    tier=2,
+    kev=False,
 )
-con.commit(); con.close()
+hub.save_finding(f)
+# save_finding writes status='open' by default; coerce to the requested state.
+if {status!r} != 'open':
+    hub.set_status({fid!r}, {status!r})
 """
     )
 
