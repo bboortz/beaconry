@@ -1,7 +1,7 @@
 ---
 id: BC-030
 title: internet_facing detection → Tier 1 fires
-status: in-progress
+status: shipped
 created: 2026-10-31
 branch: feat/BC-030-internet-facing-detection
 plan: docs/plan/BC-030-internet-facing-detection-plan.md
