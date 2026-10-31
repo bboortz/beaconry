@@ -500,6 +500,8 @@ def format_notification(finding: Finding) -> str:
             f"Target: <code>{esc(finding.source_ref)}</code> ({esc(finding.source_type)})",
             f"Package: <code>{esc(finding.package)} {esc(finding.version)}</code> "
             f"→ fixed in <code>{esc(finding.fixed_version)}</code>",
+            # BC-032: tell the operator whether tapping Fix will likely help.
+            _viability_line(finding),
         ]
     )
     if finding.description:
@@ -507,6 +509,60 @@ def format_notification(finding: Finding) -> str:
         lines.append(f"\n<i>{desc}</i>")
     lines.append(f"\n<code>{esc(fix_cmd)}</code>")
     return "\n".join(lines)
+
+
+def assess_fix_viability(finding: Finding) -> tuple[str, str]:
+    """BC-032: give the operator a quick signal whether `🔧 Fix` is likely to work.
+
+    Returns (label, reason) where label is one of 'likely', 'unlikely', 'unknown'.
+
+    Heuristic (not a guarantee — grype's `fix.versions` isn't always accurate):
+
+      - docker + `:latest|main|stable|edge|nightly` → **likely**: mutable tag,
+        pulling fetches the current upstream which should include the fix.
+      - docker + frozen semver tag (`:1.24`, `:16-alpine`, `:1.24.0`) → **unlikely**:
+        BC-014 same-track pull returns the same bits; a frozen tag won't drift
+        to a fixed version. Operator needs to edit the compose to a newer tag.
+      - alpm + fixed_version != current version → **likely**: `sudo pacman -Syu`
+        will pull the fixed version from the Arch repos.
+      - alpm + no fixed_version info → **unknown**.
+      - Anything else (python, etc.) → **unknown**.
+    """
+    if finding.source_type == "docker":
+        tag = finding.source_ref.rsplit(":", 1)[-1] if ":" in finding.source_ref else "latest"
+        mutable_tags = {"latest", "main", "stable", "edge", "nightly"}
+        if tag.lower() in mutable_tags:
+            return (
+                "likely",
+                f"mutable tag '{tag}' — next pull fetches current upstream",
+            )
+        if re.match(r"^\d+(\.\d+)*(-[\w.]+)?$", tag):
+            return (
+                "unlikely",
+                f"frozen tag '{tag}' — pulling returns the same bits; "
+                f"edit compose to use a newer tag that ships {finding.fixed_version}",
+            )
+        return (
+            "unknown",
+            f"tag '{tag}' — mutability can't be inferred automatically",
+        )
+    if finding.source_type == "alpm":
+        if finding.fixed_version and finding.fixed_version != "not available":
+            return (
+                "likely",
+                f"upstream repo has {finding.fixed_version}; `sudo pacman -Syu` pulls it",
+            )
+        return "unknown", "no fixed version info — upstream may not have patched yet"
+    return "unknown", f"viability heuristic doesn't cover source_type '{finding.source_type}'"
+
+
+def _viability_line(finding: Finding) -> str:
+    """Render the viability assessment as one HTML line for the notification body."""
+    import html
+
+    label, reason = assess_fix_viability(finding)
+    marker = {"likely": "✅", "unlikely": "❌", "unknown": "❓"}[label]
+    return f"Fix viability: {marker} <b>{label}</b> — <i>{html.escape(reason, quote=False)}</i>"
 
 
 def _render_mock_telegram(text: str) -> str:
@@ -541,7 +597,11 @@ def format_regression(finding: Finding, last_fixed_ts: int) -> str:
         "🔥 <b>FIX REGRESSED</b>",
         f"<b>{esc(finding.cve_id)}</b> is back after being fixed on <code>{fixed_date}</code>.",
         f"Target: <code>{esc(finding.source_ref)}</code> ({esc(finding.source_type)})",
-        f"Package: <code>{esc(finding.package)} {esc(finding.version)}</code>",
+        # BC-032: show the fixed version AND the viability assessment so the
+        # operator can tell whether 🔧 Re-fix will actually help or will loop.
+        f"Package: <code>{esc(finding.package)} {esc(finding.version)}</code> "
+        f"→ fixed in <code>{esc(finding.fixed_version)}</code>",
+        _viability_line(finding),
         "",
         "<i>Something reinstalled or rolled back the vulnerable version. "
         "Investigate before re-fixing — the root cause will come back again otherwise.</i>",

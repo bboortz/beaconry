@@ -883,6 +883,24 @@ Enforcement: `poc/scripts/verify_traceability.py` runs as part of `make check`. 
 - **verified by:**
   - `poc/tests/integration/test_BC_031_scan_reconciliation.py`
 
+### CAP-T074: Notification body carries a fix-viability indicator (✅ likely / ❌ unlikely / ❓ unknown)
+- **type:** technical
+- **status:** active
+- **origin:** BC-032 — operator screenshot 2026-10-31 of 🔥 FIX REGRESSED for nginx:1.24 flagged that Fix would be a no-op loop with no warning
+- **description:** `hub.assess_fix_viability(finding) -> (label, reason)` returns an operator-facing signal about whether tapping Fix is likely to help. Heuristic: docker + frozen semver tag → unlikely (BC-014 same-track pull returns same bits); docker + `latest`/`main`/`stable`/`edge`/`nightly` → likely; alpm + fixed_version present → likely (`sudo pacman -Syu` pulls it); everything else → unknown. Rendered via `_viability_line` into both `format_notification` and `format_regression` so the operator can tell at-a-glance whether the fix button will loop.
+- **supports:** CAP-B018
+- **verified by:**
+  - `poc/tests/unit/test_hub_helpers.py`
+
+### CAP-T075: Regression notification body shows `→ fixed in X` (parity with regular notification)
+- **type:** technical
+- **status:** active
+- **origin:** BC-032 — operator screenshot showed the regression body was missing `fixed in` even though `format_notification` had it since BC-002
+- **description:** `format_regression` now includes the `Package: X Y.Z → fixed in A.B.C` line that `format_notification` has always had. Prevents operators from having to cross-reference back to the original notification to see which version carries the fix.
+- **supports:** CAP-B021
+- **verified by:**
+  - `poc/tests/unit/test_hub_helpers.py`
+
 ### CAP-T017: Orphan tests fail the gate with a copy-pasteable template
 - **type:** technical
 - **status:** active

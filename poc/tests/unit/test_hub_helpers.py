@@ -28,6 +28,8 @@ Covers:
     - CAP-T062: Digest format surfaces KEV markers for suppressed findings
     - CAP-T063: KEV findings bypass MIN_CVSS filter in hub ingest
     - CAP-T066: KEV lookup resolves grype's relatedVulnerabilities aliases
+    - CAP-T074: Notification body carries a fix-viability indicator
+    - CAP-T075: Regression notification body shows `fixed in X`
 """
 
 from __future__ import annotations
@@ -1133,3 +1135,102 @@ async def test_kev_resolved_via_related_alias(monkeypatch: pytest.MonkeyPatch) -
     assert f.kev is True, "alias in KEV catalog must set finding.kev=True"
     assert f.tier == 0
     assert f.cve_id == "GO-2023-1703", "primary id is preserved for display"
+
+
+# ── BC-032: fix viability indicator ──────────────────────────────────────────
+
+
+def test_viability_docker_frozen_semver_is_unlikely() -> None:
+    """nginx:1.24 is the exact case from the operator's screenshot. The pull
+    returns the same frozen bits; Fix cannot help without editing compose."""
+    f = _finding(source_type="docker", source_ref="nginx:1.24", fixed_version="1.26")
+    label, reason = hub.assess_fix_viability(f)
+    assert label == "unlikely"
+    assert "frozen" in reason.lower() or "nginx:1.24" in reason
+    assert "edit compose" in reason.lower() or "newer tag" in reason.lower()
+
+
+def test_viability_docker_frozen_patch_version_is_unlikely() -> None:
+    f = _finding(source_type="docker", source_ref="postgres:16-alpine", fixed_version="17")
+    label, _reason = hub.assess_fix_viability(f)
+    assert label == "unlikely"
+
+
+def test_viability_docker_latest_is_likely() -> None:
+    f = _finding(source_type="docker", source_ref="nginx:latest", fixed_version="1.26")
+    label, reason = hub.assess_fix_viability(f)
+    assert label == "likely"
+    assert "mutable" in reason.lower() or "current upstream" in reason.lower()
+
+
+def test_viability_docker_mutable_variants_all_likely() -> None:
+    for tag in ("latest", "main", "stable", "edge", "nightly"):
+        f = _finding(source_type="docker", source_ref=f"repo:{tag}", fixed_version="2.0")
+        label, _ = hub.assess_fix_viability(f)
+        assert label == "likely", f"tag {tag!r} should be likely"
+
+
+def test_viability_alpm_with_fixed_version_is_likely() -> None:
+    """php 8.5.12-0.1 → fixed in 8.5.12-1 (operator's AVG-2909 case).
+    pacman -Syu will pull it."""
+    f = _finding(
+        source_type="alpm",
+        source_ref="php",
+        fixed_version="8.5.12-1",
+    )
+    label, reason = hub.assess_fix_viability(f)
+    assert label == "likely"
+    assert "pacman" in reason.lower()
+
+
+def test_viability_alpm_without_fixed_version_is_unknown() -> None:
+    f = _finding(source_type="alpm", source_ref="php", fixed_version="not available")
+    label, _ = hub.assess_fix_viability(f)
+    assert label == "unknown"
+
+
+def test_viability_unknown_source_type_is_unknown() -> None:
+    f = _finding(source_type="python", source_ref="requests", fixed_version="2.31.0")
+    label, _ = hub.assess_fix_viability(f)
+    assert label == "unknown"
+
+
+def test_viability_docker_no_tag_defaults_to_latest_likely() -> None:
+    """`nginx` (no `:tag`) → treat as `:latest`."""
+    f = _finding(source_type="docker", source_ref="nginx", fixed_version="1.26")
+    label, _ = hub.assess_fix_viability(f)
+    assert label == "likely"
+
+
+def test_format_notification_includes_viability_line() -> None:
+    f = _finding(
+        source_type="docker",
+        source_ref="nginx:1.24",
+        fixed_version="1.26",
+        tier=2,
+        kev=False,
+    )
+    body = hub.format_notification(f)
+    assert "Fix viability" in body
+    assert "❌" in body or "unlikely" in body
+    assert "fixed in" in body
+    assert "1.26" in body
+
+
+def test_format_regression_includes_viability_and_fixed_version() -> None:
+    """The regression body was missing both pre-BC-032. User screenshot
+    confirmed the gap: 'Package: libfreetype6 2.10.4+dfsg-1+deb11u1' had
+    no fixed-in indication."""
+    f = _finding(
+        source_type="docker",
+        source_ref="nginx:1.24",
+        package="libfreetype6",
+        fixed_version="2.10.5+dfsg-1+deb11u2",
+    )
+    body = hub.format_regression(f, last_fixed_ts=1793428833)
+    # The missing piece from the pre-BC-032 regression body:
+    assert "fixed in" in body
+    assert "2.10.5" in body
+    # And the new viability indicator:
+    assert "Fix viability" in body
+    assert "unlikely" in body  # frozen tag → unlikely
