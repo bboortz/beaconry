@@ -123,6 +123,7 @@ Two tiers (BC-006). Fast tier (`make check`) runs pre-push + the merge gate; ful
 | Smoke | `make smoke` (mocked pipeline) | fast | `make check` |
 | Compose integration | `pytest -m compose` | full | `make check-full` |
 | Real-tools integration | `pytest -m real_tools` | full | `make check-full` |
+| End-to-end BC-011 probe flow against live hub + telegram-mock + probe target | `make test-e2e` (BC-017 stack) | full | `make check-full` |
 
 No advisory gates in the POC — if a check isn't worth blocking, it isn't worth running.
 

@@ -85,6 +85,9 @@ check-full: check
 	@echo "==> Full tier: running opt-in markers (compose + real_tools)"
 	pytest -m "compose or real_tools" --no-cov
 	@echo ""
+	@echo "==> Full tier: running e2e stack (BC-017; brings up isolated compose project)"
+	$(MAKE) test-e2e
+	@echo ""
 	@echo "✓ Full tier (make check-full) passed"
 
 findings:

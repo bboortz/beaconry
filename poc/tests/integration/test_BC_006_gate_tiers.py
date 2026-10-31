@@ -64,6 +64,21 @@ def test_check_full_recipe_invokes_opt_in_markers() -> None:
     )
 
 
+def test_check_full_recipe_invokes_test_e2e() -> None:
+    """Full gate must also run the e2e stack. Rationale: `check` alone missed 4
+    live-smoke regressions in the KEV-ingest session (BC-020 Dockerfile COPY,
+    BC-020 empty-env, BC-023 MIN_CVSS ordering). The pre-merge tier catches
+    them pre-merge instead of in post-ship audits."""
+    text = MAKEFILE.read_text()
+    m = re.search(r"^check-full\s*:.*\n((?:\t.+\n?)+)", text, re.MULTILINE)
+    assert m, "`check-full` target has no recipe body"
+    recipe = m.group(1)
+    assert "test-e2e" in recipe, (
+        f"`make check-full` must invoke `make test-e2e`; got:\n{recipe}\n"
+        "Add `$(MAKE) test-e2e` to the check-full recipe."
+    )
+
+
 def test_opt_in_markers_collect_without_error_regardless_of_prereqs() -> None:
     """BC-006 close-gaps: `pytest -m "compose or real_tools" --collect-only` must
     succeed even on hosts that lack docker / syft / grype. If collection raises
