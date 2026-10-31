@@ -35,6 +35,12 @@ try:
     import urgency as _urgency
     import waterfall as _waterfall
     from beaconry_health import build_router, check_binary, check_db, check_dir_populated
+    from notifiers import TelegramAdapter
+    from notifiers import notify_digest as _dispatch_digest
+    from notifiers import notify_finding as _dispatch_finding
+    from notifiers import notify_heartbeat as _dispatch_heartbeat
+    from notifiers import notify_regression as _dispatch_regression
+    from notifiers import register as _register_adapter
 except ImportError:
     # Host test path: imported as poc.hub.hub, package at poc.beaconry_health
     from poc.beaconry_health import build_router, check_binary, check_db, check_dir_populated
@@ -42,6 +48,12 @@ except ImportError:
     from poc.hub import kev as _kev
     from poc.hub import urgency as _urgency
     from poc.hub import waterfall as _waterfall
+    from poc.hub.notifiers import TelegramAdapter
+    from poc.hub.notifiers import notify_digest as _dispatch_digest
+    from poc.hub.notifiers import notify_finding as _dispatch_finding
+    from poc.hub.notifiers import notify_heartbeat as _dispatch_heartbeat
+    from poc.hub.notifiers import notify_regression as _dispatch_regression
+    from poc.hub.notifiers import register as _register_adapter
 
 logging.basicConfig(
     level=logging.INFO,
@@ -78,6 +90,18 @@ FIX_ENABLED = os.environ.get("BEACONRY_FIX_ENABLED", "1") != "0"
 # for self-hosted scenarios where the long-term diff feels like surveillance,
 # or when the DB holds historical state the operator doesn't want touched.
 RECONCILE_ENABLED = os.environ.get("BEACONRY_RECONCILE_ENABLED", "1") != "0"
+# BC-035: periodic reminder for findings sitting at status=open for too long.
+# Default ON — the whole point is that silent-forever findings are a bug.
+HEARTBEAT_ENABLED = os.environ.get("BEACONRY_HEARTBEAT_ENABLED", "1") != "0"
+# How long a finding sits before heartbeat re-pokes. Default 7 days.
+HEARTBEAT_INTERVAL_S = int(os.environ.get("BEACONRY_HEARTBEAT_INTERVAL_S", str(7 * 86400)))
+# How often the sweep runs internally. Default 1h — cheap, catches new-stale.
+HEARTBEAT_SWEEP_INTERVAL_S = int(os.environ.get("BEACONRY_HEARTBEAT_SWEEP_INTERVAL_S", "3600"))
+# BC-035: a finding whose last_seen_ts is older than this window is considered
+# gone from inventory — no heartbeat (BC-031 reconcile will auto-close it).
+HEARTBEAT_LIVENESS_WINDOW_S = int(
+    os.environ.get("BEACONRY_HEARTBEAT_LIVENESS_WINDOW_S", str(7 * 86400))
+)
 
 DATA_DIR.mkdir(parents=True, exist_ok=True)
 DB_PATH = DATA_DIR / "beaconry.db"
@@ -126,7 +150,8 @@ def init_db() -> None:
             tier         INTEGER DEFAULT 3,
             kev          INTEGER DEFAULT 0,
             last_fixed_ts INTEGER DEFAULT 0,
-            last_seen_ts INTEGER DEFAULT 0
+            last_seen_ts INTEGER DEFAULT 0,
+            last_notified_ts INTEGER DEFAULT 0
         )
     """)
     # Idempotent migrations for DBs created before each column existed.
@@ -157,6 +182,15 @@ def init_db() -> None:
         con.execute("ALTER TABLE findings ADD COLUMN last_seen_ts INTEGER DEFAULT 0")
     con.execute(
         "UPDATE findings SET last_seen_ts = found_at WHERE last_seen_ts = 0 AND found_at > 0"
+    )
+    # BC-035: last_notified_ts tracks the most recent reminder sent for this
+    # finding (first-fire OR heartbeat). The heartbeat sweep uses it to avoid
+    # re-poking too often. Legacy rows backfill from `found_at` (approximation —
+    # the first notification happened near first-sighting).
+    with contextlib.suppress(sqlite3.OperationalError):
+        con.execute("ALTER TABLE findings ADD COLUMN last_notified_ts INTEGER DEFAULT 0")
+    con.execute(
+        "UPDATE findings SET last_notified_ts = found_at WHERE last_notified_ts = 0 AND found_at > 0"
     )
     con.commit()
     con.close()
@@ -682,49 +716,52 @@ def format_regression(finding: Finding, last_fixed_ts: int) -> str:
     return "\n".join(lines)
 
 
-async def notify_regression(finding: Finding, last_fixed_ts: int) -> None:
-    """BC-031: send the 🔥 FIX REGRESSED alarm. Keyboard offers Investigate +
-    Re-fix + Accept risk — operator chooses between "look first" and "patch
-    again now"."""
-    text = format_regression(finding, last_fixed_ts)
-    if MOCK:
-        print("    [mock] telegram send: regression notification dispatched")
-        print("    ==> Regression")
-        print(_render_mock_telegram(text))
-        return
-    if tg_app is None:
-        log.warning("Telegram app not ready — skipping regression notification")
-        return
-    keyboard = InlineKeyboardMarkup(
+def format_heartbeat(finding: Finding, open_since_ts: int) -> str:
+    """BC-035: periodic reminder for an open finding operator never actioned.
+
+    Body shape mirrors format_notification but leads with a ⏰ header giving
+    the time-open context so operator understands this is a nudge, not a
+    first-fire."""
+    import datetime
+    import html
+
+    def esc(s: str) -> str:
+        return html.escape(s, quote=False)
+
+    days_open = max(1, (int(time.time()) - open_since_ts) // 86400)
+    since = (
+        datetime.datetime.fromtimestamp(open_since_ts).strftime("%Y-%m-%d")
+        if open_since_ts
+        else "unknown"
+    )
+    emoji = {"Critical": "🔴", "High": "🟠", "Medium": "🟡"}.get(finding.severity, "⚪")
+
+    lines = [
+        f"⏰ <b>OPEN SINCE {esc(since)} ({days_open} day{'s' if days_open != 1 else ''})</b>",
+    ]
+    if finding.tier == 0:
+        lines.append("🚨 <b>KEV — EXPLOITED IN THE WILD</b>")
+    lines.extend(
         [
-            [
-                InlineKeyboardButton("🔧 Re-fix", callback_data=f"fix:{finding.id}"),
-                InlineKeyboardButton("✅ Accept risk", callback_data=f"ack:{finding.id}"),
-            ]
+            f"{emoji} <b>{esc(finding.severity)} — {esc(finding.cve_id)}</b>",
+            f"CVSS: <code>{finding.cvss:.1f}</code> · Host: <code>{esc(finding.host)}</code>",
+            f"Target: <code>{esc(finding.source_ref)}</code> ({esc(finding.source_type)})",
+            _package_fix_line(finding, esc),
+            _viability_line(finding),
+            "",
+            "<i>You haven't actioned this finding yet. Snooze to defer or "
+            "accept the risk if you've decided to live with it.</i>",
         ]
     )
-    await tg_app.bot.send_message(
-        chat_id=TELEGRAM_CHAT_ID,
-        text=text,
-        parse_mode="HTML",
-        reply_markup=keyboard,
-    )
+    return "\n".join(lines)
 
 
-async def notify(finding: Finding) -> None:
-    text = format_notification(finding)
+# ── BC-035: keyboard builders exposed to the TelegramAdapter ─────────────────
 
-    if MOCK:
-        print("    [mock] telegram send: notification dispatched")
-        print("    ==> Notification")
-        print(_render_mock_telegram(text))
-        return
 
-    if tg_app is None:
-        log.warning("Telegram app not ready — skipping notification")
-        return
-
-    keyboard = InlineKeyboardMarkup(
+def _kb_finding(finding: Finding) -> "InlineKeyboardMarkup":
+    """First-fire + heartbeat buttons — Fix / Snooze / Accept risk."""
+    return InlineKeyboardMarkup(
         [
             [
                 InlineKeyboardButton("🔧 Fix now", callback_data=f"fix:{finding.id}"),
@@ -733,12 +770,62 @@ async def notify(finding: Finding) -> None:
             [InlineKeyboardButton("✅ Accept risk", callback_data=f"ack:{finding.id}")],
         ]
     )
-    await tg_app.bot.send_message(
-        chat_id=TELEGRAM_CHAT_ID,
-        text=text,
-        parse_mode="HTML",
-        reply_markup=keyboard,
+
+
+def _kb_regression(finding: Finding) -> "InlineKeyboardMarkup":
+    """BC-031 regression — no Snooze (regression deserves attention, not deferral)."""
+    return InlineKeyboardMarkup(
+        [
+            [
+                InlineKeyboardButton("🔧 Re-fix", callback_data=f"fix:{finding.id}"),
+                InlineKeyboardButton("✅ Accept risk", callback_data=f"ack:{finding.id}"),
+            ]
+        ]
     )
+
+
+# BC-035 thin wrappers — hub call sites keep their original names but now
+# dispatch through the notifier registry. One adapter failing (e.g. Telegram
+# offline) must not stop others; the registry handles isolation.
+
+
+def _mock_print(label: str, text: str) -> None:
+    """BC-035 fallback: in MOCK mode with no adapter registered (demo path),
+    preserve the pre-BC-035 '[mock] telegram send' output so BC-001 e2e tests
+    still see the labelled stub."""
+    print(f"    [mock] telegram send: {label} dispatched")
+    print(f"    ==> {label.title()}")
+    print(_render_mock_telegram(text))
+
+
+async def notify_regression(finding: Finding, last_fixed_ts: int) -> None:
+    """BC-031: 🔥 FIX REGRESSED. Dispatched to all enabled notification adapters."""
+    from poc.hub import notifiers as _n
+
+    if MOCK and not _n.enabled_adapters():
+        _mock_print("Regression", format_regression(finding, last_fixed_ts))
+        return
+    await _dispatch_regression(finding, last_fixed_ts)
+
+
+async def notify(finding: Finding) -> None:
+    """BC-003: first-fire notification. Dispatched to all enabled adapters."""
+    from poc.hub import notifiers as _n
+
+    if MOCK and not _n.enabled_adapters():
+        _mock_print("Notification", format_notification(finding))
+        return
+    await _dispatch_finding(finding)
+
+
+async def notify_heartbeat(finding: Finding, open_since_ts: int) -> None:
+    """BC-035: periodic reminder. Dispatched to all enabled adapters."""
+    from poc.hub import notifiers as _n
+
+    if MOCK and not _n.enabled_adapters():
+        _mock_print("Heartbeat", format_heartbeat(finding, open_since_ts))
+        return
+    await _dispatch_heartbeat(finding, open_since_ts)
 
 
 CALLBACK_RE = re.compile(r"^(fix|snooze|ack|verify):[a-f0-9]{16}(?::\d+)?$")
@@ -1010,12 +1097,40 @@ async def lifespan(
     tg_app = _app
     log.info("Telegram bot polling started")
 
+    # BC-035: register the Telegram notification adapter. Future adapters
+    # (email, Reddit, SMS, …) register themselves here too, each gated by
+    # its own BEACONRY_NOTIFIER_<NAME>_ENABLED env var.
+    _register_adapter(
+        TelegramAdapter(
+            tg_app_getter=lambda: tg_app,
+            chat_id_getter=lambda: TELEGRAM_CHAT_ID,
+            formatters={
+                "notification": format_notification,
+                "regression": format_regression,
+                "heartbeat": format_heartbeat,
+                "digest": format_digest_body,
+            },
+            keyboard_builders={
+                "finding": _kb_finding,
+                "regression": _kb_regression,
+                "heartbeat": _kb_finding,  # same actions as a first-fire
+            },
+            mock_renderer=_render_mock_telegram,
+        )
+    )
+
+    # BC-035: periodic reminder loop for stale open findings.
+    _heartbeat_task = asyncio.create_task(_heartbeat_loop_forever())
+
     yield
 
     # BC-020: cancel KEV refresh loop on shutdown.
     _kev_task.cancel()
+    _heartbeat_task.cancel()
     with contextlib.suppress(asyncio.CancelledError):
         await _kev_task
+    with contextlib.suppress(asyncio.CancelledError):
+        await _heartbeat_task
 
     assert tg_app is not None
     assert tg_app.updater is not None
@@ -1104,16 +1219,12 @@ def dedup_and_cap(findings: list[Finding], cap: int) -> tuple[list[Finding], lis
     return unique[:cap], unique[cap:]
 
 
-async def send_digest(suppressed: list[Finding]) -> None:
-    """Send a single HTML digest message summarising suppressed findings."""
+def format_digest_body(suppressed: list[Finding]) -> str:
+    """BC-022 digest render — one HTML blob summarising cap-suppressed findings.
+    Pure render; sending is the adapter's job."""
     import html
 
-    if not suppressed or tg_app is None:
-        return
     lines = [f"📋 <b>{len(suppressed)} additional finding(s) suppressed this run</b>"]
-    # BC-022: if any suppressed finding is KEV, surface a loud banner above the
-    # bullet list — otherwise Tier 0 findings hide invisibly in prose when
-    # #KEV > BEACONRY_MAX_FINDINGS_PER_RUN.
     kev_count = sum(1 for f in suppressed if f.kev)
     if kev_count:
         lines.append(
@@ -1129,12 +1240,101 @@ async def send_digest(suppressed: list[Finding]) -> None:
     if len(suppressed) > 10:
         lines.append(f"… and {len(suppressed) - 10} more")
     lines.append("\n<i>Raise MIN_CVSS or lower BEACONRY_MAX_FINDINGS_PER_RUN to tune.</i>")
+    return "\n".join(lines)
+
+
+async def send_digest(suppressed: list[Finding]) -> None:
+    """BC-035: thin wrapper — all enabled notification adapters receive the digest."""
+    if not suppressed:
+        return
+    await _dispatch_digest(suppressed)
+
+
+async def heartbeat_sweep() -> int:
+    """BC-035: scan the DB for stale open findings and emit a reminder for each.
+
+    Returns the number of reminders sent. No-op when HEARTBEAT_ENABLED is False.
+
+    Qualifying criteria for a reminder:
+      - status='open' (snoozed/accepted/fixed/regressed/fixed_verified skipped)
+      - last_seen_ts > now - HEARTBEAT_LIVENESS_WINDOW_S (still in inventory;
+        no point reminding about findings scout no longer sees — those will
+        auto-close via BC-031 reconcile)
+      - last_notified_ts < now - HEARTBEAT_INTERVAL_S (not recently poked)
+
+    Writes `last_notified_ts = now` for each reminded finding so the next
+    sweep doesn't re-poke until the interval elapses again. Audit event
+    `heartbeat_reminder_sent` emitted per reminder (BC-029)."""
+    if not HEARTBEAT_ENABLED:
+        return 0
+    con = sqlite3.connect(DB_PATH)
     try:
-        await tg_app.bot.send_message(
-            chat_id=int(TELEGRAM_CHAT_ID), text="\n".join(lines), parse_mode="HTML"
+        now = int(time.time())
+        liveness_cutoff = now - HEARTBEAT_LIVENESS_WINDOW_S
+        poke_cutoff = now - HEARTBEAT_INTERVAL_S
+        rows = con.execute(
+            "SELECT id, host, cve_id, package, version, fixed_version, severity, "
+            "cvss, source_type, source_ref, description, tier, kev, found_at, "
+            "last_notified_ts FROM findings "
+            "WHERE status='open' AND last_seen_ts > ? "
+            "AND (last_notified_ts = 0 OR last_notified_ts < ?)",
+            (liveness_cutoff, poke_cutoff),
+        ).fetchall()
+    except sqlite3.OperationalError:
+        con.close()
+        return 0
+
+    sent = 0
+    for row in rows:
+        finding = Finding(
+            id=row[0],
+            host=row[1],
+            cve_id=row[2],
+            package=row[3],
+            version=row[4],
+            fixed_version=row[5],
+            severity=row[6],
+            cvss=row[7],
+            source_type=row[8],
+            source_ref=row[9],
+            description=row[10] or "",
+            tier=row[11],
+            kev=bool(row[12]),
         )
-    except Exception as e:  # noqa: BLE001
-        log.warning("digest message failed: %s", e)
+        open_since = row[13] or int(time.time())
+        try:
+            await _dispatch_heartbeat(finding, open_since)
+        except Exception as e:  # noqa: BLE001
+            log.warning("heartbeat notify failed for %s: %s", finding.cve_id, e)
+            continue
+        con.execute(
+            "UPDATE findings SET last_notified_ts = ? WHERE id = ?",
+            (now, finding.id),
+        )
+        days_open = max(1, (now - open_since) // 86400)
+        _audit.append(
+            "heartbeat_reminder_sent",
+            finding_id=finding.id,
+            cve_id=finding.cve_id,
+            days_open=days_open,
+        )
+        sent += 1
+    con.commit()
+    con.close()
+    if sent:
+        log.info("BC-035: heartbeat sweep sent %d reminder(s)", sent)
+    return sent
+
+
+async def _heartbeat_loop_forever() -> (
+    None
+):  # pragma: no cover - infinite async loop; tested via sweep directly
+    while True:
+        try:
+            await heartbeat_sweep()
+        except Exception as e:  # noqa: BLE001
+            log.warning("BC-035: heartbeat sweep failed: %s", e)
+        await asyncio.sleep(HEARTBEAT_SWEEP_INTERVAL_S)
 
 
 def _mark_scan_now() -> None:

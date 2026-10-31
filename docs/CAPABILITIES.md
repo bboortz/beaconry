@@ -919,6 +919,25 @@ Enforcement: `poc/scripts/verify_traceability.py` runs as part of `make check`. 
 - **verified by:**
   - `poc/tests/unit/test_last_seen_tracking.py`
 
+### CAP-T078: Notification adapter architecture with per-channel enable/disable
+- **type:** technical
+- **status:** active
+- **origin:** BC-035 — operator 2026-10-31 "important is that we can enable/disable all kind of notification and the notification types are following an adapter approach"
+- **description:** Outbound notifications go through a registry of `NotificationAdapter` subclasses, each owning its own `env_var` enable flag (default on when unset). Hub call sites (`notify_finding`, `notify_regression`, `notify_heartbeat`, `notify_digest`) iterate the registry; one failing adapter is logged and swallowed per-call so it cannot block siblings. First adapter is `TelegramAdapter`; future adapters (email, Reddit, SMS, webhook) subclass `NotificationAdapter` and self-register — no hub.py changes needed. Interactive callbacks (button taps) stay Telegram-specific in `on_button_click` — the adapter abstraction is for OUTBOUND dispatch only.
+- **supports:** CAP-B003
+- **verified by:**
+  - `poc/tests/unit/test_notification_adapters.py`
+  - `poc/tests/unit/test_telegram_adapter.py`
+
+### CAP-T079: Heartbeat sweep reminds operators about stale open findings
+- **type:** technical
+- **status:** active
+- **origin:** BC-035 — "fix is not forget" principle; silent-forever findings are a bug
+- **description:** Periodic `heartbeat_sweep()` scans the DB for rows where `status='open'`, `last_seen_ts > now - BEACONRY_HEARTBEAT_LIVENESS_WINDOW_S` (still in inventory), and `last_notified_ts < now - BEACONRY_HEARTBEAT_INTERVAL_S` (default 7d). Each hit dispatches `notify_heartbeat` through the adapter registry (so disabling Telegram also silences heartbeats) and advances `last_notified_ts` so the next sweep within the interval is a no-op. Snoozed/accepted/fixed/absent findings are skipped — BC-031 reconcile owns those paths. Audit event `heartbeat_reminder_sent` carries `finding_id`, `cve_id`, `days_open`. Operator opt-out: `BEACONRY_HEARTBEAT_ENABLED=0`.
+- **supports:** CAP-B003
+- **verified by:**
+  - `poc/tests/unit/test_heartbeat_sweep.py`
+
 ### CAP-T017: Orphan tests fail the gate with a copy-pasteable template
 - **type:** technical
 - **status:** active

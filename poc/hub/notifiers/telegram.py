@@ -1,0 +1,82 @@
+"""BC-035 — Telegram notification adapter.
+
+Wraps the python-telegram-bot Application + chat_id. All existing
+notification bodies (format_notification, format_regression, format_heartbeat,
+digest) are rendered elsewhere in hub.py; this adapter just dispatches them.
+"""
+
+from __future__ import annotations
+
+import logging
+import os
+from typing import TYPE_CHECKING
+
+from .base import NotificationAdapter
+
+if TYPE_CHECKING:
+    from poc.hub.executor.base import Finding
+
+log = logging.getLogger("hub.notifiers.telegram")
+
+
+class TelegramAdapter(NotificationAdapter):
+    name = "telegram"
+    env_var = "BEACONRY_NOTIFIER_TELEGRAM_ENABLED"
+
+    def __init__(
+        self,
+        tg_app_getter,
+        chat_id_getter,
+        formatters,
+        keyboard_builders,
+        mock_renderer=None,
+    ) -> None:
+        """Lazy getters so hub.py can hand us closures over its module globals
+        (tg_app may be None at import time; chat_id may be reconfigured for e2e)."""
+        self._tg_app = tg_app_getter
+        self._chat_id = chat_id_getter
+        self._fmt = formatters
+        self._kb = keyboard_builders
+        self._mock_renderer = mock_renderer
+
+    def _is_mock(self) -> bool:
+        return os.environ.get("BEACONRY_MOCK") == "1"
+
+    async def _send(self, text: str, reply_markup=None) -> None:
+        """Common send path handling MOCK + missing tg_app gracefully."""
+        if self._is_mock():
+            if self._mock_renderer is not None:
+                print("    [mock] telegram send: notification dispatched")
+                print("    ==> Notification")
+                print(self._mock_renderer(text))
+            return
+        tg_app = self._tg_app()
+        if tg_app is None:
+            log.warning("Telegram app not ready — skipping notification")
+            return
+        chat_id = self._chat_id()
+        kwargs: dict = {"chat_id": int(chat_id), "text": text, "parse_mode": "HTML"}
+        if reply_markup is not None:
+            kwargs["reply_markup"] = reply_markup
+        await tg_app.bot.send_message(**kwargs)
+
+    async def send_finding(self, finding: Finding) -> None:
+        text = self._fmt["notification"](finding)
+        kb = self._kb["finding"](finding)
+        await self._send(text, reply_markup=kb)
+
+    async def send_regression(self, finding: Finding, last_fixed_ts: int) -> None:
+        text = self._fmt["regression"](finding, last_fixed_ts)
+        kb = self._kb["regression"](finding)
+        await self._send(text, reply_markup=kb)
+
+    async def send_heartbeat(self, finding: Finding, open_since_ts: int) -> None:
+        text = self._fmt["heartbeat"](finding, open_since_ts)
+        kb = self._kb["heartbeat"](finding)
+        await self._send(text, reply_markup=kb)
+
+    async def send_digest(self, suppressed: list[Finding]) -> None:
+        if not suppressed:
+            return
+        text = self._fmt["digest"](suppressed)
+        await self._send(text, reply_markup=None)

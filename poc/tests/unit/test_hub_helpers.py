@@ -953,13 +953,40 @@ class _CapturingBot:
 async def _capture_digest(
     monkeypatch: pytest.MonkeyPatch, suppressed: list[Finding]
 ) -> _CapturingBot:
+    """BC-035 updated harness: notifications dispatch via adapter registry.
+    Register a TelegramAdapter pointing at the capturing bot for the test."""
     bot = _CapturingBot()
     import types
+
+    from poc.hub import notifiers
 
     fake_tg_app = types.SimpleNamespace(bot=bot)
     monkeypatch.setattr(hub, "tg_app", fake_tg_app)
     monkeypatch.setattr(hub, "TELEGRAM_CHAT_ID", "123", raising=False)
-    await hub.send_digest(suppressed)
+    notifiers.reset_registry_for_tests()
+    monkeypatch.setenv("BEACONRY_MOCK", "")  # ensure not mock mode
+    notifiers.register(
+        hub.TelegramAdapter(
+            tg_app_getter=lambda: fake_tg_app,
+            chat_id_getter=lambda: "123",
+            formatters={
+                "notification": hub.format_notification,
+                "regression": hub.format_regression,
+                "heartbeat": hub.format_heartbeat,
+                "digest": hub.format_digest_body,
+            },
+            keyboard_builders={
+                "finding": hub._kb_finding,
+                "regression": hub._kb_regression,
+                "heartbeat": hub._kb_finding,
+            },
+            mock_renderer=hub._render_mock_telegram,
+        )
+    )
+    try:
+        await hub.send_digest(suppressed)
+    finally:
+        notifiers.reset_registry_for_tests()
     return bot
 
 

@@ -22,6 +22,8 @@ COPY hub/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
 COPY hub/hub.py hub/waterfall.py hub/urgency.py hub/kev.py hub/audit.py ./
 COPY hub/executor/ executor/
+# BC-035: notification adapter package — Telegram, future email/Reddit/etc.
+COPY hub/notifiers/ notifiers/
 # BC-012: shared health-check package — every container COPYs this.
 COPY beaconry_health/ ./beaconry_health/
 
