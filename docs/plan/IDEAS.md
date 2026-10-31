@@ -260,6 +260,11 @@ See per-decision review dates in `memory/`:
   priority: later
   Scope sketch: `/ultrareview` rule that greps `poc/hub/hub.py` for `@api.post("/test/*")` or `@app.post("/test/*")` definitions and fails if the enclosing block is NOT inside an `if TEST_MODE:` or equivalent guard. Second rule: `poc/docker-compose.yml`'s hub `environment:` list must not default `BEACONRY_TEST_MODE` to anything but empty/0. Both are structural checks, not runtime behavior.
 
+- **Three-way sync: VARIABLES.md ↔ .env.example ↔ docker-compose.yml — needs BC-039 shipped**
+  trigger: BC-039 shipped 2026-10-31 — `docs/VARIABLES.md` is now the one authoritative index of env vars, and `make verify-variables` catches code↔doc drift. BC-011's `verify-compose-env-propagation` catches hub-code↔compose drift. But a variable could be in VARIABLES.md + hub.py + docker-compose.yml yet still missing from `.env.example`, or default-mismatched between the three files, and no gate would catch it.
+  priority: later
+  Scope sketch: extend `verify_variables_documented.py` with two cross-checks: (1) every documented variable with a non-empty default appears in `poc/.env.example` with the SAME default value; (2) every variable in `poc/docker-compose.yml`'s hub/scout `environment:` list is in VARIABLES.md. Needs a shared parser for `.env.example` (shell-flavored). First rule is the operator-facing one; second rule is a safety net for forgotten additions. Est. half-day.
+
 ## Parking lot (ideas we discussed but likely won't do)
 
 - **`make demo` works with host-run telegram-mock (BC-018 Scenario 7's literal recipe)**
