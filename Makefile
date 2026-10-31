@@ -1,4 +1,4 @@
-.PHONY: help lint format type test check check-full demo smoke clean install-hooks verify-traceability verify-dockerfile-health-copy verify-dockerfile-sources verify-memory-drift verify-compose-env-propagation verify-docs-drift verify-evidence-pointers verify-per-file-coverage findings status test-e2e
+.PHONY: help lint format type test check check-full demo smoke clean install-hooks verify-traceability verify-dockerfile-health-copy verify-dockerfile-sources verify-memory-drift verify-compose-env-propagation verify-docs-drift verify-evidence-pointers verify-per-file-coverage findings status test-e2e live-rebuild live-status
 
 PYTHON ?= python3
 PYTEST_ARGS ?=
@@ -37,6 +37,14 @@ help:
 	@echo "  BEACONRY_MOCK=1 make demo       local Python mock (fast dev loop)"
 	@echo "  make demo ARGS=--self-test      Telegram canary (mock mode only)"
 	@echo "  make test-e2e                   isolated BC-011 probe e2e (BC-017; no Telegram needed)"
+	@echo ""
+	@echo "Live stack (operator — use these before any real-world verification):"
+	@echo "  make live-rebuild               rebuild + restart hub + scout from current source"
+	@echo "                                  Always run this BEFORE interpreting /healthz,"
+	@echo "                                  make findings, or Telegram screenshots as evidence."
+	@echo "                                  Stale containers = false test results."
+	@echo "  make live-status                compare running image build-time to source mtime"
+	@echo "                                  (hint when rebuild is overdue)"
 	@echo ""
 	@echo "Housekeeping:"
 	@echo "  make install-hooks              pre-commit install + pre-push"
@@ -130,3 +138,34 @@ test-e2e:
 
 status:
 	@$(PYTHON) -m poc.scripts.status
+
+# Rebuild + restart the live stack from current source. Always run before
+# any real-world verification against the running hub/scout — stale
+# containers are the #1 source of "my change doesn't work" false negatives
+# (bit us 3+ times in BC-020 and BC-022). See memory/workflow.md.
+live-rebuild:
+	@echo "==> Rebuilding beaconry-hub + beaconry-scout from current source…"
+	cd poc && docker compose up -d --build
+	@echo "==> Waiting for /readyz on hub…"
+	@until curl -sS http://localhost:8000/readyz >/dev/null 2>&1; do sleep 1; done
+	@echo "==> Live stack now matches source. /healthz:"
+	@docker exec beaconry-hub python3 -c "import urllib.request,json; print(json.dumps(json.loads(urllib.request.urlopen('http://localhost:8000/healthz').read())['checks'], indent=2))" 2>&1 | sed 's/^/    /'
+
+# Verdict: is the running stack up-to-date with current source? Prints FRESH
+# or STALE and the delta in seconds. Checks hub + scout.
+live-status:
+	@for svc in hub scout; do \
+	   CONTAINER="beaconry-$$svc"; \
+	   BUILT_ISO=$$(docker inspect $$CONTAINER --format='{{.Created}}' 2>/dev/null); \
+	   if [ -z "$$BUILT_ISO" ]; then \
+	     echo "$$CONTAINER: not running (run 'make live-rebuild')"; continue; \
+	   fi; \
+	   BUILT_EPOCH=$$(date -d "$$BUILT_ISO" +%s); \
+	   SRC_EPOCH=$$(find poc/$$svc -name '*.py' -printf '%T@\n' 2>/dev/null | sort -nr | head -1 | cut -d. -f1); \
+	   DELTA=$$(( SRC_EPOCH - BUILT_EPOCH )); \
+	   if [ "$$DELTA" -gt 0 ]; then \
+	     echo "$$CONTAINER: ⚠️ STALE — source is $${DELTA}s newer than container. Run 'make live-rebuild'."; \
+	   else \
+	     echo "$$CONTAINER: ✓ FRESH — container is $$(( -DELTA ))s newer than source."; \
+	   fi; \
+	 done

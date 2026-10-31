@@ -157,3 +157,13 @@ poc/tests/
   - On `commit`: ruff + ruff format + pyright on staged files
   - On `push`: full `pytest` suite
 - Install: `pre-commit install && pre-commit install --hook-type pre-push`
+
+## Live-stack verification: always rebuild first
+
+Any real-world verification against the running `beaconry-hub` / `beaconry-scout` containers (reading `/healthz`, interpreting `make findings`, taking a Telegram screenshot, running `make demo` in real mode) MUST be preceded by `make live-rebuild`. Stale containers have produced false test results three times already — most notably BC-020 (where `/healthz` had no `kev` field because the container predated the ship) and BC-022 (where the digest was interpreted as "shipped behavior" when it was pre-ship code).
+
+Discipline:
+
+1. Run `make live-rebuild` → rebuilds + restarts + waits for `/readyz` + prints `/healthz` so you can confirm the shipped code is live.
+2. `make live-status` prints the running image's build-time vs the newest source `.py` mtime — use when unsure.
+3. `make test-e2e` and `make check-full` rebuild their own isolated containers from source, so they're inherently stale-free. The staleness rule only applies to the main `make demo` stack.
