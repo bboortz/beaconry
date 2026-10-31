@@ -32,5 +32,6 @@ One-line status board for operator scenarios. Full stories in `BC-NNN-<slug>.md`
 | BC-028 | KEV lookup resolves grype related aliases | shipped     | — (merged to dev)                   |
 | BC-029 | Append-only audit log of operator-visible state changes | shipped     | — (merged to dev)                   |
 | BC-030 | internet_facing detection → Tier 1 fires | ready       | (next session)                      |
+| BC-031 | Scan reconciliation + regression detection — fix is not forget | ready       | (next session)                      |
 
 Lifecycle: `draft → ready → in-progress → shipped`. Status matches each story's frontmatter.

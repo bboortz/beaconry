@@ -222,7 +222,7 @@ See per-decision review dates in `memory/`:
   priority: later (both are marginal; verdict in the trade-off discussion was "not worth the churn")
   Scope: scan — split per drift check if we add a 5th check and CC jumps above 15. parse_capabilities — swap to markdown-it-py if we ever add a new field or shape. Both are "touch when you have to" candidates.
 
-- **BC-031 candidate — Surface KEV-alias context in notifications when a non-CVE primary is tier-0**
+- **Surface KEV-alias context in notifications when a non-CVE primary is tier-0** (future BC — BC-031 slot taken by scan reconciliation)
   trigger: BC-028 audit 2026-10-31 flagged this as a theoretical UX gap. 2026-10-31 real-world fire **confirmed it live**: operator's phone received `🚨 KEV — EXPLOITED IN THE WILD · AVG-2909` with no indication of which CVE alias triggered the KEV match. The description field says "arbitrary code execution" but there's no public exploit name the operator can grep for.
   priority: soon (promoted from "later" after live confirmation)
   Scope sketch: in `format_notification`, if `finding.kev` and primary doesn't start with `CVE-`, append a tiny second line: `<i>KEV via CVE-...</i>`. Requires storing the alias at ingest time → new `Finding.kev_cve_alias: str | None` field + DB migration. ~0.5 day. Audit log entry gains the field for free via `**details`.
