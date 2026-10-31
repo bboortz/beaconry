@@ -1,0 +1,40 @@
+---
+# BC-038 scenario-harness compose: hub-only, isolated project, test-mode enabled.
+# Opened by poc/scenarios/run.sh; torn down automatically.
+services:
+  hub:
+    build:
+      context: ../
+      dockerfile: hub/Dockerfile
+    image: beaconry-hub:scenarios
+    container_name: beaconry-scenarios-hub
+    environment:
+      # Test mode: /test/* routes are registered.
+      - BEACONRY_TEST_MODE=1
+      # Skip grype DB download (BC-018): we never call grype in scenarios.
+      - BEACONRY_MOCK=1
+      - BEACONRY_SKIP_GRYPE_DB=1
+      # Deterministic cap so s07 digest math is predictable.
+      - BEACONRY_MAX_FINDINGS_PER_RUN=5
+      # Default digest cadence (24h) — scenarios drive `at` directly.
+      - BEACONRY_DIGEST_INTERVAL_S=86400
+      # Heartbeat 24h — s08 drives via injected `at`.
+      - BEACONRY_HEARTBEAT_INTERVAL_S=86400
+      - BEACONRY_HEARTBEAT_LIVENESS_WINDOW_S=604800
+      - BEACONRY_RECONCILE_ENABLED=1
+      - BEACONRY_INTERNET_FACING_DETECTION_ENABLED=1
+      # No Telegram — the mock dial above short-circuits all adapters.
+      - TELEGRAM_BOT_TOKEN=
+      - TELEGRAM_CHAT_ID=
+      - GRYPE_DB_CACHE_DIR=/data/grype-db
+    volumes:
+      - /tmp/beaconry-scenarios:/data
+    ports:
+      - "127.0.0.1:8004:8000"
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request,sys;sys.exit(0 if urllib.request.urlopen('http://localhost:8000/readyz').status==200 else 1)"]
+      interval: 5s
+      start_interval: 2s
+      timeout: 5s
+      start_period: 30s
+      retries: 3

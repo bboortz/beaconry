@@ -39,5 +39,6 @@ One-line status board for operator scenarios. Full stories in `BC-NNN-<slug>.md`
 | BC-035 | Notification adapter architecture + heartbeat for stale open findings | shipped     | — (merged to dev)                   |
 | BC-036 | Decouple digest cadence from scan cadence | shipped     | — (merged to dev)                   |
 | BC-037 | On-demand scout scan trigger (`make scan`) | shipped     | — (merged to dev)                   |
+| BC-038 | Live-stack scenario harness (`make test-scenarios`) | shipped     | — (merged to dev)                   |
 
 Lifecycle: `draft → ready → in-progress → shipped`. Status matches each story's frontmatter.

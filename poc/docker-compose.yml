@@ -36,6 +36,9 @@ services:
       - BEACONRY_NOTIFIER_TELEGRAM_ENABLED=${BEACONRY_NOTIFIER_TELEGRAM_ENABLED:-1}
       # BEACONRY_MOCK is dev-mode; opt-in via explicit env
       - BEACONRY_MOCK=${BEACONRY_MOCK:-}
+      # BC-038: /test/* routes gate. Default empty = routes NOT registered.
+      # DO NOT set to 1 in production operator stacks.
+      - BEACONRY_TEST_MODE=${BEACONRY_TEST_MODE:-}
     volumes:
       - beaconry-data:/data
       - /var/run/docker.sock:/var/run/docker.sock

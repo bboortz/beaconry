@@ -255,6 +255,11 @@ See per-decision review dates in `memory/`:
   Scope sketch: extend `verify_evidence_pointers.py` with a second pass: for every integration test file `test_BC_NNN_*.py`, assert each `test_*` node is referenced by at least one shipping-evidence row in the matching `BC-NNN-*-plan.md`. Allowlist for intentional meta-tests or helpers. Error msg: "test_x.py::test_backfill is a shipped test but no plan row references it — add an evidence row or move the test to a helper file." Pairs with BC-024's reverse-traceability.
   Related memories: [[live-testing-requires-rebuild]], [[fix-is-not-forget]], [[breaking-changes-in-planning]] — all "move vigilance to lint".
 
+- **Extend `/ultrareview` to lint for exposed `/test/*` endpoints — needs BC-038 shipped**
+  trigger: BC-038 shipped 2026-10-31 — `/test/wipe`, `/test/scan`, `/test/sweep` endpoints are env-gated at import time (`BEACONRY_TEST_MODE=1`). Correct by construction today, but a prod operator could accidentally set the var in their `.env` and expose destructive routes to anyone reaching 127.0.0.1:8000.
+  priority: later
+  Scope sketch: `/ultrareview` rule that greps `poc/hub/hub.py` for `@api.post("/test/*")` or `@app.post("/test/*")` definitions and fails if the enclosing block is NOT inside an `if TEST_MODE:` or equivalent guard. Second rule: `poc/docker-compose.yml`'s hub `environment:` list must not default `BEACONRY_TEST_MODE` to anything but empty/0. Both are structural checks, not runtime behavior.
+
 ## Parking lot (ideas we discussed but likely won't do)
 
 - **`make demo` works with host-run telegram-mock (BC-018 Scenario 7's literal recipe)**

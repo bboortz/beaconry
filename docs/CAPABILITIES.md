@@ -988,6 +988,36 @@ Enforcement: `poc/scripts/verify_traceability.py` runs as part of `make check`. 
   - `poc/tests/unit/test_scan_trigger.py`
   - `poc/tests/integration/test_BC_037_on_demand_scan.py`
 
+### CAP-B022: Operator can verify pipeline behavior under simulated mutations
+- **type:** business
+- **status:** active
+- **origin:** BC-038 — "how could we simulate state changes and verify correct scanning?" (2026-10-31)
+- **description:** `make test-scenarios` spins up an isolated hub (BEACONRY_TEST_MODE=1) and runs 10 behavior scenarios covering every shipped operator-visible promise: fresh ingest (BC-020), auto-close + regression (BC-031), snooze flow (BC-003), KEV Tier 0 (BC-020), Internet-facing Tier 1 (BC-030), digest content-hash (BC-036), heartbeat sweep with injected clock (BC-035), multi-host isolation, last_seen_ts bump (BC-034). Deterministic — no real grype, no clock drift, no network. Full suite under 30 s.
+- **supports:** CAP-B018
+- **verified by:**
+  - `poc/tests/integration/test_BC_038_scenario_harness.py`
+  - `poc/tests/unit/test_scenario_runner.py`
+
+### CAP-T082: Live-stack scenario harness runner
+- **type:** technical
+- **status:** active
+- **origin:** BC-038
+- **description:** Each scenario is a class subclassing `Scenario(ABC)` with `name`, `order`, `description`, and `run(ctx)`. Explicit `SCENARIOS = [...]` registry — no autodiscovery. `ScenarioContext` provides mutation (`inject_scan`, `trigger_sweep`, `set_db_status`, `wipe`) and assertion primitives (`assert_status`, `assert_tier`, `assert_internet_facing`, `assert_audit_fired`, `assert_audit_absent`, `assert_count`). Scenarios compose assertions; the context never knows about CVE-specific logic — zero central if-chains. CLI entry `python -m poc.scenarios` + Makefile `test-scenarios` target wrap the shell lifecycle (compose up → health gate → runner → teardown).
+- **supports:** CAP-B022
+- **verified by:**
+  - `poc/tests/unit/test_scenario_runner.py`
+  - `poc/tests/integration/test_BC_038_scenario_harness.py`
+
+### CAP-T083: Hub test-mode endpoints under BEACONRY_TEST_MODE=1
+- **type:** technical
+- **status:** active
+- **origin:** BC-038
+- **description:** When `BEACONRY_TEST_MODE=1`, hub registers three routes: `POST /test/wipe` (delete DB + audit, re-init), `POST /test/scan` (accept pre-matched candidates + optional `at` timestamp + `port_exposure`, bypass grype, run the real `_ingest_candidates` flow), `POST /test/sweep` (invoke `heartbeat_sweep` with injected `now`). Route registration — not per-request check — is the gate: when the flag is off at import time, routes are not attached, requests return 404. Deliberate design: `grep -n "@api.post" poc/hub/hub.py` enumerates every reachable endpoint. Future lint candidate (IDEAS backlog): extend `/ultrareview` to fail if `/test/*` routes exist without the env guard.
+- **supports:** CAP-B022
+- **verified by:**
+  - `poc/tests/integration/test_BC_038_scenario_harness.py`
+  - `poc/tests/unit/test_scenario_runner.py`
+
 ### CAP-T080: Digest cadence throttle with content-hash fallback
 - **type:** technical
 - **status:** active

@@ -127,6 +127,13 @@ HEARTBEAT_SWEEP_INTERVAL_S = _int_env("BEACONRY_HEARTBEAT_SWEEP_INTERVAL_S", 360
 # gone from inventory — no heartbeat (BC-031 reconcile will auto-close it).
 HEARTBEAT_LIVENESS_WINDOW_S = _int_env("BEACONRY_HEARTBEAT_LIVENESS_WINDOW_S", 7 * 86400)
 DIGEST_INTERVAL_S = _int_env("BEACONRY_DIGEST_INTERVAL_S", 86400)
+# BC-038: scenario harness toggle. When set, `/test/*` endpoints are registered
+# on the FastAPI app. These endpoints accept pre-matched candidates + an
+# injected `now` timestamp so scenarios can exercise the full ingest flow
+# without real grype, real scout, or real clock drift. When OFF, the routes
+# are not registered at all — requests to them return 404. Must remain OFF
+# in production operator stacks; env-gate only (hub does not police misuse).
+TEST_MODE = os.environ.get("BEACONRY_TEST_MODE") == "1"
 
 DATA_DIR.mkdir(parents=True, exist_ok=True)
 DB_PATH = DATA_DIR / "beaconry.db"
@@ -238,15 +245,19 @@ def init_db() -> None:
     con.close()
 
 
-def save_finding(f: Finding) -> bool:
-    """Insert finding. Returns True if new (not a duplicate)."""
+def save_finding(f: Finding, *, now_ts: int | None = None) -> bool:
+    """Insert finding. Returns True if new (not a duplicate).
+
+    `now_ts` injected for BC-038 scenarios; defaults to real clock."""
+    ts = now_ts if now_ts is not None else int(time.time())
     con = sqlite3.connect(DB_PATH)
     try:
         con.execute(
             """INSERT OR IGNORE INTO findings
                (id, host, cve_id, package, version, fixed_version, severity,
-                cvss, source_type, source_ref, description, found_at, tier, kev, internet_facing)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                cvss, source_type, source_ref, description, found_at, tier, kev,
+                internet_facing, last_seen_ts, last_notified_ts)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (
                 f.id,
                 f.host,
@@ -259,10 +270,19 @@ def save_finding(f: Finding) -> bool:
                 f.source_type,
                 f.source_ref,
                 f.description,
-                int(time.time()),
+                ts,
                 f.tier,
                 1 if f.kev else 0,
                 1 if f.internet_facing else 0,
+                # BC-035 close-gap (surfaced by BC-038 s08): seed last_seen_ts
+                # and last_notified_ts to `now` on first write. Pre-BC-038 the
+                # defaults were 0, which worked IFF init_db's backfill ran
+                # between save_finding and the first heartbeat sweep — true in
+                # prod (hub restart → migration) but false in scenarios + any
+                # scan on a long-running hub. Seeding here makes the semantic
+                # robust across both.
+                ts,
+                ts,
             ),
         )
         new_row = con.execute("SELECT changes()").fetchone()[0] > 0
@@ -318,7 +338,7 @@ def set_status(finding_id: str, status: str) -> None:
     _audit.append("status_change", finding_id=finding_id, status=status)
 
 
-def bump_last_seen(host: str, scanned_ids: set[str]) -> None:
+def bump_last_seen(host: str, scanned_ids: set[str], *, now_ts: int | None = None) -> None:
     """BC-034: update `last_seen_ts` for every DB finding whose id scout
     still reported in the current scan.
 
@@ -327,16 +347,17 @@ def bump_last_seen(host: str, scanned_ids: set[str]) -> None:
     that will consume this data (future BCs) each have their own opt-out.
 
     No-op for empty scanned_ids. Scoped to host so a scan from host-a
-    cannot touch host-b bookkeeping (parity with reconcile_scan)."""
+    cannot touch host-b bookkeeping (parity with reconcile_scan).
+    `now_ts` injected for BC-038 scenarios; defaults to real clock."""
     if not scanned_ids:
         return
+    ts = now_ts if now_ts is not None else int(time.time())
     con = sqlite3.connect(DB_PATH)
     try:
-        now = int(time.time())
         placeholders = ",".join("?" * len(scanned_ids))
         con.execute(
             f"UPDATE findings SET last_seen_ts = ? WHERE host = ? AND id IN ({placeholders})",
-            (now, host, *scanned_ids),
+            (ts, host, *scanned_ids),
         )
         con.commit()
     except sqlite3.OperationalError:
@@ -1376,10 +1397,11 @@ async def send_digest(suppressed: list[Finding]) -> None:
     await _dispatch_digest(suppressed)
 
 
-async def heartbeat_sweep() -> int:
+async def heartbeat_sweep(*, now_ts: int | None = None) -> int:
     """BC-035: scan the DB for stale open findings and emit a reminder for each.
 
     Returns the number of reminders sent. No-op when HEARTBEAT_ENABLED is False.
+    `now_ts` injected for BC-038 scenarios; defaults to real clock.
 
     Qualifying criteria for a reminder:
       - status='open' (snoozed/accepted/fixed/regressed/fixed_verified skipped)
@@ -1395,7 +1417,7 @@ async def heartbeat_sweep() -> int:
         return 0
     con = sqlite3.connect(DB_PATH)
     try:
-        now = int(time.time())
+        now = now_ts if now_ts is not None else int(time.time())
         liveness_cutoff = now - HEARTBEAT_LIVENESS_WINDOW_S
         poke_cutoff = now - HEARTBEAT_INTERVAL_S
         rows = con.execute(
@@ -1427,7 +1449,7 @@ async def heartbeat_sweep() -> int:
             tier=row[11],
             kev=bool(row[12]),
         )
-        open_since = row[13] or int(time.time())
+        open_since = row[13] or now
         try:
             await _dispatch_heartbeat(finding, open_since)
         except Exception as e:  # noqa: BLE001
@@ -1499,6 +1521,21 @@ async def receive_scan(payload: dict) -> dict:
         except Exception as e:  # noqa: BLE001
             log.error("Error processing SBOM entry: %s", e)
 
+    return await _ingest_candidates(host, candidates, now_ts=int(time.time()))
+
+
+async def _ingest_candidates(
+    host: str,
+    candidates: list[Finding],
+    *,
+    now_ts: int,
+) -> dict:
+    """BC-038: extracted ingest flow — dedup+cap, save+notify, digest, reconcile.
+
+    Shared between `receive_scan` (real path, invokes `process_sbom_entry` first)
+    and `/test/scan` (test path, candidates are pre-matched). `now_ts` is
+    injected so scenarios can simulate clock advancement without real sleeps.
+    """
     cap = int(os.environ.get("BEACONRY_MAX_FINDINGS_PER_RUN", "5"))
     to_notify, suppressed = dedup_and_cap(candidates, cap)
     log.info(
@@ -1511,7 +1548,7 @@ async def receive_scan(payload: dict) -> dict:
 
     new_findings = 0
     for f in to_notify:
-        if not save_finding(f):
+        if not save_finding(f, now_ts=now_ts):
             continue
         log.info(
             "New finding: %s (%s CVSS %.1f) in %s",
@@ -1531,7 +1568,6 @@ async def receive_scan(payload: dict) -> dict:
     # BC-036: throttle digests. First-fires above are unaffected; this gate
     # is strictly digest-local. See `should_send_digest` for the policy.
     if suppressed:
-        now_ts = int(time.time())
         should_fire, _hash, reason = should_send_digest(host, suppressed, now=now_ts)
         if should_fire:
             await send_digest(suppressed)
@@ -1545,7 +1581,7 @@ async def receive_scan(payload: dict) -> dict:
     # block the scan response.
     scanned_ids = {c.id for c in candidates}
     # BC-034: bookkeeping — always, regardless of RECONCILE_ENABLED.
-    bump_last_seen(host, scanned_ids)
+    bump_last_seen(host, scanned_ids, now_ts=now_ts)
     regressed, auto_closed = reconcile_scan(host, scanned_ids)
     if regressed:
         log.warning("BC-031: %d regression(s) detected on %s", len(regressed), host)
@@ -1568,6 +1604,85 @@ async def receive_scan(payload: dict) -> dict:
         "regressed": len(regressed),
         "auto_closed": len(auto_closed),
     }
+
+
+# ── BC-038: scenario-harness test-mode endpoints ─────────────────────────────
+#
+# Registered at import time ONLY when `BEACONRY_TEST_MODE=1`. When the flag
+# is off (production default), these routes are not attached — requests to
+# `/test/*` return 404 Not Found.
+#
+# Deliberate design: route registration is the gate, not a per-request check.
+# A grep for "@api.post" shows exactly which endpoints are addressable; a
+# future `/ultrareview` lint can enforce that no un-gated route starts with
+# `/test/` (tracked in docs/plan/IDEAS.md).
+
+if TEST_MODE:
+    log.warning("BC-038: BEACONRY_TEST_MODE=1 — /test/* endpoints are LIVE on this hub")
+
+    @api.post("/test/wipe")
+    async def test_wipe() -> dict:
+        """BC-038: reset DB + audit log so each scenario starts clean."""
+        if DB_PATH.exists():
+            DB_PATH.unlink()
+        audit_path = DATA_DIR / "audit.log"
+        if audit_path.exists():
+            audit_path.unlink()
+        init_db()
+        return {"status": "wiped"}
+
+    @api.post("/test/scan")
+    async def test_scan(payload: dict) -> dict:
+        """BC-038: ingest pre-matched candidates, bypassing grype.
+
+        Body shape:
+            {
+              "host": "h1",
+              "candidates": [{"cve_id": "CVE-A", "cvss": 9.5, "severity": "Critical",
+                              "package": "openssl", "version": "1.0",
+                              "fixed_version": "1.1", "source_type": "docker",
+                              "source_ref": "nginx:1.24", "description": "x",
+                              "kev": false}],
+              "port_exposure": {"nginx:1.24": true},   # optional
+              "at": 1700000000                         # optional (defaults to now)
+            }
+        """
+        host = payload.get("host", "scenario-host")
+        port_exposure: dict[str, bool] = payload.get("port_exposure") or {}
+        at = payload.get("at") or int(time.time())
+
+        candidates: list[Finding] = []
+        for c in payload.get("candidates", []):
+            f = Finding(
+                id=make_id(host, c["cve_id"], c["source_ref"], c["package"]),
+                host=host,
+                cve_id=c["cve_id"],
+                package=c["package"],
+                version=c["version"],
+                fixed_version=c.get("fixed_version", "not available"),
+                severity=c.get("severity", "High"),
+                cvss=c["cvss"],
+                source_type=c.get("source_type", "docker"),
+                source_ref=c["source_ref"],
+                description=c.get("description", ""),
+                kev=bool(c.get("kev", False)),
+            )
+            # Honour the toggles the same way `process_sbom_entry` does.
+            is_if = INTERNET_FACING_DETECTION_ENABLED and bool(
+                port_exposure.get(f.source_ref, False)
+            )
+            f.internet_facing = is_if
+            f.tier = _urgency.classify_tier(f, kev=f.kev, internet_facing=is_if)
+            candidates.append(f)
+
+        return await _ingest_candidates(host, candidates, now_ts=at)
+
+    @api.post("/test/sweep")
+    async def test_sweep(payload: dict) -> dict:
+        """BC-038: invoke heartbeat_sweep with an injected `now` timestamp."""
+        at = payload.get("at") or int(time.time())
+        sent = await heartbeat_sweep(now_ts=at)
+        return {"sent": sent, "at": at}
 
 
 if __name__ == "__main__":

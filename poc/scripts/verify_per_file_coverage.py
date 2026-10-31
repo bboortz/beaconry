@@ -40,6 +40,11 @@ ALLOWLIST: dict[str, tuple[float, str]] = {
         70.0,
         "orchestrator main() is live-tested via `make check`.",
     ),
+    "poc/scenarios/__main__.py": (
+        0.0,
+        "CLI entry glue (argparse + pass/fail reporter); exercised end-to-end "
+        "by `make test-scenarios` and the in-process integration test.",
+    ),
 }
 
 

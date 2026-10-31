@@ -1,4 +1,4 @@
-.PHONY: help lint format type test check check-full demo smoke clean install-hooks verify-traceability verify-dockerfile-health-copy verify-dockerfile-sources verify-memory-drift verify-compose-env-propagation verify-docs-drift verify-evidence-pointers verify-per-file-coverage findings status test-e2e live-rebuild live-status scan
+.PHONY: help lint format type test check check-full demo smoke clean install-hooks verify-traceability verify-dockerfile-health-copy verify-dockerfile-sources verify-memory-drift verify-compose-env-propagation verify-docs-drift verify-evidence-pointers verify-per-file-coverage findings status test-e2e live-rebuild live-status scan test-scenarios
 
 PYTHON ?= python3
 PYTEST_ARGS ?=
@@ -33,6 +33,8 @@ help:
 	@echo "                                  BEACONRY_FINDINGS_LOCAL=1 forces local .beaconry-cache DB over compose volume"
 	@echo "  make scan                       trigger an immediate scout scan (BC-037)"
 	@echo "                                  bypasses SCAN_INTERVAL — useful after an out-of-band fix"
+	@echo "  make test-scenarios             run live-stack behavior scenarios (BC-038)"
+	@echo "                                  spins up isolated hub w/ BEACONRY_TEST_MODE=1 and runs 10 scenarios"
 	@echo ""
 	@echo "Demo:"
 	@echo "  make demo                       docker compose up (real pipeline, host inventory)"
@@ -125,6 +127,12 @@ scan:
 	  503) echo "✗ scout 503 — $$body"; exit 3 ;; \
 	  *)   echo "✗ unexpected HTTP $$code — $$body"; exit 4 ;; \
 	esac
+
+# BC-038: live-stack scenario harness. Spins up an isolated hub (test-mode
+# enabled, grype skipped), runs 10 behavior scenarios covering the shipped
+# BCs, tears down. See `poc/scenarios/run.sh`.
+test-scenarios:
+	bash poc/scenarios/run.sh
 
 demo:
 	@if [ "$$BEACONRY_MOCK" = "1" ]; then \
