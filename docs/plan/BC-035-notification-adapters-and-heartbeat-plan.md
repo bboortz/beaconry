@@ -135,6 +135,15 @@ Additive. Operators who do nothing get the heartbeat sweep ON (desired default).
 | `last_notified_ts` advances after reminder | unit | `test_heartbeat_sweep.py::test_sweep_updates_last_notified_ts` | ✓ |
 | Audit event emitted per reminder | unit | `test_heartbeat_sweep.py::test_sweep_audit_event_emitted` | ✓ |
 | Cold-boot safety (missing table) | unit | `test_heartbeat_sweep.py::test_sweep_tolerates_missing_table` | ✓ |
+| `last_notified_ts` column added by init_db | unit | `test_heartbeat_sweep.py::test_init_db_adds_last_notified_ts_column` | ✓ |
+| last_notified migration is idempotent | unit | `test_heartbeat_sweep.py::test_init_db_last_notified_migration_is_idempotent` | ✓ |
+| Legacy rows backfill `last_notified_ts` from `found_at` (upgrade-day storm prevention) | unit | `test_heartbeat_sweep.py::test_legacy_rows_backfill_last_notified_from_found_at` | ✓ |
+| `format_heartbeat` renders core elements | unit | `test_heartbeat_sweep.py::test_format_heartbeat_contains_core_elements` | ✓ |
+| `format_heartbeat` KEV badge gated by tier | unit | `test_heartbeat_sweep.py::test_format_heartbeat_kev_badge_only_when_tier_zero` | ✓ |
+| `format_heartbeat` handles zero open_since (missing data) | unit | `test_heartbeat_sweep.py::test_format_heartbeat_handles_zero_open_since` | ✓ |
+| `_mock_print` fallback — first-fire notify | unit | `test_heartbeat_sweep.py::test_notify_mock_fallback_prints_when_registry_empty` | ✓ |
+| `_mock_print` fallback — heartbeat path | unit | `test_heartbeat_sweep.py::test_notify_heartbeat_mock_fallback_prints_when_registry_empty` | ✓ |
+| `_mock_print` fallback — regression path | unit | `test_heartbeat_sweep.py::test_notify_regression_mock_fallback_prints_when_registry_empty` | ✓ |
 | CAP-T078 + CAP-T079 registered + bidirectional | verify-traceability | `docs/CAPABILITIES.md` diff | ✓ |
 | Compose env propagation of 5 new vars | lint | `verify-compose-env-propagation` | ✓ |
 | make check green | multi-gate | `make check` | ✓ |

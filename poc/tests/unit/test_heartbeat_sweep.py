@@ -218,3 +218,154 @@ async def test_sweep_tolerates_missing_table(
     monkeypatch.setattr(hub, "HEARTBEAT_ENABLED", True)
     sent = await hub.heartbeat_sweep()
     assert sent == 0
+
+
+# ── BC-035 breaking-change-in-planning: last_notified_ts migration + backfill ──
+
+
+def test_init_db_adds_last_notified_ts_column(sweep_env: _StubAdapter) -> None:
+    """Fresh DB has the column; `ALTER TABLE ADD COLUMN` migration is reachable."""
+    con = sqlite3.connect(hub.DB_PATH)
+    cols = {row[1] for row in con.execute("PRAGMA table_info(findings)")}
+    con.close()
+    assert "last_notified_ts" in cols
+
+
+def test_init_db_last_notified_migration_is_idempotent(sweep_env: _StubAdapter) -> None:
+    """Re-running init_db must not raise on an already-migrated DB."""
+    hub.init_db()
+    hub.init_db()
+    con = sqlite3.connect(hub.DB_PATH)
+    cols = {row[1] for row in con.execute("PRAGMA table_info(findings)")}
+    con.close()
+    assert "last_notified_ts" in cols
+
+
+def test_legacy_rows_backfill_last_notified_from_found_at(sweep_env: _StubAdapter) -> None:
+    """BC-035 upgrade-day safety: pre-BC-035 rows have last_notified_ts=0 →
+    without backfill the first sweep after upgrade would re-poke every open
+    finding at once. init_db backfills from `found_at` so the sweep stays quiet."""
+    found_at = int(time.time()) - 3 * 86400  # 3 days ago
+    con = sqlite3.connect(hub.DB_PATH)
+    con.execute(
+        "INSERT INTO findings (id, host, cve_id, package, version, fixed_version, "
+        "severity, cvss, source_type, source_ref, description, found_at, status, "
+        "tier, kev, last_fixed_ts, last_seen_ts, last_notified_ts) "
+        "VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)",
+        (
+            "legacy01",
+            "homelab",
+            "CVE-LEGACY",
+            "p",
+            "1",
+            "2",
+            "High",
+            8.0,
+            "docker",
+            "nginx:1.24",
+            "d",
+            found_at,
+            "open",
+            3,
+            0,
+            0,
+            found_at,
+            0,  # legacy: last_notified_ts was 0 before BC-035
+        ),
+    )
+    con.commit()
+    con.close()
+
+    hub.init_db()  # idempotent run triggers the backfill
+
+    con = sqlite3.connect(hub.DB_PATH)
+    row = con.execute("SELECT last_notified_ts FROM findings WHERE id=?", ("legacy01",)).fetchone()
+    con.close()
+    assert row[0] == found_at
+
+
+# ── BC-035 format_heartbeat rendering parity with format_notification ──
+
+
+def test_format_heartbeat_contains_core_elements() -> None:
+    finding = _finding(id="fmt01", cve_id="CVE-FMT-1", severity="High", host="h1")
+    open_since = int(time.time()) - 10 * 86400
+    body = hub.format_heartbeat(finding, open_since)
+    assert "OPEN SINCE" in body
+    assert "CVE-FMT-1" in body
+    assert "h1" in body
+    assert "⏰" in body
+    # Days-open label grammar: "10 days" (plural)
+    assert "10 day" in body
+
+
+def test_format_heartbeat_kev_badge_only_when_tier_zero() -> None:
+    low = _finding(id="k0", tier=3, kev=False)
+    assert "KEV — EXPLOITED" not in hub.format_heartbeat(low, int(time.time()) - 86400)
+    high = _finding(id="k1", tier=0, kev=True)
+    assert "KEV — EXPLOITED" in hub.format_heartbeat(high, int(time.time()) - 86400)
+
+
+def test_format_heartbeat_handles_zero_open_since() -> None:
+    """Missing/zero `open_since_ts` renders 'unknown' date rather than epoch."""
+    body = hub.format_heartbeat(_finding(id="zero01"), 0)
+    assert "unknown" in body
+
+
+# ── BC-035 _mock_print fallback preserves BC-001 e2e expectations ──
+
+
+async def test_notify_heartbeat_mock_fallback_prints_when_registry_empty(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """BEACONRY_MOCK=1 + no registered adapters → `_mock_print` dumps the body
+    so the BC-001 demo test still sees the `[mock] telegram send: ...` string."""
+    from poc.hub import notifiers
+
+    monkeypatch.setattr(hub, "MOCK", True)
+    notifiers.reset_registry_for_tests()
+    try:
+        await hub.notify_heartbeat(
+            _finding(id="mock01", cve_id="CVE-MOCK-H"), int(time.time()) - 86400
+        )
+        out = capsys.readouterr().out
+        assert "[mock] telegram send: Heartbeat dispatched" in out
+        assert "CVE-MOCK-H" in out
+    finally:
+        notifiers.reset_registry_for_tests()
+
+
+async def test_notify_mock_fallback_prints_when_registry_empty(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Parity check for the first-fire notify() mock fallback — same contract."""
+    from poc.hub import notifiers
+
+    monkeypatch.setattr(hub, "MOCK", True)
+    notifiers.reset_registry_for_tests()
+    try:
+        await hub.notify(_finding(id="mock02", cve_id="CVE-MOCK-N"))
+        out = capsys.readouterr().out
+        assert "[mock] telegram send: Notification dispatched" in out
+        assert "CVE-MOCK-N" in out
+    finally:
+        notifiers.reset_registry_for_tests()
+
+
+async def test_notify_regression_mock_fallback_prints_when_registry_empty(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    """Third branch — regression path mock fallback."""
+    from poc.hub import notifiers
+
+    monkeypatch.setattr(hub, "MOCK", True)
+    notifiers.reset_registry_for_tests()
+    try:
+        await hub.notify_regression(
+            _finding(id="mock03", cve_id="CVE-MOCK-R"), last_fixed_ts=int(time.time()) - 86400
+        )
+        out = capsys.readouterr().out
+        assert "[mock] telegram send: Regression dispatched" in out
+        assert "CVE-MOCK-R" in out
+    finally:
+        notifiers.reset_registry_for_tests()
