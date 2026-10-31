@@ -88,13 +88,14 @@ con.execute('''
         id TEXT PRIMARY KEY, host TEXT, cve_id TEXT, package TEXT,
         version TEXT, fixed_version TEXT, severity TEXT, cvss REAL,
         source_type TEXT, source_ref TEXT, description TEXT,
-        found_at INTEGER, status TEXT DEFAULT 'open', tier INTEGER DEFAULT 3)
+        found_at INTEGER, status TEXT DEFAULT 'open', tier INTEGER DEFAULT 3,
+        kev INTEGER DEFAULT 0)
 ''')
 con.execute(
-    'INSERT OR REPLACE INTO findings VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
+    'INSERT OR REPLACE INTO findings VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)',
     ('{fid}', 'test-host', '{cve_id}', 'pkg', '1.0', '1.1',
      'High', 8.0, 'docker', '{source_ref}', 'e2e fixture',
-     int(time.time()), '{status}', 2)
+     int(time.time()), '{status}', 2, 0)
 )
 con.commit(); con.close()
 """

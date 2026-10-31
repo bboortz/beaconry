@@ -20,7 +20,7 @@ RUN curl -fsSL "https://download.docker.com/linux/static/stable/x86_64/docker-${
 WORKDIR /app
 COPY hub/requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt
-COPY hub/hub.py hub/waterfall.py ./
+COPY hub/hub.py hub/waterfall.py hub/urgency.py hub/kev.py ./
 COPY hub/executor/ executor/
 # BC-012: shared health-check package — every container COPYs this.
 COPY beaconry_health/ ./beaconry_health/
