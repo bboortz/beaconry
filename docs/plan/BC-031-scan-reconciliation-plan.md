@@ -46,7 +46,20 @@ New function `reconcile_scan(host, scanned_ids: set[str]) -> (regressed, auto_cl
 
 ## Breaking changes
 
-- `receive_scan` return shape gains `regressed` + `auto_closed` keys. Scout and e2e tests tolerate extra keys. One existing unit test (`test_receive_scan_empty_sbom_list`) updated to assert the new shape.
+Enumerated under the three dimensions per `docs/plan/_template.md § Breaking changes`:
+
+### 1. API / return shape
+`receive_scan` return shape gains `regressed` + `auto_closed` keys. Scout and e2e tests tolerate extra keys. One existing unit test (`test_receive_scan_empty_sbom_list`) updated to assert the new shape.
+
+### 2. Data model (schema + legacy rows)
+New column `last_fixed_ts INTEGER DEFAULT 0`. **Legacy fixed/fixed_verified rows written pre-BC-031** default to 0 → regression notifications for them would render "regressed since **unknown**". This would be a bad-UX moment for a key user whose system has prior fix history.
+
+**Migration (in-branch, not a close-gap):** `init_db` runs an idempotent `UPDATE findings SET last_fixed_ts = found_at WHERE status IN ('fixed','fixed_verified') AND last_fixed_ts = 0 AND found_at > 0`. Backfills from `found_at` (approximation — fix landed at or after find). Three test cases guard this: legacy row gets backfilled; modern row with real ts not touched; open rows untouched.
+
+*Discovered during live-stack audit, fixed in this branch, retrospectively planned here per the breaking-changes-in-planning discipline.*
+
+### 3. Behavioral semantics
+`set_status(id, "fixed")` and `set_status(id, "fixed_verified")` now implicitly write `last_fixed_ts`. Any external caller that relied on `set_status` as a pure status-only write won't see a bug, just an extra column populated. Scan reconciliation changes the meaning of "status=fixed" from "done forever" to "under surveillance forever" — this is the whole point of BC-031 and is operator-visible via the `BEACONRY_RECONCILE_ENABLED=0` opt-out. Operators who want the pre-BC-031 "status=fixed means done" semantics can set that env.
 
 ## Shipping evidence
 

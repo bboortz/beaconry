@@ -46,7 +46,31 @@ Key choices and why. Rejected alternatives in one line each.
 
 ## Breaking changes
 
-API, config, CLI, or data-model changes that would break existing deployments. "None" is a valid answer and should be stated.
+Enumerate under all three dimensions. "None" per dimension is a valid answer and MUST state WHY (not "nothing changed" — "existing users of X see the same behavior because Y").
+
+### 1. API / return shape
+
+What callers (scout, Telegram client, external tooling, tests) see a different interface shape? For each: do they tolerate extra keys, or do they strict-match?
+
+### 2. Data model (schema + legacy rows)
+
+For every added column, removed column, or changed status/enum value: **what happens to rows that existed before this change?** State for each:
+- Default value for legacy rows (0, "", NULL, etc.)
+- Does that default render correctly in operator-facing output (notifications, `make findings`, audit log, dashboards)?
+- If NO → migration or backfill goes in this branch, not a close-gap. Specify exact SQL / Python / migration step.
+
+Example done-right (BC-031 after close-gap): "Added `last_fixed_ts` column. Legacy `fixed`/`fixed_verified` rows default to 0 → would render 'regressed since unknown' in notification body. **Migration**: in `init_db()`, after `ALTER TABLE ADD COLUMN last_fixed_ts`, `UPDATE findings SET last_fixed_ts = found_at WHERE status IN ('fixed','fixed_verified') AND last_fixed_ts = 0`. Approximates "fix time" from "find time" (upper-bound; the fix happened at or after find)."
+
+### 3. Behavioral semantics
+
+Does a function change its implicit meaning? Could an operator who depended on the old behavior get:
+- Noisier notifications (e.g. BC-031's regression alerts for operators who thought "fixed" was final)?
+- Quieter notifications (e.g. a filter now suppresses something that used to surface)?
+- Different-shaped output (e.g. new column in findings CLI)?
+
+For each: who are the operators affected, and what's the config knob (env var, feature flag) to opt out of the new behavior if needed?
+
+**If any breaking change is discovered during implementation or testing** that was not identified at planning time: fix in-branch BEFORE merging, do NOT ship as a close-gap. See [[breaking-changes-in-planning]] memory. The planning dimension that missed it also gets reinforced for future stories.
 
 ---
 

@@ -294,3 +294,69 @@ def test_format_regression_handles_missing_fix_date_gracefully(recon_env: Path) 
     f = _finding(fid="2345678923456789", cve_id="CVE-FIRE-02")
     body = hub.format_regression(f, last_fixed_ts=0)
     assert "unknown" in body
+
+
+# ── BC-031 close-gap: legacy-row backfill ────────────────────────────────────
+
+
+def test_init_db_backfills_last_fixed_ts_from_found_at(recon_env: Path) -> None:
+    """BC-031 close-gap: legacy fixed/fixed_verified rows that predate the
+    last_fixed_ts column must get backfilled from `found_at` on next init_db,
+    so operators don't get `regressed since unknown` on previously-fixed CVEs."""
+    # Simulate a pre-BC-031 row: fixed finding with last_fixed_ts=0 but a
+    # real found_at value. (In production this is what the ALTER TABLE
+    # migration leaves behind for rows that existed before the column.)
+    f = _finding(fid="legacy0000000001", cve_id="CVE-LEGACY-01")
+    hub.save_finding(f)
+    con = sqlite3.connect(recon_env / "beaconry.db")
+    con.execute(
+        "UPDATE findings SET status='fixed', last_fixed_ts=0, found_at=1700000000 WHERE id=?",
+        (f.id,),
+    )
+    con.commit()
+    con.close()
+
+    # Rerun init_db — backfill should apply.
+    hub.init_db()
+
+    con = sqlite3.connect(recon_env / "beaconry.db")
+    row = con.execute("SELECT last_fixed_ts FROM findings WHERE id=?", (f.id,)).fetchone()
+    con.close()
+    assert row[0] == 1700000000, (
+        "legacy fixed row must have last_fixed_ts backfilled from found_at "
+        "so regression notifications don't render as 'unknown'"
+    )
+
+
+def test_init_db_backfill_does_not_touch_already_populated_rows(recon_env: Path) -> None:
+    """Idempotence: a fixed row with a legitimate last_fixed_ts (set by
+    set_status on a modern Fix tap) must not be overwritten by the backfill."""
+    f = _finding(fid="modern0000000001", cve_id="CVE-MODERN-01")
+    hub.save_finding(f)
+    hub.set_status(f.id, "fixed")  # writes last_fixed_ts to now()
+    con = sqlite3.connect(recon_env / "beaconry.db")
+    row = con.execute("SELECT last_fixed_ts FROM findings WHERE id=?", (f.id,)).fetchone()
+    original_ts = row[0]
+    con.close()
+    assert original_ts > 0
+
+    hub.init_db()  # backfill pass should not touch this row
+
+    con = sqlite3.connect(recon_env / "beaconry.db")
+    row = con.execute("SELECT last_fixed_ts FROM findings WHERE id=?", (f.id,)).fetchone()
+    con.close()
+    assert row[0] == original_ts
+
+
+def test_init_db_backfill_does_not_touch_open_rows(recon_env: Path) -> None:
+    """Guard: backfill only applies to fixed/fixed_verified status."""
+    f = _finding(fid="openrow000000001", cve_id="CVE-OPEN-01")
+    hub.save_finding(f)
+    # Row is `open` with found_at > 0. Backfill must NOT set last_fixed_ts.
+
+    hub.init_db()
+
+    con = sqlite3.connect(recon_env / "beaconry.db")
+    row = con.execute("SELECT last_fixed_ts FROM findings WHERE id=?", (f.id,)).fetchone()
+    con.close()
+    assert row[0] == 0, "open rows must stay at last_fixed_ts=0 — they were never fixed"

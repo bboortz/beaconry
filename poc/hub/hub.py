@@ -138,6 +138,16 @@ def init_db() -> None:
     # in the loud alarm. 0 = never fixed yet.
     with contextlib.suppress(sqlite3.OperationalError):
         con.execute("ALTER TABLE findings ADD COLUMN last_fixed_ts INTEGER DEFAULT 0")
+    # BC-031 close-gap (breaking-change-in-planning discipline): legacy
+    # `fixed`/`fixed_verified` rows written pre-BC-031 default last_fixed_ts=0,
+    # which would render as "regressed since unknown" in the 🔥 notification
+    # body if those CVEs ever reappear. Backfill from `found_at` — approximation
+    # (the fix landed at or after the finding was found), but strictly better
+    # than "unknown" for operator diffing against change logs.
+    con.execute(
+        "UPDATE findings SET last_fixed_ts = found_at "
+        "WHERE status IN ('fixed','fixed_verified') AND last_fixed_ts = 0 AND found_at > 0"
+    )
     con.commit()
     con.close()
 
