@@ -64,3 +64,29 @@ exception_regex = [
   "migrated to HTTP",
   "HTTP-less",
 ]
+
+# ── BC-020: urgency.classify_tier wired into ingest; tier is live behavior ─
+[[ban]]
+pattern = "classify_tier[^\\n]*(not called|never called|dead code|not wired|unused)"
+banned_since = "BC-020"
+reason = "BC-020 wired urgency.classify_tier into process_sbom_entry. Pre-BC-020 the function existed with unit tests but was never called; post-BC-020 every finding gets its real tier."
+exception_regex = [
+  "pre-BC-020",
+  "Pre-BC-020",
+  "BC-020 wired",
+  "BC-020 calls",
+  "superseded",
+]
+
+[[ban]]
+pattern = "(every|all) finding[^\\n]*tier[^\\n]*(=|is|stays) 3"
+banned_since = "BC-020"
+reason = "Pre-BC-020 the DB default tier=3 was the only value because classify_tier wasn't called. BC-020 wires it; findings now get 0/1/2/3 per real urgency. Don't describe the current state as 'always tier 3'."
+exception_regex = [
+  "pre-BC-020",
+  "Pre-BC-020",
+  "fall-through",
+  "cold boot",
+  "fetch fail",
+  "CVSS < 7",
+]
