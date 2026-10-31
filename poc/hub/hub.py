@@ -498,8 +498,7 @@ def format_notification(finding: Finding) -> str:
             f"{emoji} <b>{esc(finding.severity)} — {esc(finding.cve_id)}</b>",
             f"CVSS: <code>{finding.cvss:.1f}</code> · Host: <code>{esc(finding.host)}</code>",
             f"Target: <code>{esc(finding.source_ref)}</code> ({esc(finding.source_type)})",
-            f"Package: <code>{esc(finding.package)} {esc(finding.version)}</code> "
-            f"→ fixed in <code>{esc(finding.fixed_version)}</code>",
+            _package_fix_line(finding, esc),
             # BC-032: tell the operator whether tapping Fix will likely help.
             _viability_line(finding),
         ]
@@ -511,6 +510,14 @@ def format_notification(finding: Finding) -> str:
     return "\n".join(lines)
 
 
+def _has_upstream_fix(finding: Finding) -> bool:
+    """BC-032 close-gap: 'not available' is the sentinel process_sbom_entry
+    writes when grype's `fix.versions` is empty. Any heuristic that reasons
+    about 'the fix version' must guard this case first — otherwise the
+    reason text inlines 'not available' as if it were a real version."""
+    return bool(finding.fixed_version) and finding.fixed_version != "not available"
+
+
 def assess_fix_viability(finding: Finding) -> tuple[str, str]:
     """BC-032: give the operator a quick signal whether `🔧 Fix` is likely to work.
 
@@ -518,6 +525,8 @@ def assess_fix_viability(finding: Finding) -> tuple[str, str]:
 
     Heuristic (not a guarantee — grype's `fix.versions` isn't always accurate):
 
+      - No upstream fix available (grype returns `not available`) → **unlikely**:
+        regardless of tag mutability, Fix can't pull a patch that doesn't exist.
       - docker + `:latest|main|stable|edge|nightly` → **likely**: mutable tag,
         pulling fetches the current upstream which should include the fix.
       - docker + frozen semver tag (`:1.24`, `:16-alpine`, `:1.24.0`) → **unlikely**:
@@ -525,9 +534,15 @@ def assess_fix_viability(finding: Finding) -> tuple[str, str]:
         to a fixed version. Operator needs to edit the compose to a newer tag.
       - alpm + fixed_version != current version → **likely**: `sudo pacman -Syu`
         will pull the fixed version from the Arch repos.
-      - alpm + no fixed_version info → **unknown**.
+      - alpm + no fixed_version info → **unlikely** (vendor hasn't patched).
       - Anything else (python, etc.) → **unknown**.
     """
+    # Guard first: no upstream fix exists → Fix cannot help regardless of tag.
+    if not _has_upstream_fix(finding):
+        return (
+            "unlikely",
+            "no upstream fix available yet — the vendor hasn't released a patched version",
+        )
     if finding.source_type == "docker":
         tag = finding.source_ref.rsplit(":", 1)[-1] if ":" in finding.source_ref else "latest"
         mutable_tags = {"latest", "main", "stable", "edge", "nightly"}
@@ -547,13 +562,24 @@ def assess_fix_viability(finding: Finding) -> tuple[str, str]:
             f"tag '{tag}' — mutability can't be inferred automatically",
         )
     if finding.source_type == "alpm":
-        if finding.fixed_version and finding.fixed_version != "not available":
-            return (
-                "likely",
-                f"upstream repo has {finding.fixed_version}; `sudo pacman -Syu` pulls it",
-            )
-        return "unknown", "no fixed version info — upstream may not have patched yet"
+        return (
+            "likely",
+            f"upstream repo has {finding.fixed_version}; `sudo pacman -Syu` pulls it",
+        )
     return "unknown", f"viability heuristic doesn't cover source_type '{finding.source_type}'"
+
+
+def _package_fix_line(finding: Finding, esc) -> str:
+    """BC-032 close-gap: render the Package line, replacing grype's
+    `not available` sentinel with human-readable phrasing so the body
+    doesn't say 'fixed in not available'."""
+    pkg_version = f"{esc(finding.package)} {esc(finding.version)}"
+    if _has_upstream_fix(finding):
+        return (
+            f"Package: <code>{pkg_version}</code> → fixed in "
+            f"<code>{esc(finding.fixed_version)}</code>"
+        )
+    return f"Package: <code>{pkg_version}</code> — <i>no upstream fix available yet</i>"
 
 
 def _viability_line(finding: Finding) -> str:
@@ -599,8 +625,7 @@ def format_regression(finding: Finding, last_fixed_ts: int) -> str:
         f"Target: <code>{esc(finding.source_ref)}</code> ({esc(finding.source_type)})",
         # BC-032: show the fixed version AND the viability assessment so the
         # operator can tell whether 🔧 Re-fix will actually help or will loop.
-        f"Package: <code>{esc(finding.package)} {esc(finding.version)}</code> "
-        f"→ fixed in <code>{esc(finding.fixed_version)}</code>",
+        _package_fix_line(finding, esc),
         _viability_line(finding),
         "",
         "<i>Something reinstalled or rolled back the vulnerable version. "

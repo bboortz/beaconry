@@ -1183,10 +1183,14 @@ def test_viability_alpm_with_fixed_version_is_likely() -> None:
     assert "pacman" in reason.lower()
 
 
-def test_viability_alpm_without_fixed_version_is_unknown() -> None:
+def test_viability_alpm_without_fixed_version_is_unlikely() -> None:
+    """BC-032 close-gap: alpm + 'not available' is now unlikely (not unknown).
+    The no-upstream-fix guard runs first — the operator can't tap Fix into
+    a patch that doesn't exist, regardless of source_type."""
     f = _finding(source_type="alpm", source_ref="php", fixed_version="not available")
-    label, _ = hub.assess_fix_viability(f)
-    assert label == "unknown"
+    label, reason = hub.assess_fix_viability(f)
+    assert label == "unlikely"
+    assert "no upstream fix" in reason.lower()
 
 
 def test_viability_unknown_source_type_is_unknown() -> None:
@@ -1215,6 +1219,60 @@ def test_format_notification_includes_viability_line() -> None:
     assert "❌" in body or "unlikely" in body
     assert "fixed in" in body
     assert "1.26" in body
+
+
+def test_viability_no_upstream_fix_is_unlikely_regardless_of_tag() -> None:
+    """BC-032 close-gap: when grype reports no fix, Fix can't help no matter
+    what the tag is. Both frozen and mutable tags should return unlikely."""
+    for ref in ("nginx:1.24", "nginx:latest", "alpine:main"):
+        f = _finding(source_type="docker", source_ref=ref, fixed_version="not available")
+        label, reason = hub.assess_fix_viability(f)
+        assert label == "unlikely", f"{ref!r} with no fix must be unlikely"
+        assert "no upstream fix" in reason.lower()
+        # The nonsensical 'edit compose to use a newer tag that ships not available'
+        # from the pre-close-gap reason must NOT appear.
+        assert "not available" not in reason
+
+
+def test_viability_alpm_no_upstream_fix_is_unlikely() -> None:
+    f = _finding(source_type="alpm", source_ref="php", fixed_version="not available")
+    label, reason = hub.assess_fix_viability(f)
+    assert label == "unlikely"
+    assert "no upstream fix" in reason.lower()
+
+
+def test_format_notification_handles_no_upstream_fix_gracefully() -> None:
+    """The CVE-2023-44487 user-screenshot case: grype returns 'not available'
+    for the Debian bullseye nginx variant. The body must not say
+    'fixed in not available'."""
+    f = _finding(
+        source_type="docker",
+        source_ref="nginx:1.24",
+        package="nginx",
+        version="1.24.0-1~bullseye",
+        fixed_version="not available",
+    )
+    body = hub.format_notification(f)
+    assert "fixed in not available" not in body
+    assert "fixed in <code>not available</code>" not in body
+    assert "no upstream fix available yet" in body
+
+
+def test_format_regression_handles_no_upstream_fix_gracefully() -> None:
+    """Same guarantee for the regression body (the exact case from the user's
+    2nd screenshot). Both the Package line AND the viability reason must not
+    inline 'not available'."""
+    f = _finding(
+        source_type="docker",
+        source_ref="nginx:1.24",
+        package="nginx",
+        version="1.24.0-1~bullseye",
+        fixed_version="not available",
+    )
+    body = hub.format_regression(f, last_fixed_ts=1793428833)
+    assert "fixed in not available" not in body
+    assert "ships not available" not in body
+    assert "no upstream fix available yet" in body
 
 
 def test_format_regression_includes_viability_and_fixed_version() -> None:

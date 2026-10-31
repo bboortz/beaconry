@@ -42,7 +42,7 @@ Notification bodies gain one new line (`Fix viability: {marker} {label} — {rea
 | Docker :latest → likely | unit test | `test_hub_helpers.py::test_viability_docker_latest_is_likely` | ✓ |
 | All mutable tag variants (main/stable/edge/nightly) → likely | unit test | `test_hub_helpers.py::test_viability_docker_mutable_variants_all_likely` | ✓ |
 | alpm with fixed_version → likely | unit test | `test_hub_helpers.py::test_viability_alpm_with_fixed_version_is_likely` | ✓ |
-| alpm without fixed_version → unknown | unit test | `test_hub_helpers.py::test_viability_alpm_without_fixed_version_is_unknown` | ✓ |
+| alpm without fixed_version → unlikely (close-gap: was unknown pre-fix) | unit test | `test_hub_helpers.py::test_viability_alpm_without_fixed_version_is_unlikely` | ✓ |
 | Unknown source_type (python etc.) → unknown | unit test | `test_hub_helpers.py::test_viability_unknown_source_type_is_unknown` | ✓ |
 | docker without :tag → treat as :latest → likely | unit test | `test_hub_helpers.py::test_viability_docker_no_tag_defaults_to_latest_likely` | ✓ |
 | format_notification body includes viability + fixed in | unit test | `test_hub_helpers.py::test_format_notification_includes_viability_line` | ✓ |
