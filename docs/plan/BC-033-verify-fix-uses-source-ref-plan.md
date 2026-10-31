@@ -40,6 +40,7 @@ No configuration flag — this is a correctness fix, not an opt-in feature. Ther
 |---|---|---|---|
 | verify_fix scans source_ref exactly (frozen tag case) | unit test | `test_hub_helpers.py::test_verify_fix_scans_source_ref_not_latest` | ✓ |
 | Works for arbitrary tag shapes (alpine, path with slash, SHA tags) | unit test | `test_hub_helpers.py::test_verify_fix_scans_source_ref_for_custom_tags` | ✓ |
+| Non-docker source types short-circuit without invoking syft (Scenario 3) | unit test | `test_hub_helpers.py::test_verify_fix_short_circuits_non_docker_source_type` | ✓ |
 | CAP-T076 registered + bidirectional | verify-traceability | CAPABILITIES.md diff | ✓ |
 | make check green | multi-gate | `make check` | ✓ |
 | Memory drift pattern added if applicable | N/A | no documented behavior deprecated | ✓ |

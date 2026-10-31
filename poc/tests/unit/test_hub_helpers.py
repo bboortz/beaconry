@@ -1299,6 +1299,29 @@ async def test_verify_fix_scans_source_ref_not_latest(
     )
 
 
+async def test_verify_fix_short_circuits_non_docker_source_type(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """BC-033 Scenario 3: alpm / python / anything-not-docker returns True
+    without invoking syft. ManualAdapter owns those paths and the operator
+    confirms externally; auto-verify would be meaningless."""
+    syft_called = False
+
+    async def _should_not_run(*_a: object, **_k: object) -> object:
+        nonlocal syft_called
+        syft_called = True
+        raise AssertionError("verify_fix must not spawn syft for non-docker findings")
+
+    monkeypatch.setattr(hub, "MOCK", False)
+    monkeypatch.setattr(hub.asyncio, "create_subprocess_exec", _should_not_run)
+
+    for src in ("alpm", "python", "unknown"):
+        f = _finding(source_type=src, source_ref="whatever")
+        result = await hub.verify_fix(f)
+        assert result is True, f"non-docker ({src}) must return True immediately"
+    assert syft_called is False
+
+
 async def test_verify_fix_scans_source_ref_for_custom_tags(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
