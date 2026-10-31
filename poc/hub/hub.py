@@ -125,7 +125,8 @@ def init_db() -> None:
             status       TEXT DEFAULT 'open',
             tier         INTEGER DEFAULT 3,
             kev          INTEGER DEFAULT 0,
-            last_fixed_ts INTEGER DEFAULT 0
+            last_fixed_ts INTEGER DEFAULT 0,
+            last_seen_ts INTEGER DEFAULT 0
         )
     """)
     # Idempotent migrations for DBs created before each column existed.
@@ -147,6 +148,15 @@ def init_db() -> None:
     con.execute(
         "UPDATE findings SET last_fixed_ts = found_at "
         "WHERE status IN ('fixed','fixed_verified') AND last_fixed_ts = 0 AND found_at > 0"
+    )
+    # BC-034: last_seen_ts tracks the most recent scout cycle that still
+    # reported this (host, cve, source_ref, package) tuple. Pre-BC-034 we
+    # only persisted first-sighting via `found_at`. Legacy rows: backfill
+    # from found_at (approximation — at least that scan definitely saw it).
+    with contextlib.suppress(sqlite3.OperationalError):
+        con.execute("ALTER TABLE findings ADD COLUMN last_seen_ts INTEGER DEFAULT 0")
+    con.execute(
+        "UPDATE findings SET last_seen_ts = found_at WHERE last_seen_ts = 0 AND found_at > 0"
     )
     con.commit()
     con.close()
@@ -227,6 +237,34 @@ def set_status(finding_id: str, status: str) -> None:
     con.close()
     # BC-029: every operator-visible state transition lands in the audit log.
     _audit.append("status_change", finding_id=finding_id, status=status)
+
+
+def bump_last_seen(host: str, scanned_ids: set[str]) -> None:
+    """BC-034: update `last_seen_ts` for every DB finding whose id scout
+    still reported in the current scan.
+
+    Independent of RECONCILE_ENABLED — this is pure inventory bookkeeping,
+    not an operator-visible state change. The reminder/heartbeat features
+    that will consume this data (future BCs) each have their own opt-out.
+
+    No-op for empty scanned_ids. Scoped to host so a scan from host-a
+    cannot touch host-b bookkeeping (parity with reconcile_scan)."""
+    if not scanned_ids:
+        return
+    con = sqlite3.connect(DB_PATH)
+    try:
+        now = int(time.time())
+        placeholders = ",".join("?" * len(scanned_ids))
+        con.execute(
+            f"UPDATE findings SET last_seen_ts = ? WHERE host = ? AND id IN ({placeholders})",
+            (now, host, *scanned_ids),
+        )
+        con.commit()
+    except sqlite3.OperationalError:
+        # Cold boot / init_db hasn't run — nothing to update.
+        pass
+    finally:
+        con.close()
 
 
 def reconcile_scan(host: str, scanned_ids: set[str]) -> tuple[list[Finding], list[Finding]]:
@@ -1165,6 +1203,8 @@ async def receive_scan(payload: dict) -> dict:
     # being marked fixed. Fire-and-forget: a failed notification must not
     # block the scan response.
     scanned_ids = {c.id for c in candidates}
+    # BC-034: bookkeeping — always, regardless of RECONCILE_ENABLED.
+    bump_last_seen(host, scanned_ids)
     regressed, auto_closed = reconcile_scan(host, scanned_ids)
     if regressed:
         log.warning("BC-031: %d regression(s) detected on %s", len(regressed), host)

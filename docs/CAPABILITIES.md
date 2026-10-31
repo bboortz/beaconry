@@ -910,6 +910,15 @@ Enforcement: `poc/scripts/verify_traceability.py` runs as part of `make check`. 
 - **verified by:**
   - `poc/tests/unit/test_hub_helpers.py`
 
+### CAP-T077: Hub persists `last_seen_ts` per finding (prerequisite data for reminder features)
+- **type:** technical
+- **status:** active
+- **origin:** BC-034 — operator question 2026-10-31 "are we storing when we saw a specific software + version the last time?"
+- **description:** Every scan calls `bump_last_seen(host, scanned_ids)` which `UPDATE`s `last_seen_ts = NOW()` for every DB finding whose id is in the current scan. Runs independently of `BEACONRY_RECONCILE_ENABLED` — this is pure inventory bookkeeping, not an operator-visible state change. Legacy rows backfilled from `found_at` by idempotent `init_db` migration. Enables future heartbeat / digest-refresh / stale-row-detection features that need "last time we saw this" to differentiate recently-active findings from six-month-old database ghosts.
+- **supports:** CAP-B011
+- **verified by:**
+  - `poc/tests/unit/test_last_seen_tracking.py`
+
 ### CAP-T017: Orphan tests fail the gate with a copy-pasteable template
 - **type:** technical
 - **status:** active
