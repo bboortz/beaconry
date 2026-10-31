@@ -1,7 +1,7 @@
 ---
 id: BC-035
 title: Notification adapter architecture + heartbeat for stale open findings
-status: in-progress
+status: shipped
 created: 2026-10-31
 branch: feat/BC-035-notification-adapters-and-heartbeat
 plan: docs/plan/BC-035-notification-adapters-and-heartbeat-plan.md
