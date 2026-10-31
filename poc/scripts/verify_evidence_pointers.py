@@ -167,7 +167,7 @@ def check_plan(plan_path: Path, collected_nodes: set[str], tests_root: Path) -> 
     return errors
 
 
-def main() -> int:
+def main() -> int:  # pragma: no cover - entry-point wrapper exercised via make check, not pytest
     plans_dir = Path(os.environ.get("BEACONRY_PLANS_DIR", str(_REPO_ROOT / "docs" / "plan")))
     tests_root = Path(os.environ.get("BEACONRY_TESTS_ROOT", str(_REPO_ROOT / "poc" / "tests")))
     if not plans_dir.is_dir():
@@ -175,9 +175,10 @@ def main() -> int:
         return 0  # soft-pass; traceability lint handles plan-doc presence
 
     collected_nodes = collect_pytest_nodes(tests_root)
+    plans = sorted(plans_dir.glob("BC-*-plan.md"))
 
     all_errors: list[str] = []
-    for plan_path in sorted(plans_dir.glob("BC-*-plan.md")):
+    for plan_path in plans:
         all_errors.extend(check_plan(plan_path, collected_nodes, tests_root))
 
     if all_errors:
@@ -192,6 +193,7 @@ def main() -> int:
             file=sys.stderr,
         )
         return 1
+    print(f"✓ {len(plans)} plan(s) checked — all shipping-evidence pointers resolve")
     return 0
 
 

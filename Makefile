@@ -24,7 +24,7 @@ help:
 	@echo ""
 	@echo "Tiers:"
 	@echo "  make check         FAST TIER — all gates above (~7s)"
-	@echo "  make check-full    FULL TIER — check + pytest -m 'compose or real_tools' (~1-2m)"
+	@echo "  make check-full    FULL TIER — check + pytest -m 'compose or real_tools' + make test-e2e (~1-2m)"
 	@echo ""
 	@echo "Operator CLIs:"
 	@echo "  make status                     one-line-per-service health table (BC-013)"

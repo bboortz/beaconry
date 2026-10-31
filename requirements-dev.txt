@@ -5,7 +5,7 @@
 ruff==0.14.1
 
 # Type checking
-pyright==1.1.408
+pyright==1.1.414
 
 # Testing
 pytest==8.3.3

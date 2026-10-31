@@ -103,10 +103,11 @@ def check_service(service_dir: Path, dockerfile: Path) -> list[str]:
     ]
 
 
-def main() -> int:
+def main() -> int:  # pragma: no cover - entry-point wrapper exercised via make check, not pytest
     poc_root = Path(__file__).resolve().parents[1]
+    dockerfiles = sorted(poc_root.glob("*/Dockerfile"))
     errors: list[str] = []
-    for dockerfile in sorted(poc_root.glob("*/Dockerfile")):
+    for dockerfile in dockerfiles:
         errors.extend(check_service(dockerfile.parent, dockerfile))
 
     if errors:
@@ -114,6 +115,7 @@ def main() -> int:
         for e in errors:
             print(f"  {e}", file=sys.stderr)
         return 1
+    print(f"✓ {len(dockerfiles)} Dockerfile(s) checked — every service-local .py is COPY'd")
     return 0
 
 

@@ -71,7 +71,7 @@ def check_coverage(cov_json: Path, min_pct: float = DEFAULT_MIN_PCT) -> list[str
     return errors
 
 
-def main() -> int:
+def main() -> int:  # pragma: no cover - entry-point wrapper exercised via make check, not pytest
     repo_root = Path(__file__).resolve().parents[2]
     cov_json = repo_root / "coverage.json"
     if not cov_json.exists():
@@ -91,6 +91,11 @@ def main() -> int:
         for e in errors:
             print(f"  {e}", file=sys.stderr)
         return 1
+    doc = json.loads(cov_json.read_text())
+    file_count = len(doc.get("files", {}))
+    print(
+        f"✓ {file_count} file(s) ≥ 65% coverage (plus {len(ALLOWLIST)} allowlisted at lower floors)"
+    )
     return 0
 
 
