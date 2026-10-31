@@ -65,27 +65,17 @@ class ScenarioContext:
         return r.json()
 
     def set_db_status(self, cve_id: str, status: str, *, host: str = "scenario-host") -> None:
-        """BC-038: direct SQL mutation for scenarios that need to simulate
-        operator actions (snooze, accept) without going through the Telegram
-        callback path. Writes `last_fixed_ts` for fix-like statuses to keep
-        BC-031 reconcile honest."""
-        import time as _t
+        """BC-038: set a finding's status via POST /test/set_status.
 
-        con = sqlite3.connect(self.db_path)
-        try:
-            if status in ("fixed", "fixed_verified"):
-                con.execute(
-                    "UPDATE findings SET status=?, last_fixed_ts=? WHERE cve_id=? AND host=?",
-                    (status, int(_t.time()), cve_id, host),
-                )
-            else:
-                con.execute(
-                    "UPDATE findings SET status=? WHERE cve_id=? AND host=?",
-                    (status, cve_id, host),
-                )
-            con.commit()
-        finally:
-            con.close()
+        Routed through hub (not direct SQL) because scenarios running against
+        a containerized hub can't write to the shared DB file (root-owned).
+        Uses the real `set_status` fn so BC-031 reconcile's last_fixed_ts
+        bookkeeping stays correct."""
+        r = self._client.post(
+            f"{self.hub_url}/test/set_status",
+            json={"host": host, "cve_id": cve_id, "status": status},
+        )
+        r.raise_for_status()
 
     # ── Reads ───────────────────────────────────────────────────────────
 

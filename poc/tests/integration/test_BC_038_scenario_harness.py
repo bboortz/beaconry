@@ -43,6 +43,11 @@ def hub_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[dict]:
         "hub": hub,
     }
     client.close()
+    # BC-038: reload hub without TEST_MODE env so sibling tests see baseline module state.
+    monkeypatch.delenv("BEACONRY_TEST_MODE", raising=False)
+    monkeypatch.delenv("BEACONRY_MOCK", raising=False)
+    monkeypatch.delenv("BEACONRY_SKIP_GRYPE_DB", raising=False)
+    importlib.reload(hub)
 
 
 def test_full_suite_passes(hub_env: dict) -> None:

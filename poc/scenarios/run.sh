@@ -19,27 +19,38 @@ COMPOSE_FILE="poc/scenarios/compose.yml"
 cleanup() {
   echo "==> tearing down compose project '$PROJECT'"
   docker compose -p "$PROJECT" -f "$COMPOSE_FILE" down --volumes --remove-orphans >/dev/null 2>&1 || true
-  rm -rf "$DATA_DIR"
+  # Hub ran as root inside the container → files in $DATA_DIR are root-owned.
+  # Clean them with a short-lived container that shares the mount.
+  if [ -d "$DATA_DIR" ]; then
+    docker run --rm -v "$DATA_DIR:/d" alpine sh -c "rm -rf /d/* /d/.??*" >/dev/null 2>&1 || true
+    rmdir "$DATA_DIR" 2>/dev/null || true
+  fi
 }
 trap cleanup EXIT
 
+# Pre-cleanup in case a previous run left root-owned junk behind.
+if [ -d "$DATA_DIR" ]; then
+  docker run --rm -v "$DATA_DIR:/d" alpine sh -c "rm -rf /d/* /d/.??*" >/dev/null 2>&1 || true
+fi
 mkdir -p "$DATA_DIR"
-chmod 777 "$DATA_DIR"
+chmod 777 "$DATA_DIR" 2>/dev/null || true
 
 echo "==> starting isolated hub (test-mode) on port $HUB_PORT"
 docker compose -p "$PROJECT" -f "$COMPOSE_FILE" up -d --build
 
-echo "==> waiting for /readyz…"
+# BC-038: scenarios bypass grype entirely, so the grype_db prereq in /readyz
+# doesn't apply. Poll /startupz (which only gates "boot complete") instead.
+echo "==> waiting for /startupz…"
 for _ in $(seq 1 60); do
-  if curl -sf "${HUB_URL}/readyz" >/dev/null 2>&1; then
-    echo "==> hub ready"
+  if curl -sf "${HUB_URL}/startupz" >/dev/null 2>&1; then
+    echo "==> hub started"
     break
   fi
   sleep 1
 done
 
-if ! curl -sf "${HUB_URL}/readyz" >/dev/null 2>&1; then
-  echo "✗ hub never became ready"
+if ! curl -sf "${HUB_URL}/startupz" >/dev/null 2>&1; then
+  echo "✗ hub never started"
   docker compose -p "$PROJECT" -f "$COMPOSE_FILE" logs hub | tail -40
   exit 1
 fi

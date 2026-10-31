@@ -45,6 +45,11 @@ def scenario_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[di
         "hub": hub,
     }
     client.close()
+    # BC-038: tests reload hub.py to apply env changes — other tests inherit
+    # that module state. Reload once more with the monkeypatched env removed
+    # so subsequent test collection sees the baseline hub module.
+    monkeypatch.delenv("BEACONRY_TEST_MODE", raising=False)
+    importlib.reload(hub)
 
 
 def test_scenario_base_is_abstract() -> None:

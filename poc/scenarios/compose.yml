@@ -31,8 +31,10 @@ services:
       - /tmp/beaconry-scenarios:/data
     ports:
       - "127.0.0.1:8004:8000"
+    # BC-038: scenarios don't invoke grype → /readyz would always 503 on
+    # the "grype_db missing" check. /startupz is the correct gate here.
     healthcheck:
-      test: ["CMD", "python3", "-c", "import urllib.request,sys;sys.exit(0 if urllib.request.urlopen('http://localhost:8000/readyz').status==200 else 1)"]
+      test: ["CMD", "python3", "-c", "import urllib.request,sys;sys.exit(0 if urllib.request.urlopen('http://localhost:8000/startupz').status==200 else 1)"]
       interval: 5s
       start_interval: 2s
       timeout: 5s

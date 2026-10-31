@@ -1684,6 +1684,31 @@ if TEST_MODE:
         sent = await heartbeat_sweep(now_ts=at)
         return {"sent": sent, "at": at}
 
+    @api.post("/test/set_status")
+    async def test_set_status(payload: dict) -> dict:
+        """BC-038: set a finding's status without going through the Telegram
+        callback path. Scenarios use this to simulate `operator snoozed` /
+        `operator accepted` / `operator fixed`. Must resolve the finding by
+        (host, cve_id) since scenarios pin those but not the hashed `id`."""
+        host = payload["host"]
+        cve_id = payload["cve_id"]
+        status = payload["status"]
+        con = sqlite3.connect(DB_PATH)
+        try:
+            row = con.execute(
+                "SELECT id FROM findings WHERE host=? AND cve_id=?", (host, cve_id)
+            ).fetchone()
+        finally:
+            con.close()
+        if row is None:
+            from fastapi import HTTPException
+
+            raise HTTPException(
+                status_code=404, detail=f"no finding for host={host} cve_id={cve_id}"
+            )
+        set_status(row[0], status)
+        return {"status": "ok", "finding_id": row[0]}
+
 
 if __name__ == "__main__":
     uvicorn.run("hub:api", host="0.0.0.0", port=8000, log_level="info")
