@@ -20,7 +20,7 @@ help:
 	@echo "  make verify-docs-drift          Makefile help + README match code enumerations (BC-016)"
 	@echo "  make verify-evidence-pointers   plan shipping-evidence pointers resolve to real tests (BC-019)"
 	@echo "  make verify-per-file-coverage   every file ≥ 65% coverage (or allowlisted with reason)"
-	@echo "  make verify-variables           docs/VARIABLES.md ↔ env var reads bidirectional check (BC-039)"
+	@echo "  make verify-variables           VARIABLES.md ↔ code ↔ .env.example ↔ docker-compose.yml drift (BC-039 + BC-040)"
 	@echo "  make smoke                      bash poc/demo.sh --smoke (non-interactive mock, CI)"
 	@echo ""
 	@echo "Tiers:"
@@ -93,9 +93,13 @@ verify-per-file-coverage:
 verify-dockerfile-sources:
 	$(PYTHON) -m poc.scripts.verify_dockerfile_sources
 
-# BC-039: docs/VARIABLES.md ↔ env-var reads bidirectional check.
-# Fails if a variable is read in code without a documented row, OR if a
-# documented row has no reader. Also catches unfilled `*(placeholder)*` stubs.
+# BC-039 + BC-040: four-way env variable drift lint.
+# Fails if a variable: (a) read in code without a VARIABLES.md row, (b) in
+# VARIABLES.md without a reader, (c) in VARIABLES.md but missing from
+# .env.example (unless dev-only allowlisted), (d) in .env.example without
+# a VARIABLES.md row, (e) in docker-compose.yml `environment:` without a
+# VARIABLES.md row, (f) default-literal mismatch between .env.example and
+# VARIABLES.md, (g) row has an unfilled `*(placeholder)*` stub.
 verify-variables:
 	$(PYTHON) -m poc.scripts.verify_variables_documented
 
