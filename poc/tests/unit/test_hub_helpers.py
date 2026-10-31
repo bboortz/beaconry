@@ -994,3 +994,96 @@ async def test_digest_empty_list_no_send(monkeypatch: pytest.MonkeyPatch) -> Non
     """Pre-BC-022 behavior preserved: empty suppressed list → no Telegram message."""
     bot = await _capture_digest(monkeypatch, [])
     assert bot.sent == []
+
+
+# ── BC-023: KEV bypasses MIN_CVSS filter ────────────────────────────────────
+
+
+def _grype_match(cve_id: str, cvss: float, severity: str = "High") -> dict:
+    return {
+        "vulnerability": {
+            "id": cve_id,
+            "severity": severity,
+            "cvss": [{"metrics": {"baseScore": cvss}}],
+            "description": "fixture",
+            "fix": {"versions": ["1.1"]},
+        },
+        "artifact": {"name": "pkg", "version": "1.0"},
+    }
+
+
+async def _ingest(
+    monkeypatch: pytest.MonkeyPatch,
+    kev_cves: set[str],
+    matches: list[dict],
+    min_cvss: float = 9.0,
+) -> list[Finding]:
+    """Drive process_sbom_entry with mocked grype + KEV lookup."""
+    from poc.hub import kev as _kev
+
+    monkeypatch.setattr(hub, "MIN_CVSS", min_cvss, raising=False)
+    monkeypatch.setattr(_kev, "is_known_exploited", lambda c: c in kev_cves)
+
+    async def _fake_grype(_sbom: dict) -> list[dict]:
+        return matches
+
+    monkeypatch.setattr(hub, "run_grype", _fake_grype)
+    return await hub.process_sbom_entry(
+        {"source_meta": {"type": "docker", "image": "nginx:1.24"}, "sbom": {}},
+        host="h",
+    )
+
+
+async def test_kev_below_min_cvss_passes_filter(monkeypatch: pytest.MonkeyPatch) -> None:
+    """CAP-T063 Scenario 1: KEV CVE below MIN_CVSS must survive the filter."""
+    findings = await _ingest(
+        monkeypatch,
+        kev_cves={"CVE-2023-44487"},
+        matches=[_grype_match("CVE-2023-44487", cvss=7.5)],
+        min_cvss=9.0,
+    )
+    assert len(findings) == 1
+    assert findings[0].cve_id == "CVE-2023-44487"
+    assert findings[0].kev is True
+    assert findings[0].tier == 0
+
+
+async def test_non_kev_below_min_cvss_still_filtered(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Scenario 2: non-KEV below MIN_CVSS continues to be filtered (noise control)."""
+    findings = await _ingest(
+        monkeypatch,
+        kev_cves=set(),
+        matches=[_grype_match("CVE-NON-01", cvss=7.5)],
+        min_cvss=9.0,
+    )
+    assert findings == []
+
+
+async def test_non_kev_above_min_cvss_unchanged(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Scenario 3: non-KEV ≥ MIN_CVSS unchanged (tier=2 since internet_facing=False)."""
+    findings = await _ingest(
+        monkeypatch,
+        kev_cves=set(),
+        matches=[_grype_match("CVE-HIGH-01", cvss=9.5)],
+        min_cvss=9.0,
+    )
+    assert len(findings) == 1
+    assert findings[0].kev is False
+    assert findings[0].tier == 2
+
+
+async def test_kev_above_min_cvss_still_tier_0(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Scenario 4 regression guard: KEV ≥ MIN_CVSS keeps working post-BC-023."""
+    findings = await _ingest(
+        monkeypatch,
+        kev_cves={"CVE-KEV-HIGH"},
+        matches=[_grype_match("CVE-KEV-HIGH", cvss=9.8)],
+        min_cvss=9.0,
+    )
+    assert len(findings) == 1
+    assert findings[0].tier == 0
+    assert findings[0].kev is True

@@ -90,3 +90,17 @@ exception_regex = [
   "fetch fail",
   "CVSS < 7",
 ]
+
+# ── BC-023: KEV bypasses MIN_CVSS filter ────────────────────────────────────
+[[ban]]
+pattern = "MIN_CVSS[^\\n]*(drops|filters|rejects)[^\\n]*(KEV|all finding|every finding)"
+banned_since = "BC-023"
+reason = "BC-023 made KEV findings bypass MIN_CVSS. Pre-BC-023 the filter dropped KEV CVEs below the threshold; post-BC-023 is_known_exploited is checked first and KEVs always pass. Don't describe MIN_CVSS as filtering KEV findings."
+exception_regex = [
+  "pre-BC-023",
+  "Pre-BC-023",
+  "non-KEV",
+  "BC-023 made",
+  "BC-023 fixed",
+  "superseded",
+]

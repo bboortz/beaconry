@@ -799,6 +799,16 @@ Enforcement: `poc/scripts/verify_traceability.py` runs as part of `make check`. 
 - **verified by:**
   - `poc/tests/unit/test_hub_helpers.py`
 
+### CAP-T063: KEV findings bypass MIN_CVSS filter in hub ingest
+- **type:** technical
+- **status:** active
+- **origin:** BC-023 (fixes an ordering bug in BC-020's CAP-T059)
+- **design:** docs/stories/BC-023-kev-bypasses-min-cvss.md
+- **description:** `process_sbom_entry` computes `is_kev` before applying the MIN_CVSS gate: `if not is_kev and cvss < MIN_CVSS: continue`. KEV CVEs always pass the filter regardless of their theoretical CVSS score; non-KEV CVEs continue to be filtered as before. Fixes BC-020's architectural bug where KEV was checked AFTER a filter that could drop it, making Tier 0 unreachable for CVSS < MIN_CVSS CVEs. A `log.info` records every bypass for operator audit. Live acceptance surfaced two previously-silent KEV CVEs in `nginx:1.24`: CVE-2025-27363 (CVSS 8.1, libfreetype6) and CVE-2023-44487 (CVSS 7.5, nginx HTTP/2 Rapid Reset).
+- **supports:** CAP-B019
+- **verified by:**
+  - `poc/tests/unit/test_hub_helpers.py`
+
 ### CAP-T017: Orphan tests fail the gate with a copy-pasteable template
 - **type:** technical
 - **status:** active

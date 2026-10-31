@@ -250,16 +250,27 @@ async def process_sbom_entry(entry: dict, host: str) -> list[Finding]:
         vuln = match.get("vulnerability", {})
         artifact = match.get("artifact", {})
         cvss = extract_cvss(vuln)
+        cve_id = vuln["id"]
+        is_kev = _kev.is_known_exploited(cve_id)
 
-        if cvss < MIN_CVSS:
+        # BC-023: KEV bypasses MIN_CVSS. The product thesis is "KEV is
+        # empirical exploitation signal; CVSS is theoretical severity." A
+        # CVSS-7.5 KEV CVE is more urgent than a CVSS-9.8 theoretical one.
+        # Filtering by CVSS first would make Tier 0 unreachable below
+        # MIN_CVSS, which is the exact bug BC-020 was supposed to prevent.
+        if not is_kev and cvss < MIN_CVSS:
             continue
+        if is_kev and cvss < MIN_CVSS:
+            log.info(
+                "BC-023: KEV %s bypassed MIN_CVSS filter (cvss=%.1f < %.1f)",
+                cve_id,
+                cvss,
+                MIN_CVSS,
+            )
 
         source_type = source_meta.get("type", "unknown")
         source_ref = source_meta.get("image") or artifact.get("name", "")
         fix_versions = vuln.get("fix", {}).get("versions") or []
-
-        cve_id = vuln["id"]
-        is_kev = _kev.is_known_exploited(cve_id)
         # Build a provisional finding so classify_tier gets the real CVSS/severity.
         f = Finding(
             id=make_id(host, cve_id, source_ref, artifact.get("name", "")),
