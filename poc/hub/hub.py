@@ -98,6 +98,11 @@ RECONCILE_ENABLED = os.environ.get("BEACONRY_RECONCILE_ENABLED", "1") != "0"
 INTERNET_FACING_DETECTION_ENABLED = (
     os.environ.get("BEACONRY_INTERNET_FACING_DETECTION_ENABLED", "1") != "0"
 )
+# BC-036: digest cadence throttle. Default 24h — digests are summarisations
+# of state that doesn't change scan-to-scan, so repeating the same body every
+# SCAN_INTERVAL (default 5min = 288/day) is noise. Content hash fallback
+# bypasses the window if the suppressed set actually changes. 0 = disable
+# the throttle entirely (pre-BC-036 behavior: fire every scan with suppressed).
 
 
 def _int_env(key: str, default: int) -> int:
@@ -121,6 +126,7 @@ HEARTBEAT_SWEEP_INTERVAL_S = _int_env("BEACONRY_HEARTBEAT_SWEEP_INTERVAL_S", 360
 # BC-035: a finding whose last_seen_ts is older than this window is considered
 # gone from inventory — no heartbeat (BC-031 reconcile will auto-close it).
 HEARTBEAT_LIVENESS_WINDOW_S = _int_env("BEACONRY_HEARTBEAT_LIVENESS_WINDOW_S", 7 * 86400)
+DIGEST_INTERVAL_S = _int_env("BEACONRY_DIGEST_INTERVAL_S", 86400)
 
 DATA_DIR.mkdir(parents=True, exist_ok=True)
 DB_PATH = DATA_DIR / "beaconry.db"
@@ -218,6 +224,16 @@ def init_db() -> None:
     # legacy classifier assumed anyway.
     with contextlib.suppress(sqlite3.OperationalError):
         con.execute("ALTER TABLE findings ADD COLUMN internet_facing INTEGER DEFAULT 0")
+    # BC-036: digest cadence state — per-host last-sent + content hash. Separate
+    # table (not a column on `findings`) because the state is per-host, not
+    # per-finding.
+    con.execute("""
+        CREATE TABLE IF NOT EXISTS digest_state (
+            host         TEXT PRIMARY KEY,
+            last_sent_ts INTEGER NOT NULL,
+            last_hash    TEXT NOT NULL
+        )
+    """)
     con.commit()
     con.close()
 
@@ -1282,6 +1298,77 @@ def format_digest_body(suppressed: list[Finding]) -> str:
     return "\n".join(lines)
 
 
+def _digest_hash(suppressed: list[Finding]) -> str:
+    """BC-036: stable content hash of a suppressed set — sorted by finding id so
+    order doesn't matter, truncated like `make_id` for consistency."""
+    joined = ":".join(sorted(f.id for f in suppressed))
+    return hashlib.sha256(joined.encode()).hexdigest()[:16]
+
+
+def should_send_digest(host: str, suppressed: list[Finding], *, now: int) -> tuple[bool, str, str]:
+    """BC-036: decide whether to send a digest for `host` at `now`.
+
+    Returns (should_send, content_hash, reason). Reason strings are stable
+    identifiers emitted to the audit log for forensics.
+
+    Policy:
+      - empty suppressed → never send (BC-022 preserved)
+      - DIGEST_INTERVAL_S == 0 → always send (pre-BC-036 opt-out)
+      - no prior send for this host → send (first_fire)
+      - content hash differs from last send → send (content_changed)
+      - interval elapsed since last send → send (interval_elapsed)
+      - otherwise → throttled
+    """
+    content_hash = _digest_hash(suppressed)
+    if not suppressed:
+        return False, content_hash, "empty"
+    if DIGEST_INTERVAL_S == 0:
+        return True, content_hash, "throttle_disabled"
+    con = sqlite3.connect(DB_PATH)
+    try:
+        row = con.execute(
+            "SELECT last_sent_ts, last_hash FROM digest_state WHERE host=?", (host,)
+        ).fetchone()
+    finally:
+        con.close()
+    if row is None:
+        return True, content_hash, "first_fire"
+    last_sent_ts, last_hash = row
+    if last_hash != content_hash:
+        return True, content_hash, "content_changed"
+    if now - last_sent_ts >= DIGEST_INTERVAL_S:
+        return True, content_hash, "interval_elapsed"
+    return False, content_hash, "throttled"
+
+
+def record_digest_sent(host: str, suppressed: list[Finding], *, now: int) -> None:
+    """BC-036: persist last-sent state + emit `digest_sent` audit event."""
+    content_hash = _digest_hash(suppressed)
+    con = sqlite3.connect(DB_PATH)
+    try:
+        con.execute(
+            "INSERT INTO digest_state (host, last_sent_ts, last_hash) VALUES (?,?,?) "
+            "ON CONFLICT(host) DO UPDATE SET last_sent_ts=excluded.last_sent_ts, "
+            "last_hash=excluded.last_hash",
+            (host, now, content_hash),
+        )
+        con.commit()
+    finally:
+        con.close()
+    _audit.append("digest_sent", host=host, hash=content_hash, count=len(suppressed))
+
+
+def record_digest_throttled(host: str, suppressed: list[Finding], *, now: int, reason: str) -> None:
+    """BC-036: emit `digest_throttled` audit event. No DB write — nothing changed."""
+    _audit.append(
+        "digest_throttled",
+        host=host,
+        hash=_digest_hash(suppressed),
+        count=len(suppressed),
+        reason=reason,
+    )
+
+
 async def send_digest(suppressed: list[Finding]) -> None:
     """BC-035: thin wrapper — all enabled notification adapters receive the digest."""
     if not suppressed:
@@ -1441,8 +1528,16 @@ async def receive_scan(payload: dict) -> dict:
         new_findings += 1
         await asyncio.sleep(0.3)  # mild rate-limiting vs. Telegram flood control
 
+    # BC-036: throttle digests. First-fires above are unaffected; this gate
+    # is strictly digest-local. See `should_send_digest` for the policy.
     if suppressed:
-        await send_digest(suppressed)
+        now_ts = int(time.time())
+        should_fire, _hash, reason = should_send_digest(host, suppressed, now=now_ts)
+        if should_fire:
+            await send_digest(suppressed)
+            record_digest_sent(host, suppressed, now=now_ts)
+        else:
+            record_digest_throttled(host, suppressed, now=now_ts, reason=reason)
 
     # BC-031: reconcile this scan against DB — auto-close findings no longer
     # present, raise 🔥 FIX REGRESSED alarms for findings that returned after

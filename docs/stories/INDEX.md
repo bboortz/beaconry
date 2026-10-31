@@ -37,5 +37,6 @@ One-line status board for operator scenarios. Full stories in `BC-NNN-<slug>.md`
 | BC-033 | verify_fix scans operator's actual source_ref (not hardcoded :latest) | shipped     | — (merged to dev)                   |
 | BC-034 | Hub persists last_seen_ts per finding | shipped     | — (merged to dev)                   |
 | BC-035 | Notification adapter architecture + heartbeat for stale open findings | shipped     | — (merged to dev)                   |
+| BC-036 | Decouple digest cadence from scan cadence | shipped     | — (merged to dev)                   |
 
 Lifecycle: `draft → ready → in-progress → shipped`. Status matches each story's frontmatter.

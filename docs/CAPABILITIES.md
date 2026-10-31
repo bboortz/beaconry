@@ -968,6 +968,15 @@ Enforcement: `poc/scripts/verify_traceability.py` runs as part of `make check`. 
   - `poc/tests/integration/test_BC_030_internet_facing_detection.py`
   - `poc/tests/unit/test_internet_facing_classification.py`
 
+### CAP-T080: Digest cadence throttle with content-hash fallback
+- **type:** technical
+- **status:** active
+- **origin:** BC-036 — operator 2026-10-31 asked how to tune digest cadence independently of scan cadence
+- **description:** `receive_scan` passes suppressed findings through `should_send_digest(host, suppressed, now)` before dispatch. Policy: empty set → never fire (BC-022 regression guard); `BEACONRY_DIGEST_INTERVAL_S=0` → never throttle (pre-BC-036 behavior); otherwise fire on first-fire, content change (sha256 of sorted finding ids), OR interval elapsed. Per-host state in new `digest_state` table (idempotent CREATE in `init_db`). Audit events `digest_sent` + `digest_throttled` carry host, hash, and reason for forensics. First-fire + regression notifications are unaffected — this gate is strictly digest-local.
+- **supports:** CAP-B003
+- **verified by:**
+  - `poc/tests/unit/test_digest_cadence.py`
+
 ### CAP-T070: `make findings` + Telegram notification surface exposure dimension
 - **type:** technical
 - **status:** active
