@@ -262,6 +262,7 @@ def save_finding(f: Finding) -> bool:
             tier=f.tier,
             kev=f.kev,
             cvss=f.cvss,
+            internet_facing=f.internet_facing,  # BC-030
         )
     return new_row
 

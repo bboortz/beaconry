@@ -131,6 +131,8 @@ Additive. Operators who do nothing continue running — hub tolerates missing `c
 | KEV header still wins over Tier 1 marker | unit | `test_hub_helpers.py::test_format_notification_tier_0_wins_over_tier_1_marker` | ✓ |
 | LAN-only CVSS≥9 omits 🌐 marker | unit | `test_hub_helpers.py::test_format_notification_tier_1_marker_absent_for_lan_only` | ✓ |
 | Backward-compat: process_sbom_entry works without port_exposure arg | integration | `test_BC_030_internet_facing_detection.py::test_missing_port_exposure_arg_defaults_safe` | ✓ |
+| Audit event (`finding_ingested`) carries `internet_facing` for forensics | integration | `test_BC_030_internet_facing_detection.py::test_audit_event_carries_internet_facing` | ✓ |
+| `.env.example` documents `BEACONRY_INTERNET_FACING_DETECTION_ENABLED` | manual | `poc/.env.example` entry | ✓ |
 | CAP-T068 + CAP-T069 + CAP-T070 + CAP-B020 registered + bidirectional | verify-traceability | `docs/CAPABILITIES.md` diff | ✓ |
 | make check green | multi-gate | `make check` | ✓ |
 | Memory drift pattern added if applicable | N/A | no documented behavior deprecated | ✓ |

@@ -175,6 +175,36 @@ async def test_detection_disabled_forces_lan_only(
     assert f.tier == 2
 
 
+async def test_audit_event_carries_internet_facing(
+    bc030_env: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """BC-029 integration: save_finding emits an audit event that includes
+    `internet_facing`. Needed so forensics can prove which findings were ranked
+    as Tier 1 at ingest time (post-fact DB inspection isn't enough — tier may
+    change on re-ingest if the toggle flips)."""
+    import json
+
+    async def _fake_grype(_sbom: dict) -> list[dict]:
+        return [_make_grype_match("CVE-2026-AUDIT-030", 9.5)]
+
+    monkeypatch.setattr(hub, "run_grype", _fake_grype)
+    sbom_entry = {
+        "source_meta": {"type": "docker", "image": "nginx:1.24"},
+        "sbom": {"packages": []},
+    }
+    findings = await hub.process_sbom_entry(
+        sbom_entry, host="h", port_exposure={"nginx:1.24": True}
+    )
+    assert hub.save_finding(findings[0]) is True
+
+    audit_path = hub.DATA_DIR / "audit.log"
+    events = [json.loads(line) for line in audit_path.read_text().splitlines() if line.strip()]
+    ingested = [e for e in events if e["event"] == "finding_ingested"]
+    assert len(ingested) == 1
+    assert ingested[0]["internet_facing"] is True
+    assert ingested[0]["tier"] == 1
+
+
 async def test_missing_port_exposure_arg_defaults_safe(
     bc030_env: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
