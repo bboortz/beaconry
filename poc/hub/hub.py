@@ -757,9 +757,19 @@ async def send_digest(suppressed: list[Finding]) -> None:
     if not suppressed or tg_app is None:
         return
     lines = [f"📋 <b>{len(suppressed)} additional finding(s) suppressed this run</b>"]
-    for f in suppressed[:10]:
+    # BC-022: if any suppressed finding is KEV, surface a loud banner above the
+    # bullet list — otherwise Tier 0 findings hide invisibly in prose when
+    # #KEV > BEACONRY_MAX_FINDINGS_PER_RUN.
+    kev_count = sum(1 for f in suppressed if f.kev)
+    if kev_count:
         lines.append(
-            f"• <code>{html.escape(f.cve_id)}</code> {f.severity} "
+            f"⚠️ <b>{kev_count} suppressed finding(s) are KEV</b> — "
+            f"raise <code>BEACONRY_MAX_FINDINGS_PER_RUN</code> to see them individually."
+        )
+    for f in suppressed[:10]:
+        prefix = "🚨 " if f.kev else ""
+        lines.append(
+            f"• {prefix}<code>{html.escape(f.cve_id)}</code> {f.severity} "
             f"CVSS {f.cvss:.1f} — <code>{html.escape(f.package)}</code>"
         )
     if len(suppressed) > 10:

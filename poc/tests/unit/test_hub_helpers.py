@@ -918,3 +918,79 @@ def test_format_notification_omits_kev_header_for_non_tier_0() -> None:
     f = _finding(tier=2, kev=False, cve_id="CVE-2026-1111", severity="Critical", cvss=9.5)
     body = hub.format_notification(f)
     assert "KEV" not in body
+
+
+# ── BC-022: digest KEV awareness ─────────────────────────────────────────────
+
+
+class _CapturingBot:
+    """Captures send_message calls so we can assert on the rendered body.
+    `send_digest` reads `tg_app.bot.send_message` and awaits it; this stub
+    satisfies that contract."""
+
+    def __init__(self) -> None:
+        self.sent: list[dict[str, object]] = []
+
+    async def send_message(self, **kwargs: object) -> None:
+        self.sent.append(kwargs)
+
+
+async def _capture_digest(
+    monkeypatch: pytest.MonkeyPatch, suppressed: list[Finding]
+) -> _CapturingBot:
+    bot = _CapturingBot()
+    import types
+
+    fake_tg_app = types.SimpleNamespace(bot=bot)
+    monkeypatch.setattr(hub, "tg_app", fake_tg_app)
+    monkeypatch.setattr(hub, "TELEGRAM_CHAT_ID", "123", raising=False)
+    await hub.send_digest(suppressed)
+    return bot
+
+
+async def test_digest_row_prefixes_kev_with_siren(monkeypatch: pytest.MonkeyPatch) -> None:
+    """CAP-T062: KEV rows start with 🚨; non-KEV rows do not."""
+    suppressed = [
+        _finding(id="k1", cve_id="CVE-KEV-01", package="openssl", tier=0, kev=True),
+        _finding(id="n1", cve_id="CVE-NON-01", package="curl", tier=2, kev=False),
+    ]
+    bot = await _capture_digest(monkeypatch, suppressed)
+    assert len(bot.sent) == 1
+    body = str(bot.sent[0].get("text", ""))
+    # Row with KEV CVE must contain the siren prefix
+    for line in body.splitlines():
+        if "CVE-KEV-01" in line:
+            assert "🚨" in line, f"KEV row must have 🚨 prefix; got: {line!r}"
+        if "CVE-NON-01" in line and line.strip().startswith("•"):
+            assert "🚨" not in line, f"non-KEV row must NOT have 🚨; got: {line!r}"
+
+
+async def test_digest_banner_fires_when_any_suppressed_is_kev(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """CAP-T062: Loud banner surfaces the KEV count when >=1 suppressed finding is KEV."""
+    suppressed = [
+        _finding(id="k1", cve_id="CVE-KEV-01", tier=0, kev=True),
+        _finding(id="k2", cve_id="CVE-KEV-02", tier=0, kev=True),
+        _finding(id="n1", cve_id="CVE-NON-01", tier=2, kev=False),
+    ]
+    bot = await _capture_digest(monkeypatch, suppressed)
+    body = str(bot.sent[0]["text"])
+    assert "2 suppressed finding(s) are KEV" in body
+    # Banner must be above the bullet list
+    banner_pos = body.find("are KEV")
+    first_bullet_pos = body.find("•")
+    assert banner_pos < first_bullet_pos, "banner must appear before the bullet list"
+
+
+async def test_digest_no_banner_when_no_kev(monkeypatch: pytest.MonkeyPatch) -> None:
+    suppressed = [_finding(id="n1", cve_id="CVE-NON-01", tier=2, kev=False)]
+    bot = await _capture_digest(monkeypatch, suppressed)
+    body = str(bot.sent[0]["text"])
+    assert "are KEV" not in body
+
+
+async def test_digest_empty_list_no_send(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Pre-BC-022 behavior preserved: empty suppressed list → no Telegram message."""
+    bot = await _capture_digest(monkeypatch, [])
+    assert bot.sent == []

@@ -789,6 +789,16 @@ Enforcement: `poc/scripts/verify_traceability.py` runs as part of `make check`. 
   - `poc/tests/integration/test_BC_021_dockerfile_sources.py`
   - `poc/tests/unit/test_verify_dockerfile_sources.py`
 
+### CAP-T062: Digest format surfaces KEV markers for suppressed findings
+- **type:** technical
+- **status:** active
+- **origin:** BC-022
+- **design:** docs/stories/BC-022-digest-kev-awareness.md
+- **description:** `send_digest` prepends `🚨 ` on each bullet-list row whose finding has `kev=True`, and inserts a loud banner `⚠️ N suppressed finding(s) are KEV — raise BEACONRY_MAX_FINDINGS_PER_RUN to see them individually.` immediately after the header when `any(f.kev for f in suppressed)`. Closes BC-020's invariant break: when `#KEV > BEACONRY_MAX_FINDINGS_PER_RUN`, Tier 0 findings would otherwise be invisibly listed in the digest. The sort order remains `(tier, -cvss)`, so when the cap holds (`#KEV ≤ cap`), the digest contains zero KEV findings and the banner is suppressed.
+- **supports:** CAP-B019
+- **verified by:**
+  - `poc/tests/unit/test_hub_helpers.py`
+
 ### CAP-T017: Orphan tests fail the gate with a copy-pasteable template
 - **type:** technical
 - **status:** active

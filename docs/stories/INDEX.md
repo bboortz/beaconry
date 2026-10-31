@@ -26,5 +26,6 @@ One-line status board for operator scenarios. Full stories in `BC-NNN-<slug>.md`
 | BC-019 | Grep-verify every shipping-evidence pointer | shipped     | — (merged to dev)                   |
 | BC-020 | KEV ingestion + wire urgency.classify_tier | shipped     | — (merged to dev)                   |
 | BC-021 | Dockerfile sources lint | shipped     | — (merged to dev)                   |
+| BC-022 | Digest shows KEV markers for suppressed findings | shipped     | — (merged to dev)                   |
 
 Lifecycle: `draft → ready → in-progress → shipped`. Status matches each story's frontmatter.
