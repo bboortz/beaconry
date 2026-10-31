@@ -386,6 +386,33 @@ def run(docs: Path, tests: Path, *, branch: str | None = None) -> int:
                     f"capability but is not listed in Verified by"
                 )
 
+    # BC-024: reverse-direction bidirectional check.
+    # Pattern: four consecutive feats (BC-018/020/022/023) shipped with
+    # CAPs that listed a test file as verified-by, but the file's Covers:
+    # block didn't claim the CAP id. The forward direction above only
+    # catches "test claims CAP → CAP must list test"; this catches the
+    # reverse "CAP lists test → test's Covers must claim CAP". A file
+    # that doesn't resolve on disk is skipped — pre-existing file-missing
+    # check above already fires, avoiding double-report.
+    rels_by_test = {test_path: _rel(test_path, tests.parent) for test_path in test_covers}
+    for cap in caps.values():
+        for vb in cap.verified_by:
+            # Match the verified-by ref to one of the on-disk test files.
+            matched_covers: list[str] | None = None
+            for test_path, rel in rels_by_test.items():
+                if vb.endswith(rel) or rel.endswith(vb):
+                    matched_covers = test_covers[test_path]
+                    break
+            if matched_covers is None:
+                continue  # file-missing error already fires above
+            if cap.cap_id not in matched_covers:
+                errors.append(
+                    f"CAPABILITIES.md § {cap.cap_id} lists {vb} as verified-by, but "
+                    f"that file's Covers: block doesn't claim {cap.cap_id}. "
+                    f"Add '- {cap.cap_id}: ...' to the Covers block, or remove the "
+                    f"file from verified-by."
+                )
+
     # Origin story resolution: each BC-NNN in origin must point to a real story file.
     stories_dir = docs / "stories"
     if stories_dir.is_dir():

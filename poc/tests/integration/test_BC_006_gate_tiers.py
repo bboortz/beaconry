@@ -1,6 +1,7 @@
 """BC-006 gate-tier structure — asserts Makefile declares fast + full tiers.
 
 Covers:
+    - CAP-B011: Operator trusts `make check` as the single shipping gate
     - CAP-T023: make check includes smoke
     - CAP-T024: make check-full includes opt-in markers
 """

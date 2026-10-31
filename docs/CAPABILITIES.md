@@ -809,6 +809,16 @@ Enforcement: `poc/scripts/verify_traceability.py` runs as part of `make check`. 
 - **verified by:**
   - `poc/tests/unit/test_hub_helpers.py`
 
+### CAP-T064: verify-traceability enforces reverse direction (CAP → test's Covers block)
+- **type:** technical
+- **status:** active
+- **origin:** BC-024
+- **design:** docs/stories/BC-024-traceability-reverse-check.md
+- **description:** `verify_traceability.py::main` adds a reverse-direction pass: for every `(cap, verified_by_ref)` pair in CAPABILITIES.md, resolve the verified-by to an on-disk test file and assert the file's `Covers:` block claims the CAP id. The forward direction (test claims CAP → CAP must list test) was already enforced by CAP-T016; this closes the gap where a CAP was added with `verified by:` but the test file's Covers block was forgotten. Pattern surfaced four consecutive times (BC-018/020/022/023) — now caught at `make check` time. Retroactive run surfaced 8 historical drifts, all fixed in this branch as free regression data.
+- **supports:** CAP-B006
+- **verified by:**
+  - `poc/tests/integration/test_BC_004_traceability.py`
+
 ### CAP-T017: Orphan tests fail the gate with a copy-pasteable template
 - **type:** technical
 - **status:** active

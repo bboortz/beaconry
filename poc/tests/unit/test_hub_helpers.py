@@ -3,6 +3,9 @@
 Covers:
     - CAP-B003: Operator can disable Fix-execution with a feature flag
     - CAP-B004: Operator is not flooded on noisy scans
+    - CAP-B007: Operator can review the current state of findings from the CLI
+    - CAP-B008: Operator closing fix flow — tap Fix button → re-scan verify → status set
+    - CAP-T025: HTML-based notification format escapes `< > &` safely
     - CAP-T001: Finding ID is stable across runs
     - CAP-T002: CVSS extraction picks the highest score across entries
     - CAP-T003: Notification message is Telegram-HTML-safe for adversarial descriptions

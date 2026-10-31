@@ -1,6 +1,7 @@
 """BC-005 Compose integration — config validation (full up/down is manual).
 
 Covers:
+    - CAP-B009: Operator runs the multi-image Compose demo and sees per-image findings
     - CAP-T019: Compose stack brings up hub + scout with correct :ro socket mount, healthchecks, env propagation
     - CAP-T034: Hub image includes docker CLI so DockerAdapter.execute can run on the Compose path
 """

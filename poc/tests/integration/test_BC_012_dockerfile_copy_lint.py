@@ -1,6 +1,7 @@
 """BC-012 — Dockerfile-COPY lint: catch forgotten `COPY beaconry_health/`.
 
 Covers:
+    - CAP-B016: Operator can add a new service to beaconry without a container-boot regression
     - CAP-T042: Dockerfile lint gate catches forgotten `COPY beaconry_health/` at merge time
 """
 

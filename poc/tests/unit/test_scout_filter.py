@@ -1,6 +1,8 @@
 """Unit tests for scout glob filter — BC-005.
 
 Covers:
+    - CAP-B009: Operator runs the multi-image Compose demo and sees per-image findings
+    - CAP-B010: Operator can tune which images are scanned (glob include/exclude)
     - CAP-T018: Scout filters image tags by include/exclude glob patterns
 """
 

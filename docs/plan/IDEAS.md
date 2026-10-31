@@ -218,13 +218,6 @@ See per-decision review dates in `memory/`:
   **The win**: non-CVE primary IDs (GO-*, GHSA-*) no longer silently miss KEV flagging when a CVE alias exists.
   links: BC-020 (KEV lookup), grype's vulnerability match schema (`related` field).
 
-- **verify-traceability: enforce reverse direction (CAP → test's Covers block)**
-  trigger: 2026-10-31 BC-023 audit — test_hub_helpers.py's Covers block was missing CAP-T062 (BC-022) and CAP-T063 (BC-023) even though both CAPs listed the file as verified-by. `make check` passed because `verify-traceability` only enforces "test claims CAP → CAP must list test", not the reverse direction.
-  priority: soon
-  Scope sketch: add a check in `verify_traceability.py` — for every (cap_id, test_file) pair in CAPABILITIES.md's "verified by" lists, assert the test file's `Covers:` block contains cap_id. Error template: "CAPABILITIES.md § {cap} lists {file} as verified-by, but {file}'s Covers block doesn't mention {cap}. Add it to the Covers block or remove it from verified-by."
-  **The win**: the one gap my manual three-lens audits keep catching becomes a lint. Fourth time this exact drift has shown up (BC-018, BC-020, BC-022, BC-023).
-  links: BC-004 (origin), BC-019 (same "move vigilance to lint" pattern).
-
 ## Parking lot (ideas we discussed but likely won't do)
 
 - **`make demo` works with host-run telegram-mock (BC-018 Scenario 7's literal recipe)**

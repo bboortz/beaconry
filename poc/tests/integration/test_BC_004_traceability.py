@@ -5,6 +5,7 @@ Covers:
     - CAP-T017: Orphan tests fail the gate
     - CAP-T022: Fix/feat branches without a plan doc fail the gate
     - CAP-T027: Shipped stories must have a completed Shipping evidence table
+    - CAP-T064: verify-traceability enforces reverse direction (CAP → test's Covers block)
 """
 
 from __future__ import annotations
@@ -767,3 +768,143 @@ def test_bidirectional_consistency_requires_test_file_in_verified_by(
     rc = run(docs=docs, tests=tests)
     # Test claims to cover CAP-001 but CAP-001 doesn't list the test — mismatch.
     assert rc != 0
+
+
+# ── BC-024: reverse-direction bidirectional check ────────────────────────────
+
+
+def test_reverse_covers_omission_fails(
+    tmp_docs_and_tests: tuple[Path, Path], capsys: pytest.CaptureFixture[str]
+) -> None:
+    """CAP-T064 Scenario 1: CAP lists test, but test's Covers block omits the
+    CAP id → reverse-check must fail."""
+    docs, tests = tmp_docs_and_tests
+    _write_capabilities(
+        docs,
+        """
+## Business capabilities
+
+### CAP-001: Example
+- **type:** business
+- **status:** active
+- **origin:** BC-999
+- **description:** fixture
+- **verified by:**
+  - `tests/test_covers_blind.py`
+
+### CAP-002: Other
+- **type:** technical
+- **status:** active
+- **origin:** BC-999
+- **description:** fixture
+- **verified by:**
+  - `tests/test_covers_blind.py`
+""",
+    )
+    # Test file EXISTS and HAS a Covers block, but doesn't claim CAP-001.
+    _write_test(
+        tests,
+        "covers_blind",
+        '"""Covers:\n    - CAP-002: Other\n"""\n',
+    )
+
+    from poc.scripts.verify_traceability import run
+
+    rc = run(docs=docs, tests=tests)
+    captured = capsys.readouterr()
+    output = captured.err + captured.out
+    assert rc != 0
+    assert "CAP-001" in output
+    assert "test_covers_blind.py" in output
+    assert "Covers" in output  # fix hint names the Covers block
+
+
+def test_reverse_both_directions_covered_passes(
+    tmp_docs_and_tests: tuple[Path, Path],
+) -> None:
+    """CAP-T064 Scenario 2: happy path — CAP lists test AND test claims CAP."""
+    docs, tests = tmp_docs_and_tests
+    _write_capabilities(
+        docs,
+        """
+## Business capabilities
+
+### CAP-001: Example
+- **type:** business
+- **status:** active
+- **origin:** BC-999
+- **description:** fixture
+- **verified by:**
+  - `tests/test_both_ways.py`
+""",
+    )
+    _write_test(
+        tests,
+        "both_ways",
+        '"""Covers:\n    - CAP-001: Example\n"""\n',
+    )
+
+    from poc.scripts.verify_traceability import run
+
+    rc = run(docs=docs, tests=tests)
+    assert rc == 0
+
+
+def test_reverse_skipped_when_file_missing(
+    tmp_docs_and_tests: tuple[Path, Path], capsys: pytest.CaptureFixture[str]
+) -> None:
+    """CAP-T064 Scenario 3: file-missing is the pre-existing error; reverse
+    check must not double-report the same CAP/file pair."""
+    docs, tests = tmp_docs_and_tests
+    _write_capabilities(
+        docs,
+        """
+## Business capabilities
+
+### CAP-001: Example
+- **type:** business
+- **status:** active
+- **origin:** BC-999
+- **description:** fixture
+- **verified by:**
+  - `tests/test_does_not_exist.py`
+""",
+    )
+    # No test file written — file-missing error fires.
+
+    from poc.scripts.verify_traceability import run
+
+    rc = run(docs=docs, tests=tests)
+    captured = capsys.readouterr()
+    output = captured.err + captured.out
+    assert rc != 0
+    # Count occurrences of CAP-001 — must appear only once (pre-existing
+    # file-missing error), not twice (reverse would add a duplicate).
+    assert output.count("CAP-001") == 1, (
+        f"double-report; want 1 CAP-001 line, got {output.count('CAP-001')}:\n{output}"
+    )
+
+
+def test_reverse_deprecated_cap_exempt(
+    tmp_docs_and_tests: tuple[Path, Path],
+) -> None:
+    """CAP-T064 Scenario 4: deprecated CAP with no verified-by is unprobed."""
+    docs, tests = tmp_docs_and_tests
+    _write_capabilities(
+        docs,
+        """
+## Business capabilities
+
+### CAP-001: Deprecated example
+- **type:** business
+- **status:** deprecated
+- **origin:** BC-999
+- **description:** fixture
+- **verified by:**
+""",
+    )
+
+    from poc.scripts.verify_traceability import run
+
+    rc = run(docs=docs, tests=tests)
+    assert rc == 0
