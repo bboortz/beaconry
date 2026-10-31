@@ -24,7 +24,7 @@ help:
 	@echo ""
 	@echo "Tiers:"
 	@echo "  make check         FAST TIER — all gates above (~7s)"
-	@echo "  make check-full    FULL TIER — check + pytest -m 'compose or real_tools' + make test-e2e (~1-2m)"
+	@echo "  make check-full    FULL TIER — check + pytest -m 'compose or real_tools' + make test-e2e + make test-scenarios (~1-2m)"
 	@echo ""
 	@echo "Operator CLIs:"
 	@echo "  make status                     one-line-per-service health table (BC-013)"
@@ -103,6 +103,9 @@ check-full: check
 	@echo ""
 	@echo "==> Full tier: running e2e stack (BC-017; brings up isolated compose project)"
 	$(MAKE) test-e2e
+	@echo ""
+	@echo "==> Full tier: running scenario harness (BC-038; isolated hub + 10 behavior scenarios)"
+	$(MAKE) test-scenarios
 	@echo ""
 	@echo "✓ Full tier (make check-full) passed"
 
