@@ -212,6 +212,16 @@ See per-decision review dates in `memory/`:
   priority: later (both are marginal; verdict in the trade-off discussion was "not worth the churn")
   Scope: scan — split per drift check if we add a 5th check and CC jumps above 15. parse_capabilities — swap to markdown-it-py if we ever add a new field or shape. Both are "touch when you have to" candidates.
 
+- **Surface KEV-alias context in notifications when a non-CVE primary is tier-0**
+  trigger: BC-028 audit 2026-10-31 — resolve of `GO-2023-1703` → `CVE-2023-44487` works at tier scoring but the Telegram body only shows the primary id. Operator sees `🚨 GO-2023-1703` with no connection to "oh, this is HTTP/2 Rapid Reset" that they've read about.
+  priority: later
+  Scope sketch: in `format_notification`, if `finding.kev` and primary looks like `GO-*`/`GHSA-*`, append a tiny second line: `<i>KEV via CVE-2023-44487</i>` (store the alias at ingest time; new `Finding.kev_cve_alias: str | None` field — DB migration + schema change).
+
+- **`make audit` CLI to view the audit log**
+  trigger: BC-029 shipped 2026-10-31 — log lands at `/data/audit.log` as JSONL. Operators have to `docker exec beaconry-hub tail -f /data/audit.log` to view. Adding a `make audit` would mirror `make findings` + `make status` ergonomics.
+  priority: later
+  Scope sketch: tiny Python module `poc/scripts/audit.py` wrapping `audit.read_events()` with `--limit N` + `--event <type>` filter + `--since <ts>` ranges. Compose-aware routing like `findings.py` (docker exec into running hub).
+
 ## Parking lot (ideas we discussed but likely won't do)
 
 - **`make demo` works with host-run telegram-mock (BC-018 Scenario 7's literal recipe)**

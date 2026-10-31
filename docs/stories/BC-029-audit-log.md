@@ -25,6 +25,37 @@ Operator wakes up to a Telegram notification: "✅ Fixed and verified — CVE-20
 
 Operator: `grep CVE-2023-44487 audit.log` → full timeline. `tail -f` during incident.
 
+## Acceptance criteria (Gherkin)
+
+```gherkin
+Feature: Append-only audit log
+
+  Scenario: Status transition appends one event
+    Given a finding with id "abc" exists in the DB
+    When hub.set_status("abc", "fixed") runs
+    Then /data/audit.log gains one line: {"event":"status_change","finding_id":"abc","status":"fixed","ts":N}
+
+  Scenario: New finding appends one event with KEV/tier fields
+    Given scout posts an SBOM producing a new KEV finding
+    When hub.save_finding(f) runs for a non-duplicate row
+    Then /data/audit.log gains one line with event="finding_ingested" + tier, kev, cvss, host, source_ref, cve_id
+
+  Scenario: Append-only invariant — nothing truncates the log
+    Given 3 successive status changes
+    Then audit.log has exactly 3 lines in order
+
+  Scenario: Fire-and-forget — IO failure is non-fatal
+    Given DATA_DIR points at an unwritable path
+    When audit.append runs
+    Then no exception is raised; a WARNING is logged
+    And scans continue uninterrupted
+
+  Scenario: read_events returns newest-first with limit
+    Given 10 events written in order a0..a9
+    When audit.read_events(limit=3) is called
+    Then it returns [a9, a8, a7] (newest-first)
+```
+
 ## Capabilities delivered
 
 - **CAP-T067: Append-only audit log of operator-visible state changes** (technical, active)

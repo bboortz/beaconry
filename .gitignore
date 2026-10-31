@@ -24,6 +24,9 @@ coverage.json
 htmlcov/
 .pyright/
 
+# BC-029 — audit log; written to DATA_DIR which can be .beaconry-cache locally
+audit.log
+
 # Environment / secrets
 .env
 .env.local
