@@ -137,6 +137,23 @@ def test_unreadable_cache_is_treated_as_unfetched(_isolated_kev_state: Path) -> 
     assert _kev.freshness()["kev"] == "unfetched"
 
 
+def test_empty_env_feed_url_falls_back_to_default(
+    _isolated_kev_state: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """BC-020 close-gap: docker-compose `${VAR:-}` propagates "" (not unset).
+    `os.environ.get(k, default)` returns "" not default — url opener dies with
+    'unknown url type'. Guard: empty-string env must fall back to DEFAULT_FEED_URL."""
+    import importlib
+
+    monkeypatch.setenv("BEACONRY_KEV_FEED_URL", "")
+    reloaded = importlib.reload(_kev)
+    try:
+        assert reloaded.FEED_URL == reloaded.DEFAULT_FEED_URL
+    finally:
+        monkeypatch.delenv("BEACONRY_KEV_FEED_URL", raising=False)
+        importlib.reload(_kev)
+
+
 async def test_fetch_failure_without_cache_is_noop_safe(
     _isolated_kev_state: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:

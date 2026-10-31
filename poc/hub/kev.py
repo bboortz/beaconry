@@ -28,7 +28,10 @@ log = logging.getLogger("hub.kev")
 DEFAULT_FEED_URL = (
     "https://www.cisa.gov/sites/default/files/feeds/known_exploited_vulnerabilities.json"
 )
-FEED_URL = os.environ.get("BEACONRY_KEV_FEED_URL", DEFAULT_FEED_URL)
+# `os.environ.get(VAR, default)` returns the empty string (not `default`) when
+# VAR is explicitly set to "". docker-compose's `${VAR:-}` expansion propagates
+# empty strings exactly that way. Use `or` to treat empty-string as unset.
+FEED_URL = os.environ.get("BEACONRY_KEV_FEED_URL") or DEFAULT_FEED_URL
 REFRESH_INTERVAL_S = 3600  # hourly
 STALE_THRESHOLD_S = 25 * 3600  # 25h — one missed daily publication + grace
 FETCH_TIMEOUT_S = 20
