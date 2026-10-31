@@ -211,6 +211,13 @@ See per-decision review dates in `memory/`:
 
 ---
 
+- **KEV lookup should resolve CVE aliases from grype's `related` field**
+  trigger: 2026-10-31 user noticed Go stdlib advisories (`GO-2023-1703`, `GO-2024-2887`) in a digest. CISA KEV uses CVE-* IDs only; `kev.is_known_exploited("GO-...")` always returns False. If a Go vuln is actively exploited, CISA assigns a CVE alias — grype's match output has a `related` list containing the CVE alias.
+  priority: later
+  Scope sketch: in `process_sbom_entry`, when `is_known_exploited(vuln["id"])` is False, iterate `vuln.get("related", [])` and recheck. Set `kev=True` if any alias matches. Preserve the original `cve_id` for display.
+  **The win**: non-CVE primary IDs (GO-*, GHSA-*) no longer silently miss KEV flagging when a CVE alias exists.
+  links: BC-020 (KEV lookup), grype's vulnerability match schema (`related` field).
+
 ## Parking lot (ideas we discussed but likely won't do)
 
 - **`make demo` works with host-run telegram-mock (BC-018 Scenario 7's literal recipe)**
