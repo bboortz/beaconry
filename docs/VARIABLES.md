@@ -40,7 +40,7 @@ See also:
 | `SCAN_INTERVAL` | `300` | int (s) | `poc/scout/scout.py` | How often scout polls the host inventory. Shorter = faster first-fire latency; longer = less CPU/network. | BC-002 |
 | `SCOUT_INCLUDE` | `nginx*,redis*,postgres*` | glob list | `poc/scout/scout.py` | Allowlist of image tags scout scans. Default is demo-safe; operators who want to scan everything on the host set `*`. Keeps the first-run finding count reasonable. | BC-005 |
 | `SCOUT_EXCLUDE` | *(empty)* | glob list | `poc/scout/scout.py` | Blocklist overlaid on `SCOUT_INCLUDE`. Lets operators keep a broad include glob while suppressing `*-test` / `*-dev` noise. | BC-005 |
-| `HOST_NAME` | `uname().nodename` | string | `poc/scout/scout.py` | Label shown in every Telegram notification and stored on each finding's `host` column. Operator wants a human-readable name (`homelab`), not the machine's auto-generated UUID-like hostname. | BC-002 |
+| `HOST_NAME` | uname().nodename | string | `poc/scout/scout.py` | Label shown in every Telegram notification and stored on each finding's `host` column. Operator wants a human-readable name (`homelab`), not the machine's auto-generated UUID-like hostname. | BC-002 |
 | `PACMAN_DB` | `/host/var/lib/pacman` | path | `poc/scout/scout.py` | Where the Arch Linux package DB is mounted inside the scout container. Non-Arch hosts leave it unset — scout logs a warning and skips the pacman source cleanly. | BC-004 |
 | `SCOUT_HTTP_PORT` | `8001` | int | `poc/scout/scout.py` | Port scout's FastAPI health server binds inside the container. Externalized so test-e2e and scenarios can run multiple scouts on different ports without collision. | BC-013 |
 

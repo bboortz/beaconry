@@ -1,9 +1,13 @@
 """BC-039 — env variable documentation drift lint.
+BC-040 — three-way sync (VARIABLES.md ↔ .env.example ↔ docker-compose.yml).
 
 Covers:
     - CAP-T084: `docs/VARIABLES.md` — single source of truth for runtime env variables
     - CAP-T085: `verify-variables` lint catches code↔doc drift bidirectionally
     - CAP-B023: Developer can review the entire variable surface without greping
+    - CAP-T086: Rewritten `.env.example` as the full operator catalog
+    - CAP-T087: Three-way lint — VARIABLES.md ↔ .env.example ↔ docker-compose.yml
+    - CAP-B024: Operator who copies `.env.example` gets every dial with correct defaults
 """
 
 from __future__ import annotations
@@ -258,9 +262,165 @@ def test_both_undocumented_and_orphan_in_one_run(tmp_path: Path) -> None:
 
 
 def test_shipped_repo_passes() -> None:
-    """CAP-T085 regression guard: the actual repo state must stay clean."""
+    """CAP-T085 + CAP-T087 regression guard: live repo stays clean across
+    the full three-way sync (code ↔ VARIABLES.md ↔ .env.example ↔ compose)."""
     repo_root = Path(__file__).resolve().parents[3]
     poc_root = repo_root / "poc"
     variables_md = repo_root / "docs" / "VARIABLES.md"
-    violations = vv.check(poc_root, variables_md)
-    assert violations == [], "VARIABLES.md drift:\n  " + "\n  ".join(violations)
+    env_example = repo_root / vv.ENV_EXAMPLE_RELPATH
+    compose_file = repo_root / vv.COMPOSE_FILE_RELPATH
+    violations = vv.check(
+        poc_root,
+        variables_md,
+        env_example=env_example,
+        compose_file=compose_file,
+    )
+    assert violations == [], "three-way drift:\n  " + "\n  ".join(violations)
+
+
+# ── BC-040: three-way-sync parsers ──────────────────────────────────────────
+
+
+def test_parse_env_example_strips_comments(tmp_path: Path) -> None:
+    env = tmp_path / ".env.example"
+    env.write_text(
+        "# header\n"
+        "\n"
+        "FOO=bar                          # some default | description\n"
+        "BAZ=                             # (empty) | desc\n"
+        "# commented out\n"
+        "# SHOULD_NOT_APPEAR=1\n"
+        "QUX=<placeholder>                # (required) | fill in\n"
+    )
+    result = vv.parse_env_example(env)
+    assert result == {"FOO": "bar", "BAZ": "", "QUX": "<placeholder>"}
+
+
+def test_parse_env_example_missing_file_returns_empty(tmp_path: Path) -> None:
+    assert vv.parse_env_example(tmp_path / "nope") == {}
+
+
+def test_parse_compose_environment_extracts_hub_and_scout(tmp_path: Path) -> None:
+    compose = tmp_path / "docker-compose.yml"
+    compose.write_text(
+        "services:\n"
+        "  hub:\n"
+        "    image: beaconry-hub\n"
+        "    environment:\n"
+        "      - BEACONRY_FOO=${BEACONRY_FOO:-1}\n"
+        "      - BEACONRY_BAR\n"
+        "    volumes:\n"
+        "      - data:/data\n"
+        "  scout:\n"
+        "    environment:\n"
+        "      - SCAN_INTERVAL=${SCAN_INTERVAL:-300}\n"
+    )
+    result = vv.parse_compose_environment(compose)
+    assert result == {
+        "hub": {"BEACONRY_FOO", "BEACONRY_BAR"},
+        "scout": {"SCAN_INTERVAL"},
+    }
+
+
+# ── BC-040: three-way check scenarios ───────────────────────────────────────
+
+
+def _make_full_env(tmp_path: Path, md_rows: list[str], env_lines: list[str]) -> tuple[Path, Path]:
+    md = _make_md(tmp_path, md_rows)
+    env = tmp_path / ".env.example"
+    env.write_text("\n".join(env_lines) + "\n")
+    return md, env
+
+
+def test_var_missing_from_env_example(tmp_path: Path) -> None:
+    md, env = _make_full_env(
+        tmp_path,
+        ["| `BEACONRY_ALPHA` | `1` | bool | poc/x.py | reason | BC-1 |"],
+        [],
+    )
+    src = _make_src(tmp_path, {"x": 'os.environ.get("BEACONRY_ALPHA")\n'})
+    violations = vv.check(src, md, env_example=env)
+    assert any("missing from" in v and "BEACONRY_ALPHA" in v for v in violations)
+
+
+def test_env_example_orphan(tmp_path: Path) -> None:
+    """A line in .env.example without a VARIABLES.md row must fail."""
+    md, env = _make_full_env(tmp_path, [], ["BEACONRY_TYPO=1"])
+    src = _make_src(tmp_path, {})
+    violations = vv.check(src, md, env_example=env)
+    assert any("no VARIABLES.md row" in v and "BEACONRY_TYPO" in v for v in violations)
+
+
+def test_default_mismatch_literal(tmp_path: Path) -> None:
+    md, env = _make_full_env(
+        tmp_path,
+        ["| `MIN_CVSS` | `7.0` | float | poc/hub/hub.py | reason | BC-1 |"],
+        ["MIN_CVSS=9.0"],
+    )
+    src = _make_src(tmp_path, {"x": 'os.environ.get("MIN_CVSS")\n'})
+    violations = vv.check(src, md, env_example=env)
+    assert any("default mismatch" in v and "7.0" in v and "9.0" in v for v in violations)
+
+
+def test_placeholder_skips_default_check(tmp_path: Path) -> None:
+    """`<from @BotFather>` is operator-filled; lint must not compare its value."""
+    md, env = _make_full_env(
+        tmp_path,
+        ["| `TELEGRAM_BOT_TOKEN` | *(empty)* | string | poc/hub/hub.py | token | BC-1 |"],
+        ["TELEGRAM_BOT_TOKEN=<from @BotFather>"],
+    )
+    src = _make_src(tmp_path, {"x": 'os.environ.get("TELEGRAM_BOT_TOKEN")\n'})
+    assert vv.check(src, md, env_example=env) == []
+
+
+def test_dev_only_allowlist_suppresses_env_example_check(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """Vars in ENV_EXAMPLE_DEV_ONLY_ALLOWLIST don't need to be in .env.example."""
+    monkeypatch.setattr(
+        vv, "ENV_EXAMPLE_DEV_ONLY_ALLOWLIST", {"BEACONRY_DEV_ONLY": "scenario harness"}
+    )
+    md, env = _make_full_env(
+        tmp_path,
+        ["| `BEACONRY_DEV_ONLY` | `1` | bool | poc/x.py | reason | BC-1 |"],
+        [],
+    )
+    src = _make_src(tmp_path, {"x": 'os.environ.get("BEACONRY_DEV_ONLY")\n'})
+    assert vv.check(src, md, env_example=env) == []
+
+
+def test_prose_defaults_match_loosely(tmp_path: Path) -> None:
+    """VARIABLES.md prose default (`*(empty)*`) matches whatever .env.example has."""
+    md, env = _make_full_env(
+        tmp_path,
+        ["| `BEACONRY_PROSE` | *(empty)* | string | poc/x.py | reason | BC-1 |"],
+        ["BEACONRY_PROSE="],
+    )
+    src = _make_src(tmp_path, {"x": 'os.environ.get("BEACONRY_PROSE")\n'})
+    assert vv.check(src, md, env_example=env) == []
+
+
+def test_compose_env_orphan(tmp_path: Path) -> None:
+    """Variable propagated via docker-compose.yml but no VARIABLES.md row."""
+    md = _make_md(tmp_path, [])  # empty VARIABLES.md
+    compose = tmp_path / "docker-compose.yml"
+    compose.write_text(
+        "services:\n"
+        "  hub:\n"
+        "    environment:\n"
+        "      - BEACONRY_COMPOSE_ONLY=${BEACONRY_COMPOSE_ONLY:-}\n"
+    )
+    src = _make_src(tmp_path, {})
+    violations = vv.check(src, md, compose_file=compose)
+    assert any("BEACONRY_COMPOSE_ONLY" in v and "no VARIABLES.md row" in v for v in violations)
+
+
+def test_normalize_default_extracts_first_backticked(tmp_path: Path) -> None:
+    assert vv._normalize_default("`604800` (7 d)") == "604800"
+    assert vv._normalize_default("`1` (default-on when unset)") == "1"
+    assert vv._normalize_default("*(empty)*") == ""
+    assert vv._normalize_default("<CISA upstream>") == ""
+    assert vv._normalize_default("CISA upstream") == ""
+    assert vv._normalize_default("uname().nodename") == ""
+    assert vv._normalize_default("`7.0`") == "7.0"
+    assert vv._normalize_default("") == ""

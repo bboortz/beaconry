@@ -1045,6 +1045,33 @@ Enforcement: `poc/scripts/verify_traceability.py` runs as part of `make check`. 
 - **verified by:**
   - `poc/tests/unit/test_verify_variables_documented.py`
 
+### CAP-B024: Operator who copies `.env.example` gets every dial with correct defaults
+- **type:** business
+- **status:** active
+- **origin:** BC-040 — pre-BC-040 `.env.example` carried 7 variables while `VARIABLES.md` had 32; operators never discovered BC-030/035/036 toggles unless they stumbled on a BC story
+- **description:** `poc/.env.example` now ships every runtime variable in the agreed format: `VAR=default # default | description`, grouped by concern (same groups as `VARIABLES.md`). Required credentials use angle-bracket placeholders (`<from @BotFather>`). Developer-only variables (`BEACONRY_TEST_MODE`, `BEACONRY_SCENARIO_*`) intentionally omitted via explicit allowlist with reason. Operator copies `.env.example → .env`, has every dial exposed with the shipped default pre-filled.
+- **supports:** CAP-B018, CAP-B023
+- **verified by:**
+  - `poc/tests/unit/test_verify_variables_documented.py`
+
+### CAP-T086: Rewritten `poc/.env.example` as the full operator catalog
+- **type:** technical
+- **status:** active
+- **origin:** BC-040
+- **description:** Flat shell-syntax file consumed by Compose + copyable to `.env`. Lines: `VAR=default` with aligned trailing `# default | description` comment. Groups delimited by `# ─── Group ───`. Angle-bracket placeholders (`<label>`) for required-no-default vars signal "operator must fill". Format mirrors operator's existing `.env` so copy/diff is intuitive.
+- **supports:** CAP-B024
+- **verified by:**
+  - `poc/tests/unit/test_verify_variables_documented.py`
+
+### CAP-T087: Three-way lint — VARIABLES.md ↔ .env.example ↔ docker-compose.yml
+- **type:** technical
+- **status:** active
+- **origin:** BC-040
+- **description:** Extends `verify_variables_documented.py` with four BC-040 checks: (5) VARIABLES.md row missing from `.env.example` (unless on `ENV_EXAMPLE_DEV_ONLY_ALLOWLIST`), (6) `.env.example` line not in VARIABLES.md, (7) compose `environment:` entry not in VARIABLES.md, (8) default-literal mismatch between VARIABLES.md and `.env.example`. Normalizer: VARIABLES.md defaults inside the FIRST backticked span (`` `604800` (7 d) `` → `604800`) are the only concrete literals compared; prose defaults (`*(empty)*`, `<CISA upstream>`, `uname().nodename`, `derived from BEACONRY_MOCK`) are skipped on equality. Angle-bracket values in `.env.example` are operator-fill, no equality check.
+- **supports:** CAP-B024
+- **verified by:**
+  - `poc/tests/unit/test_verify_variables_documented.py`
+
 ### CAP-T080: Digest cadence throttle with content-hash fallback
 - **type:** technical
 - **status:** active

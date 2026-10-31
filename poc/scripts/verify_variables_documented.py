@@ -190,19 +190,180 @@ _PLACEHOLDER_MARKERS: frozenset[str] = frozenset(
 # Minimum columns a well-formed row must have (default, type, where, reason, origin).
 _MIN_COLUMNS = 5
 
+# BC-040: variables that intentionally do NOT appear in `.env.example`.
+# Documented in VARIABLES.md (so they stay discoverable) but excluded from
+# the operator-facing starter file. Each entry needs a one-line reason.
+ENV_EXAMPLE_DEV_ONLY_ALLOWLIST: dict[str, str] = {
+    "BEACONRY_TEST_MODE": "DO NOT SET IN PROD — exposes destructive /test/* routes",
+    "BEACONRY_SCENARIO_HUB_URL": "scenario harness; only set by poc/scenarios/run.sh",
+    "BEACONRY_SCENARIO_DATA_DIR": "scenario harness; only set by poc/scenarios/run.sh",
+}
+
+# Where .env.example and docker-compose.yml live, relative to the repo root.
+ENV_EXAMPLE_RELPATH = Path("poc") / ".env.example"
+COMPOSE_FILE_RELPATH = Path("poc") / "docker-compose.yml"
+
+# Services whose `environment:` block we scan for VARIABLES.md coverage.
+# Keep tight — telegram-mock + sidecars might reference vars we don't own.
+COMPOSE_SERVICES_TO_SCAN: tuple[str, ...] = ("hub", "scout")
+
 
 def _emit_undocumented_template(var: str) -> str:
     return f"| `{var}` | *(default)* | *(type)* | *(service)* | *(one-line purpose)* | *(BC-NNN)* |"
 
 
-def check(poc_root: Path, variables_md: Path) -> list[str]:
+# ── BC-040: .env.example + docker-compose.yml parsers ──────────────────────
+
+
+_ENV_LINE_RE = re.compile(r"^\s*([A-Z][A-Z0-9_]*)\s*=\s*(.*?)\s*(?:#.*)?$")
+_ANGLE_PLACEHOLDER_RE = re.compile(r"^<[^>]+>$")
+
+
+def parse_env_example(path: Path) -> dict[str, str]:
+    """Return `{VAR: value}` from a .env.example-shaped file.
+
+    Rules:
+      - Lines starting with `#` are comments and skipped.
+      - Blank lines skipped.
+      - Trailing `# ...` comments on a line are stripped from the value.
+      - Values are returned as the raw literal after `=`, trimmed.
+    """
+    out: dict[str, str] = {}
+    if not path.exists():
+        return out
+    for raw_line in path.read_text().splitlines():
+        line = raw_line.rstrip("\n")
+        # Strip leading whitespace, skip comments + blank.
+        stripped = line.lstrip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        m = _ENV_LINE_RE.match(stripped)
+        if not m:
+            continue
+        name, value = m.group(1), m.group(2)
+        out[name] = value.strip()
+    return out
+
+
+_COMPOSE_ENV_LINE_RE = re.compile(r"^\s*-\s*([A-Z][A-Z0-9_]*)\s*(?:=|$)")
+
+
+def parse_compose_environment(
+    compose_path: Path, services: tuple[str, ...] = COMPOSE_SERVICES_TO_SCAN
+) -> dict[str, set[str]]:
+    """Return `{service: {VAR, ...}}` for each service's `environment:` list.
+
+    Regex-based: avoids a yaml dep (same reasoning as BC-011's parser).
+    Accepts both `- VAR=...` and bare `- VAR` forms. Comments ignored.
+    """
+    result: dict[str, set[str]] = {svc: set() for svc in services}
+    if not compose_path.exists():
+        return result
+
+    lines = compose_path.read_text().splitlines()
+    current_service: str | None = None
+    in_environment = False
+    current_indent: int | None = None
+
+    for raw in lines:
+        line = raw.rstrip()
+        stripped = line.lstrip()
+        if not stripped or stripped.startswith("#"):
+            continue
+        indent = len(line) - len(stripped)
+
+        # Service header: `  <name>:` at a known indent.
+        for svc in services:
+            if stripped == f"{svc}:" or stripped.startswith(f"{svc}:"):
+                current_service = svc
+                in_environment = False
+                current_indent = indent
+                break
+        else:
+            # Not a service header line. Detect `environment:` inside the
+            # current service's block, then collect vars until indent returns
+            # to the service level.
+            if current_service and current_indent is not None and indent > current_indent:
+                if stripped.startswith("environment:"):
+                    in_environment = True
+                    continue
+                if in_environment:
+                    # End of environment block = another key at same indent as
+                    # environment, i.e. not a `-` list item.
+                    if not stripped.startswith("-"):
+                        in_environment = False
+                        continue
+                    m = _COMPOSE_ENV_LINE_RE.match(stripped)
+                    if m:
+                        result[current_service].add(m.group(1))
+            else:
+                # Returned to or above service-header indent → service changed.
+                current_service = None
+                in_environment = False
+                current_indent = None
+    return result
+
+
+def _normalize_default(raw: str) -> str:
+    """Extract the comparable literal from a VARIABLES.md default cell.
+
+    Rules:
+      - Empty cell → "" (prose, skip equality).
+      - `*(…)*` italics (e.g. `*(empty)*`) → "" (prose).
+      - If the cell starts with a `` `backticked literal` `` — extract the
+        contents of the FIRST backticked span. Example: `` `604800` (7 d) ``
+        → `604800`. This is the authoritative shape going forward.
+      - Otherwise, raw prose (e.g. `CISA upstream`, `uname().nodename`,
+        `derived from BEACONRY_MOCK`) → "" (prose, skip equality).
+
+    The design intent: the ONLY way to express a concrete literal that the
+    lint compares to `.env.example` is to backtick-wrap it. Everything else
+    is prose and is skipped — `.env.example` can show whatever is useful to
+    the operator (`<nodename>`, empty, a derived marker).
+    """
+    s = raw.strip()
+    if not s:
+        return ""
+    # Italics prose like `*(empty)*`.
+    if s.startswith("*(") and s.endswith(")*"):
+        return ""
+    # Angle-bracket prose like `<CISA upstream>`.
+    if s.startswith("<") and s.endswith(">"):
+        return ""
+    # First backticked span wins — strict literal.
+    m = re.match(r"^`([^`]+)`", s)
+    if m:
+        return m.group(1).strip()
+    # No backticks → prose; skip the equality check.
+    return ""
+
+
+def _is_angle_placeholder(value: str) -> bool:
+    """`<from @BotFather>` → True. Operator must fill in; no equality check."""
+    return bool(_ANGLE_PLACEHOLDER_RE.match(value))
+
+
+def check(
+    poc_root: Path,
+    variables_md: Path,
+    *,
+    env_example: Path | None = None,
+    compose_file: Path | None = None,
+) -> list[str]:
     """Return a list of human-readable violation lines. Empty = clean.
 
-    Three failure modes:
+    BC-039 failure modes:
       1. Code reads a variable with no row → undocumented.
       2. Row exists but no code reads it → orphan.
       3. Row exists but one of its cells is still a `*(placeholder)*` or
          the row is too short → incomplete.
+      4. Row has a non-conforming variable name (not `^[A-Z][A-Z0-9_]*$`).
+
+    BC-040 failure modes (opt-in via env_example / compose_file):
+      5. VARIABLES.md row missing from `.env.example` (unless dev-only-allowlisted).
+      6. `.env.example` line not in VARIABLES.md.
+      7. compose `environment:` entry not in VARIABLES.md.
+      8. Default literal mismatch between VARIABLES.md and `.env.example`.
     """
     reads = scan_source_tree(poc_root)
     reads = {v for v in reads if v not in TEST_ONLY_ALLOWLIST}
@@ -248,6 +409,71 @@ def check(poc_root: Path, variables_md: Path) -> list[str]:
                     f"cell: `{cell}`. Replace it with the real value."
                 )
                 break
+
+    # BC-040 — three-way sync checks (only if the extra paths are provided).
+    if env_example is not None:
+        violations.extend(_check_env_example(rows, env_example))
+    if compose_file is not None:
+        violations.extend(_check_compose_env(rows, compose_file))
+    return violations
+
+
+def _check_env_example(rows: dict[str, list[str]], env_example: Path) -> list[str]:
+    """BC-040 checks 5, 6, 8 against `.env.example`."""
+    violations: list[str] = []
+    env_values = parse_env_example(env_example)
+
+    documented = set(rows.keys())
+    env_vars = set(env_values.keys())
+
+    # Rule 5: every VARIABLES.md row should appear in .env.example (minus allowlist).
+    for var in sorted(documented - env_vars - set(ENV_EXAMPLE_DEV_ONLY_ALLOWLIST)):
+        default_cell = rows[var][0] if rows[var] else ""
+        suggested = _normalize_default(default_cell) or ""
+        violations.append(
+            f"`{var}` is in VARIABLES.md but missing from `{env_example}`. "
+            f"Add a line (or allowlist in ENV_EXAMPLE_DEV_ONLY_ALLOWLIST):\n"
+            f"        {var}={suggested}             # {default_cell} | <description>"
+        )
+
+    # Rule 6: every .env.example line must be in VARIABLES.md.
+    for var in sorted(env_vars - documented):
+        violations.append(
+            f"`{var}` is in `{env_example}` but no VARIABLES.md row exists. "
+            f"Document it in VARIABLES.md first, then set the default in .env.example."
+        )
+
+    # Rule 8: default-literal mismatch.
+    for var in sorted(documented & env_vars):
+        md_default_cell = rows[var][0] if rows[var] else ""
+        md_default = _normalize_default(md_default_cell)
+        env_value = env_values[var]
+        # Skip if operator-filled placeholder.
+        if _is_angle_placeholder(env_value):
+            continue
+        # Skip if VARIABLES.md default is prose (we extracted "").
+        if md_default == "":
+            continue
+        # Both sides are concrete literals — require equality.
+        if md_default != env_value:
+            violations.append(
+                f"`{var}` default mismatch: VARIABLES.md says `{md_default_cell}`, "
+                f"`{env_example}` has `{env_value}`. Align both to the same literal."
+            )
+    return violations
+
+
+def _check_compose_env(rows: dict[str, list[str]], compose_file: Path) -> list[str]:
+    """BC-040 check 7 against docker-compose.yml."""
+    violations: list[str] = []
+    documented = set(rows.keys())
+    propagated = parse_compose_environment(compose_file)
+    for svc, env_vars in propagated.items():
+        for var in sorted(env_vars - documented):
+            violations.append(
+                f"`{var}` is propagated to `{svc}` in `{compose_file}` but no "
+                f"VARIABLES.md row exists. Document it in VARIABLES.md first."
+            )
     return violations
 
 
@@ -255,20 +481,30 @@ def main() -> int:
     repo_root = Path(__file__).resolve().parent.parent.parent
     poc_root = repo_root / "poc"
     variables_md = repo_root / "docs" / "VARIABLES.md"
+    env_example = repo_root / ENV_EXAMPLE_RELPATH
+    compose_file = repo_root / COMPOSE_FILE_RELPATH
     if not variables_md.exists():
         print(f"✗ {variables_md} missing — create it first.", file=sys.stderr)
         return 2
     if not poc_root.exists():
         print(f"✗ {poc_root} missing — are you in the repo root?", file=sys.stderr)
         return 2
-    violations = check(poc_root, variables_md)
+    violations = check(
+        poc_root,
+        variables_md,
+        env_example=env_example if env_example.exists() else None,
+        compose_file=compose_file if compose_file.exists() else None,
+    )
     if violations:
-        print(f"verify-variables: {len(violations)} violation(s) in `{variables_md}`:")
+        print(f"verify-variables: {len(violations)} violation(s):")
         for v in violations:
             print(f"    ✗ {v}")
         return 1
     rows = parse_variables_md_rows(variables_md)
-    print(f"✓ verify-variables: {len(rows)} variable(s) documented, no drift")
+    print(
+        f"✓ verify-variables: {len(rows)} variable(s) documented, "
+        f"no drift across VARIABLES.md ↔ .env.example ↔ docker-compose.yml"
+    )
     return 0
 
 
