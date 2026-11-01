@@ -926,12 +926,14 @@ def test_save_and_load_finding_round_trips_kev_flag(
 
 
 def test_format_notification_prepends_kev_header_for_tier_0() -> None:
-    """CAP-T060: Tier 0 findings get the "🚨 KEV — EXPLOITED IN THE WILD" header line."""
+    """CAP-T060: Tier 0 findings get the "🚨 KEV — EXPLOITED IN THE WILD" header line.
+    BC-057: a leading 🖥️ host-prefix line may precede it in multi-host inventories;
+    check against the first two lines so cross-test DB state doesn't break the
+    semantic contract."""
     f = _finding(tier=0, kev=True, cve_id="CVE-2026-9999", severity="High", cvss=7.5)
     body = hub.format_notification(f)
-    first_line = body.splitlines()[0]
-    assert "KEV" in first_line
-    assert "🚨" in first_line
+    header_candidates = body.splitlines()[:2]
+    assert any("KEV" in line and "🚨" in line for line in header_candidates), header_candidates
 
 
 def test_format_notification_omits_kev_header_for_non_tier_0() -> None:
@@ -941,12 +943,12 @@ def test_format_notification_omits_kev_header_for_non_tier_0() -> None:
 
 
 def test_format_notification_tier_1_marker() -> None:
-    """BC-030 CAP-T070: Tier 1 findings get the "🌐 INTERNET-FACING — Tier 1" header."""
+    """BC-030 CAP-T070: Tier 1 findings get the "🌐 INTERNET-FACING — Tier 1" header.
+    BC-057: a leading 🖥️ host-prefix line may precede it in multi-host inventories."""
     f = _finding(tier=1, internet_facing=True, cvss=9.5, kev=False)
     body = hub.format_notification(f)
-    first_line = body.splitlines()[0]
-    assert "INTERNET-FACING" in first_line
-    assert "🌐" in first_line
+    header_candidates = body.splitlines()[:2]
+    assert any("INTERNET-FACING" in line and "🌐" in line for line in header_candidates)
 
 
 def test_format_notification_tier_1_marker_absent_for_lan_only() -> None:
@@ -958,11 +960,12 @@ def test_format_notification_tier_1_marker_absent_for_lan_only() -> None:
 
 
 def test_format_notification_tier_0_wins_over_tier_1_marker() -> None:
-    """Tier 0 (KEV) wins — only the 🚨 KEV header fires, not the 🌐 Tier 1 one."""
+    """Tier 0 (KEV) wins — only the 🚨 KEV header fires, not the 🌐 Tier 1 one.
+    BC-057: 🖥️ host-prefix may precede it in multi-host; check first two lines."""
     f = _finding(tier=0, kev=True, internet_facing=True, cvss=9.5)
     body = hub.format_notification(f)
-    assert "KEV" in body.splitlines()[0]
-    # No separate Tier 1 header line should be rendered.
+    header_candidates = body.splitlines()[:2]
+    assert any("KEV" in line for line in header_candidates)
     assert "INTERNET-FACING" not in body
 
 

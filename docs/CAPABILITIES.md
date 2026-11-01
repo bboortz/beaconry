@@ -1246,3 +1246,30 @@ Enforcement: `poc/scripts/verify_traceability.py` runs as part of `make check`. 
 - **supports:** CAP-B039
 - **verified by:**
   - `poc/tests/integration/test_BC_056_install_doc.py`
+
+### CAP-B040: Operator with multiple scouts knows which host a notification came from
+- **type:** business
+- **status:** active
+- **origin:** BC-057 — operator's real environment runs ≥2 scouts (bb-82jq + server2); "where is this?" becomes the primary triage question.
+- **description:** Two paired changes: (1) `make findings HOST=<label>` filters DB rows to a single scout's findings, composing with existing STATUS filter. (2) When the hub has findings from ≥2 distinct hosts (detected at render time via `SELECT COUNT(DISTINCT host) FROM findings`), Telegram notifications prepend `🖥️ <code><host></code>` as the lead line above the KEV / internet-facing / severity rows. Single-host operators see zero change — the hub promotes the prefix automatically when a second scout starts posting.
+- **supports:** CAP-B023
+- **verified by:**
+  - `poc/tests/integration/test_BC_057_multi_host.py`
+
+### CAP-T113: `make findings HOST=` filter
+- **type:** technical
+- **status:** active
+- **origin:** BC-057
+- **description:** `poc/scripts/findings.py` grows a `--host` argparse flag; `load_findings(db, status=None, host=None)` composes host + status via AND in the SQL `WHERE`. The compose-container inline-script path accepts a parallel `##HOST_FILTER##` placeholder. The BC-055 HTTP path forwards `host=` as a query-string param. Makefile propagates `HOST=` through to `--host`.
+- **supports:** CAP-B040
+- **verified by:**
+  - `poc/tests/integration/test_BC_057_multi_host.py`
+
+### CAP-T114: Multi-host-aware notification lead line
+- **type:** technical
+- **status:** active
+- **origin:** BC-057
+- **description:** `is_multi_host_inventory()` runs a read-only sqlite query at notification time; `format_notification` prepends `🖥️ <code>host</code>` when True. No new env dial — the behavior switches automatically on inventory shape. Single-host operators never see the extra line (zero visual regression).
+- **supports:** CAP-B040
+- **verified by:**
+  - `poc/tests/integration/test_BC_057_multi_host.py`

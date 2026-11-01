@@ -687,6 +687,26 @@ def _severity_line(finding: Finding, emoji: str, esc) -> str:
     return f"{base} · <i>no CVE alias</i>"
 
 
+def is_multi_host_inventory() -> bool:
+    """BC-057: True when the findings table has ≥2 distinct host values.
+
+    Flips the notification lead from the severity line to a dedicated
+    host prefix so operators running multi-host scouts see "where is
+    this?" immediately. Zero visual regression for single-host operators.
+    """
+    if not DB_PATH.exists():
+        return False
+    try:
+        con = sqlite3.connect(f"file:{DB_PATH}?mode=ro", uri=True)
+        try:
+            row = con.execute("SELECT COUNT(DISTINCT host) FROM findings").fetchone()
+        finally:
+            con.close()
+    except sqlite3.Error:
+        return False
+    return bool(row and row[0] and row[0] > 1)
+
+
 def format_notification(finding: Finding) -> str:
     """Build the message body in Telegram HTML (parse_mode='HTML').
 
@@ -704,6 +724,10 @@ def format_notification(finding: Finding) -> str:
         return html.escape(s, quote=False)
 
     lines: list[str] = []
+    # BC-057: lead with host when the hub has findings from ≥2 distinct
+    # hosts. Single-host inventories keep today's format unchanged.
+    if is_multi_host_inventory():
+        lines.append(f"🖥️ <code>{esc(finding.host)}</code>")
     # BC-020: Tier 0 (KEV) gets a visually distinct header above the severity row.
     if finding.tier == 0:
         lines.append("🚨 <b>KEV — EXPLOITED IN THE WILD</b>")

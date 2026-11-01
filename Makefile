@@ -33,6 +33,7 @@ help:
 	@echo "  make status                     one-line-per-service health table (BC-013)"
 	@echo "  make findings                   read-only CLI view of findings DB"
 	@echo "                                  STATUS=regressed|open|verification_failed|snoozed|accepted|fixed|fixed_verified"
+	@echo "                                  HOST=<label>  filter to a single scout's findings (BC-057)"
 	@echo "                                  BEACONRY_FINDINGS_LOCAL=1 forces local .beaconry-cache DB over compose volume"
 	@echo "  make audit                      operator CLI view of /data/audit.log (BC-042)"
 	@echo "                                  LAST=N SINCE=1h EVENT=a,b CVE=X HOST=X FINDING=X COUNT=1 FOLLOW=1"
@@ -138,7 +139,7 @@ check-full: check
 	@echo "✓ Full tier (make check-full) passed"
 
 findings:
-	@$(PYTHON) -m poc.scripts.findings $(if $(STATUS),--status $(STATUS))
+	@$(PYTHON) -m poc.scripts.findings $(if $(STATUS),--status $(STATUS)) $(if $(HOST),--host $(HOST))
 
 # BC-042: operator view of audit.log with filters + compose-aware routing.
 # All filters propagate via env (LAST, SINCE, UNTIL, EVENT, CVE, HOST, FINDING,

@@ -94,7 +94,7 @@ def format_table(rows: list[dict]) -> str:
     return "\n".join([header, separator, *body_lines])
 
 
-def load_findings(db_path: Path, status: str | None = None) -> list[dict]:
+def load_findings(db_path: Path, status: str | None = None, host: str | None = None) -> list[dict]:
     if not db_path.exists():
         return []
     display_columns = [key for key, _, _ in COLUMNS]
@@ -108,10 +108,17 @@ def load_findings(db_path: Path, status: str | None = None) -> list[dict]:
         extra_cols = [c for c in SORT_ONLY_COLUMNS if c in schema_cols]
         selected = [*present_display, *extra_cols]
         sql = f"SELECT {', '.join(selected)} FROM findings"
-        params: tuple[str, ...] = ()
+        conds: list[str] = []
+        params_list: list[str] = []
         if status:
-            sql += " WHERE status = ?"
-            params = (status,)
+            conds.append("status = ?")
+            params_list.append(status)
+        if host:
+            conds.append("host = ?")
+            params_list.append(host)
+        if conds:
+            sql += " WHERE " + " AND ".join(conds)
+        params: tuple[str, ...] = tuple(params_list)
         rows = []
         for r in con.execute(sql, params).fetchall():
             row = dict(zip(selected, r, strict=True))
@@ -136,6 +143,9 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
         description="Read-only CLI view of the beaconry findings DB.",
     )
     p.add_argument("--status", choices=STATUS_ORDER, default=None)
+    # BC-057: filter by host so operators running multi-host scouts can
+    # focus on one source at a time (`make findings HOST=laptop`).
+    p.add_argument("--host", default=None, help="filter by host label (BC-057)")
     return p.parse_args(argv)
 
 
@@ -162,14 +172,14 @@ def _running_compose_hub() -> bool:
     return result.returncode == 0 and result.stdout.strip() == "true"
 
 
-def _run_in_container(args: list[str]) -> int:
+def _run_in_container(args: list[str], host: str | None = None) -> int:
     """Exec findings.py inside the running hub container; stream output to our stdout."""
     import subprocess
 
-    cmd = ["docker", "exec", HUB_CONTAINER, "python3", "-m", "scripts.findings", *args]
-    # In the container, poc/ is the WORKDIR under /app, and scripts.findings is `scripts`
-    # relative to that. But hub.py is COPY'd flat to /app, not under `poc/`. Simpler:
-    # just invoke findings.py as a path.
+    # BC-057: HOST filter needs its own placeholder in the inline script.
+    script = _INLINE_FINDINGS_SCRIPT.replace(
+        "##STATUS_FILTER##", repr(args[-1] if args else None)
+    ).replace("##HOST_FILTER##", repr(host))
     cmd = [
         "docker",
         "exec",
@@ -178,7 +188,7 @@ def _run_in_container(args: list[str]) -> int:
         HUB_CONTAINER,
         "python3",
         "-c",
-        _INLINE_FINDINGS_SCRIPT.replace("##STATUS_FILTER##", repr(args[-1] if args else None)),
+        script,
     ]
     return subprocess.run(cmd, check=False).returncode
 
@@ -194,17 +204,18 @@ db = '/data/beaconry.db'
 if not os.path.exists(db):
     print(f'No findings in {db} yet.'); sys.exit(0)
 status = ##STATUS_FILTER##
+host_filter = ##HOST_FILTER##
 con = sqlite3.connect(f'file:{db}?mode=ro', uri=True)
 cols = {r[1] for r in con.execute('PRAGMA table_info(findings)')}
 tier_sort = ', tier' if 'tier' in cols else ''
 kev_col = ', kev' if 'kev' in cols else ''
 if_col = ', internet_facing' if 'internet_facing' in cols else ''
 sql = f'SELECT cve_id,severity,cvss,host,source_ref,package,status{tier_sort}{kev_col}{if_col} FROM findings'
-if status:
-    sql += ' WHERE status=?'
-    rows = con.execute(sql, (status,)).fetchall()
-else:
-    rows = con.execute(sql).fetchall()
+conds, params = [], []
+if status: conds.append('status=?'); params.append(status)
+if host_filter: conds.append('host=?'); params.append(host_filter)
+if conds: sql += ' WHERE ' + ' AND '.join(conds)
+rows = con.execute(sql, tuple(params)).fetchall()
 if not rows:
     msg = f'No findings' + (f\" with status='{status}'\" if status else '') + f' in {db}.'
     print(msg); sys.exit(0)
@@ -230,15 +241,20 @@ for r in rows:
 """
 
 
-def _findings_via_http(cfg, status: str | None) -> int:  # type: ignore[no-untyped-def]
+def _findings_via_http(cfg, status: str | None, host: str | None = None) -> int:  # type: ignore[no-untyped-def]
     """BC-055 HTTP path for remote hubs. Returns the CLI exit code."""
     import urllib.parse
 
     from poc.scripts.cli_http import friendly_http_error, http_get
 
     url = cfg.hub_url.rstrip("/") + "/findings"
+    qs: dict[str, str] = {}
     if status:
-        url += "?" + urllib.parse.urlencode({"status": status})
+        qs["status"] = status
+    if host:
+        qs["host"] = host
+    if qs:
+        url += "?" + urllib.parse.urlencode(qs)
     try:
         rows = http_get(url, token=cfg.hub_token)
     except Exception as exc:  # noqa: BLE001 — single friendly line.
@@ -267,20 +283,25 @@ def main(argv: list[str] | None = None) -> int:
     )
 
     if source == "http":
-        return _findings_via_http(cfg, args.status)
+        return _findings_via_http(cfg, args.status, args.host)
 
     if source == "local-compose":
-        return _run_in_container([args.status] if args.status else [])
+        return _run_in_container([args.status] if args.status else [], host=args.host)
 
     data_dir = Path(os.environ.get("DATA_DIR", ".beaconry-cache"))
     db_path = data_dir / "beaconry.db"
-    rows = load_findings(db_path, status=args.status)
+    rows = load_findings(db_path, status=args.status, host=args.host)
     if not rows:
+        filter_desc = []
         if args.status:
-            print(f"No findings with status={args.status!r} in {db_path}.")
+            filter_desc.append(f"status={args.status!r}")
+        if args.host:
+            filter_desc.append(f"host={args.host!r}")
+        if filter_desc:
+            print(f"No findings with {' + '.join(filter_desc)} in {db_path}.")
         else:
             print(f"No findings in {db_path} yet.")
-        print("Run `make demo` first to populate the dev DB.")
+            print("Run `make demo` first to populate the dev DB.")
         return 0
     print(format_table(rows))
     return 0
