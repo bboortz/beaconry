@@ -44,5 +44,6 @@ One-line status board for operator scenarios. Full stories in `BC-NNN-<slug>.md`
 | BC-040 | Three-way env sync — VARIABLES.md ↔ .env.example ↔ docker-compose.yml | shipped     | — (merged to dev)                   |
 | BC-041 | verify-evidence-pointers reverse check | shipped     | — (merged to dev)                   |
 | BC-042 | `make audit` CLI + `scan_received` audit event | shipped     | — (merged to dev)                   |
+| BC-043 | CVE alias on non-CVE primary ids (KEV paper trail) | shipped     | — (merged to dev)                   |
 
 Lifecycle: `draft → ready → in-progress → shipped`. Status matches each story's frontmatter.

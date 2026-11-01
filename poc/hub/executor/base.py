@@ -22,6 +22,10 @@ class Finding:
     internet_facing: bool = (
         False  # BC-030: True if source_ref's running containers publish non-loopback ports
     )
+    # BC-043: when `cve_id` is non-CVE-shaped (GO-*, GHSA-*, AVG-*), the first
+    # CVE-shaped id grype provided in `relatedVulnerabilities`. Lets operators
+    # cross-reference NVD / GitHub advisories; carries the KEV paper trail.
+    cve_alias: str | None = None
 
 
 @dataclass

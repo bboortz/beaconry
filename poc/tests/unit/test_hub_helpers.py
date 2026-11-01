@@ -31,6 +31,7 @@ Covers:
     - CAP-T074: Notification body carries a fix-viability indicator
     - CAP-T075: Regression notification body shows `fixed in X`
     - CAP-T076: verify_fix scans the operator's actual source_ref (not hardcoded `:latest`)
+    - CAP-T092: Notification formatters surface cve_alias on non-CVE primaries (BC-043)
 """
 
 from __future__ import annotations
@@ -963,6 +964,100 @@ def test_format_notification_tier_0_wins_over_tier_1_marker() -> None:
     assert "KEV" in body.splitlines()[0]
     # No separate Tier 1 header line should be rendered.
     assert "INTERNET-FACING" not in body
+
+
+# ── BC-043: CVE alias on non-CVE primary ids ────────────────────────────────
+
+
+def test_pick_cve_alias_first_match() -> None:
+    assert (
+        hub._pick_cve_alias("GO-2026-6604", ["GHSA-xxxx", "CVE-2024-12345", "CVE-2023-99999"])
+        == "CVE-2024-12345"
+    )
+
+
+def test_pick_cve_alias_cve_primary_returns_none() -> None:
+    """When primary is already CVE-shaped, no alias is needed."""
+    assert hub._pick_cve_alias("CVE-2026-X", ["CVE-2024-OTHER"]) is None
+
+
+def test_pick_cve_alias_no_cve_in_related() -> None:
+    assert hub._pick_cve_alias("GO-2026-X", ["GHSA-xxxx", "GHSA-yyyy"]) is None
+
+
+def test_pick_cve_alias_empty_related() -> None:
+    assert hub._pick_cve_alias("GO-2026-X", []) is None
+
+
+def test_pick_cve_alias_case_insensitive_primary() -> None:
+    """Primary id check matches both CVE- and cve- (defensive)."""
+    assert hub._pick_cve_alias("cve-2026-x", ["CVE-OTHER"]) is None
+
+
+def test_severity_line_cve_primary() -> None:
+    """CVE primary → severity line unchanged (no `· alias` suffix)."""
+    f = _finding(cve_id="CVE-2026-XYZ", cve_alias=None)
+    body = hub.format_notification(f)
+    assert "CVE-2026-XYZ" in body
+    assert "no CVE alias" not in body
+    assert " · <code>" not in body  # no alias suffix
+
+
+def test_severity_line_non_cve_with_alias() -> None:
+    """Non-CVE primary + alias → severity line shows both inline."""
+    f = _finding(cve_id="GO-2026-6604", cve_alias="CVE-2024-12345")
+    body = hub.format_notification(f)
+    assert "GO-2026-6604" in body
+    assert "CVE-2024-12345" in body
+    assert "no CVE alias" not in body
+
+
+def test_severity_line_non_cve_no_alias() -> None:
+    """Non-CVE primary + no alias → severity line says 'no CVE alias'."""
+    f = _finding(cve_id="GO-2026-7777", cve_alias=None)
+    body = hub.format_notification(f)
+    assert "GO-2026-7777" in body
+    assert "no CVE alias" in body
+
+
+def test_format_notification_kev_non_cve_shows_via_alias() -> None:
+    """KEV + non-CVE primary → body has 'via <alias>' line under KEV header."""
+    f = _finding(tier=0, kev=True, cve_id="GO-2026-KEV", cve_alias="CVE-2024-REAL", cvss=7.5)
+    body = hub.format_notification(f)
+    assert "KEV — EXPLOITED IN THE WILD" in body
+    assert "via CVE-2024-REAL" in body
+
+
+def test_format_notification_kev_cve_primary_no_via_line() -> None:
+    """KEV + CVE primary → no 'via' line (header already shows the CVE)."""
+    f = _finding(tier=0, kev=True, cve_id="CVE-2024-DIRECT", cve_alias=None)
+    body = hub.format_notification(f)
+    assert "KEV — EXPLOITED IN THE WILD" in body
+    assert "via " not in body
+
+
+def test_format_regression_shows_alias() -> None:
+    """format_regression surfaces the alias for non-CVE primaries."""
+    f = _finding(cve_id="GO-2026-X", cve_alias="CVE-2024-REG")
+    body = hub.format_regression(f, last_fixed_ts=0)
+    assert "GO-2026-X" in body
+    assert "CVE-2024-REG" in body
+
+
+def test_format_regression_no_alias_explicit() -> None:
+    f = _finding(cve_id="GO-2026-X", cve_alias=None)
+    body = hub.format_regression(f, last_fixed_ts=0)
+    assert "no CVE alias" in body
+
+
+def test_format_heartbeat_shows_alias() -> None:
+    """format_heartbeat surfaces the alias for non-CVE primaries."""
+    import time as _t
+
+    f = _finding(cve_id="GO-2026-X", cve_alias="CVE-2024-HB")
+    body = hub.format_heartbeat(f, open_since_ts=int(_t.time()) - 10 * 86400)
+    assert "GO-2026-X" in body
+    assert "CVE-2024-HB" in body
 
 
 # ── BC-022: digest KEV awareness ─────────────────────────────────────────────

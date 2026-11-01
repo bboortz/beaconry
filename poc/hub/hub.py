@@ -184,7 +184,8 @@ def init_db() -> None:
             last_fixed_ts INTEGER DEFAULT 0,
             last_seen_ts INTEGER DEFAULT 0,
             last_notified_ts INTEGER DEFAULT 0,
-            internet_facing INTEGER DEFAULT 0
+            internet_facing INTEGER DEFAULT 0,
+            cve_alias TEXT
         )
     """)
     # Idempotent migrations for DBs created before each column existed.
@@ -231,6 +232,10 @@ def init_db() -> None:
     # legacy classifier assumed anyway.
     with contextlib.suppress(sqlite3.OperationalError):
         con.execute("ALTER TABLE findings ADD COLUMN internet_facing INTEGER DEFAULT 0")
+    # BC-043: CVE alias for non-CVE primary ids (NULL by default; no backfill
+    # because the related-id data isn't preserved in-schema for legacy rows).
+    with contextlib.suppress(sqlite3.OperationalError):
+        con.execute("ALTER TABLE findings ADD COLUMN cve_alias TEXT")
     # BC-036: digest cadence state — per-host last-sent + content hash. Separate
     # table (not a column on `findings`) because the state is per-host, not
     # per-finding.
@@ -256,8 +261,8 @@ def save_finding(f: Finding, *, now_ts: int | None = None) -> bool:
             """INSERT OR IGNORE INTO findings
                (id, host, cve_id, package, version, fixed_version, severity,
                 cvss, source_type, source_ref, description, found_at, tier, kev,
-                internet_facing, last_seen_ts, last_notified_ts)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                internet_facing, last_seen_ts, last_notified_ts, cve_alias)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (
                 f.id,
                 f.host,
@@ -283,6 +288,7 @@ def save_finding(f: Finding, *, now_ts: int | None = None) -> bool:
                 # robust across both.
                 ts,
                 ts,
+                f.cve_alias,  # BC-043
             ),
         )
         new_row = con.execute("SELECT changes()").fetchone()[0] > 0
@@ -301,6 +307,7 @@ def save_finding(f: Finding, *, now_ts: int | None = None) -> bool:
             kev=f.kev,
             cvss=f.cvss,
             internet_facing=f.internet_facing,  # BC-030
+            cve_alias=f.cve_alias,  # BC-043
         )
     return new_row
 
@@ -309,16 +316,22 @@ def load_finding(finding_id: str) -> Finding | None:
     con = sqlite3.connect(DB_PATH)
     row = con.execute(
         "SELECT id,host,cve_id,package,version,fixed_version,severity,"
-        "cvss,source_type,source_ref,description,tier,kev,internet_facing "
+        "cvss,source_type,source_ref,description,tier,kev,internet_facing,"
+        "cve_alias "
         "FROM findings WHERE id=?",
         (finding_id,),
     ).fetchone()
     con.close()
     if row is None:
         return None
-    # Last two columns (kev, internet_facing) are INTEGER in SQLite; coerce to bool.
-    *head, kev_int, if_int = row
-    return Finding(*head, kev=bool(kev_int), internet_facing=bool(if_int))
+    # Trailing INTEGER columns coerce to bool; cve_alias passes through (may be None).
+    *head, kev_int, if_int, cve_alias = row
+    return Finding(
+        *head,
+        kev=bool(kev_int),
+        internet_facing=bool(if_int),
+        cve_alias=cve_alias,
+    )
 
 
 def set_status(finding_id: str, status: str) -> None:
@@ -505,6 +518,20 @@ def make_id(host: str, cve_id: str, source_ref: str, package: str) -> str:
     return hashlib.sha256(key.encode()).hexdigest()[:16]
 
 
+def _pick_cve_alias(primary_id: str, related_ids: list[str]) -> str | None:
+    """BC-043: pick the first CVE-shaped id from `related_ids`.
+
+    Returns None if primary IS a CVE (no alias needed) OR if no related id
+    is CVE-shaped. First-match wins — grype's related order is stable.
+    """
+    if primary_id.upper().startswith("CVE-"):
+        return None
+    for rid in related_ids:
+        if rid and rid.upper().startswith("CVE-"):
+            return rid
+    return None
+
+
 async def process_sbom_entry(
     entry: dict,
     host: str,
@@ -552,6 +579,11 @@ async def process_sbom_entry(
         is_internet_facing = INTERNET_FACING_DETECTION_ENABLED and bool(
             port_exposure.get(source_ref, False)
         )
+        # BC-043: resolve the CVE alias from `relatedVulnerabilities` for
+        # non-CVE primary ids (`GO-*`, `GHSA-*`, …). Lets operators cross-
+        # reference NVD / GitHub advisories AND makes the KEV paper trail
+        # visible when primary is non-CVE.
+        cve_alias = _pick_cve_alias(cve_id, related_ids)
         # Build a provisional finding so classify_tier gets the real CVSS/severity.
         f = Finding(
             id=make_id(host, cve_id, source_ref, artifact.get("name", "")),
@@ -567,6 +599,7 @@ async def process_sbom_entry(
             description=(vuln.get("description") or "")[:200],
             kev=is_kev,
             internet_facing=is_internet_facing,
+            cve_alias=cve_alias,
         )
         # BC-020 + BC-030: wire the urgency ladder with real internet_facing.
         # KEV presence trumps everything per the Tier 0 rule.
@@ -633,6 +666,26 @@ async def verify_fix(finding: Finding) -> bool:
 # ── Telegram ──────────────────────────────────────────────────────────────────
 
 
+def _severity_line(finding: Finding, emoji: str, esc) -> str:
+    """BC-043: single-source severity line used by all three format functions.
+
+    Shape:
+        CVE primary                → `🔴 Critical — CVE-2026-X`
+        Non-CVE primary + alias    → `🔴 Critical — GO-2026-X · CVE-2024-Y`
+        Non-CVE primary + no alias → `🔴 Critical — GO-2026-X · no CVE alias`
+
+    Keeps the pre-BC-043 `<b>Critical — <id></b>` bolding for the primary
+    so existing tests that assert on the bold run keep passing; the alias
+    suffix lives outside the bold.
+    """
+    base = f"{emoji} <b>{esc(finding.severity)} — {esc(finding.cve_id)}</b>"
+    if finding.cve_id.upper().startswith("CVE-"):
+        return base
+    if finding.cve_alias:
+        return f"{base} · <code>{esc(finding.cve_alias)}</code>"
+    return f"{base} · <i>no CVE alias</i>"
+
+
 def format_notification(finding: Finding) -> str:
     """Build the message body in Telegram HTML (parse_mode='HTML').
 
@@ -653,13 +706,17 @@ def format_notification(finding: Finding) -> str:
     # BC-020: Tier 0 (KEV) gets a visually distinct header above the severity row.
     if finding.tier == 0:
         lines.append("🚨 <b>KEV — EXPLOITED IN THE WILD</b>")
+        # BC-043: when the primary is non-CVE, surface the alias prominently
+        # under the KEV header so the CISA paper trail is unmissable.
+        if finding.cve_alias and not finding.cve_id.upper().startswith("CVE-"):
+            lines.append(f"<i>via {esc(finding.cve_alias)}</i>")
     # BC-030: Tier 1 (CVSS≥9 + internet-facing) gets its own header. Falls
     # below KEV so operator still sees the strongest signal first on Tier 0 rows.
     if finding.tier == 1:
         lines.append("🌐 <b>INTERNET-FACING — Tier 1</b>")
     lines.extend(
         [
-            f"{emoji} <b>{esc(finding.severity)} — {esc(finding.cve_id)}</b>",
+            _severity_line(finding, emoji, esc),
             f"CVSS: <code>{finding.cvss:.1f}</code> · Host: <code>{esc(finding.host)}</code>",
             f"Target: <code>{esc(finding.source_ref)}</code> ({esc(finding.source_type)})",
             _package_fix_line(finding, esc),
@@ -783,9 +840,17 @@ def format_regression(finding: Finding, last_fixed_ts: int) -> str:
         if last_fixed_ts
         else "unknown"
     )
+    # BC-043: for non-CVE primaries, include the alias (or "no CVE alias")
+    # in the loud regression header so the paper trail is visible on reappear.
+    primary_display = f"<b>{esc(finding.cve_id)}</b>"
+    if not finding.cve_id.upper().startswith("CVE-"):
+        if finding.cve_alias:
+            primary_display += f" · <code>{esc(finding.cve_alias)}</code>"
+        else:
+            primary_display += " · <i>no CVE alias</i>"
     lines = [
         "🔥 <b>FIX REGRESSED</b>",
-        f"<b>{esc(finding.cve_id)}</b> is back after being fixed on <code>{fixed_date}</code>.",
+        f"{primary_display} is back after being fixed on <code>{fixed_date}</code>.",
         f"Target: <code>{esc(finding.source_ref)}</code> ({esc(finding.source_type)})",
         # BC-032: show the fixed version AND the viability assessment so the
         # operator can tell whether 🔧 Re-fix will actually help or will loop.
@@ -823,9 +888,11 @@ def format_heartbeat(finding: Finding, open_since_ts: int) -> str:
     ]
     if finding.tier == 0:
         lines.append("🚨 <b>KEV — EXPLOITED IN THE WILD</b>")
+        if finding.cve_alias and not finding.cve_id.upper().startswith("CVE-"):
+            lines.append(f"<i>via {esc(finding.cve_alias)}</i>")
     lines.extend(
         [
-            f"{emoji} <b>{esc(finding.severity)} — {esc(finding.cve_id)}</b>",
+            _severity_line(finding, emoji, esc),  # BC-043
             f"CVSS: <code>{finding.cvss:.1f}</code> · Host: <code>{esc(finding.host)}</code>",
             f"Target: <code>{esc(finding.source_ref)}</code> ({esc(finding.source_type)})",
             _package_fix_line(finding, esc),

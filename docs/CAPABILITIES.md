@@ -1118,6 +1118,35 @@ Enforcement: `poc/scripts/verify_traceability.py` runs as part of `make check`. 
 - **verified by:**
   - `poc/tests/integration/test_BC_042_make_audit_cli.py`
 
+### CAP-B027: Operator always has a CVE paper trail for non-CVE primary findings
+- **type:** business
+- **status:** active
+- **origin:** BC-043 — operator opens a KEV Telegram ping for `GO-2026-6604` and can't tell which CVE id made CISA care; same gap applies to non-KEV findings on `GO-*`/`GHSA-*` primaries that an operator wants to cross-reference against NVD or GitHub advisories
+- **description:** Every finding resolves an optional `cve_alias` from grype's `relatedVulnerabilities[]` at ingest. Non-CVE primary ids (`GO-*`, `GHSA-*`, `AVG-*`) display the alias inline (`GO-2026-6604 · CVE-2024-12345`) OR explicitly state `no CVE alias` when none exists. KEV findings with non-CVE primaries additionally render a `via <alias>` line under the 🚨 KEV header so the CISA paper trail is unmissable. Audit event `finding_ingested` carries `cve_alias` for forensic chain.
+- **supports:** CAP-B019
+- **verified by:**
+  - `poc/tests/integration/test_BC_043_kev_cve_alias.py`
+
+### CAP-T091: `Finding.cve_alias` field + DB migration + round-trip
+- **type:** technical
+- **status:** active
+- **origin:** BC-043
+- **description:** `Finding.cve_alias: str | None` populated at ingest by `_pick_cve_alias(primary, related_ids)` — returns the first CVE-shaped id in `related_ids` when primary isn't CVE-shaped, None otherwise. Idempotent `ALTER TABLE findings ADD COLUMN cve_alias TEXT` in `init_db`. `save_finding` + `load_finding` round-trip; legacy pre-BC-043 rows load with `cve_alias=None`.
+- **supports:** CAP-B027
+- **verified by:**
+  - `poc/tests/unit/test_kev_alias_persistence.py`
+  - `poc/tests/integration/test_BC_043_kev_cve_alias.py`
+
+### CAP-T092: Notification formatters surface the alias on non-CVE primaries
+- **type:** technical
+- **status:** active
+- **origin:** BC-043
+- **description:** Shared `_severity_line(finding, emoji, esc)` helper used by `format_notification`, `format_regression`, `format_heartbeat`. Preserves the pre-BC-043 bold `<b>severity — primary</b>` for CVE primaries; appends `· <code>cve_alias</code>` for non-CVE+alias; appends `· <i>no CVE alias</i>` for non-CVE+no-alias. KEV header gains a `via <alias>` line when primary is non-CVE so the paper trail reads top-to-bottom.
+- **supports:** CAP-B027
+- **verified by:**
+  - `poc/tests/unit/test_hub_helpers.py`
+  - `poc/tests/integration/test_BC_043_kev_cve_alias.py`
+
 ### CAP-T080: Digest cadence throttle with content-hash fallback
 - **type:** technical
 - **status:** active
