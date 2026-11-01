@@ -1228,3 +1228,21 @@ Enforcement: `poc/scripts/verify_traceability.py` runs as part of `make check`. 
 - **supports:** CAP-B038
 - **verified by:**
   - `poc/tests/integration/test_BC_055_http_cli.py`
+
+### CAP-B039: Homelab operator installs beaconry via Ansible with safe credentials handling
+- **type:** business
+- **status:** active
+- **origin:** BC-056 — homelab key user asked for an authoritative install guide covering Ansible + credentials guidance, built on BC-055's short-name + split-token conventions.
+- **description:** `docs/INSTALL.md` is the authoritative install guide: Prerequisites → Quick-start single-host → Multi-host (Tailscale) → Operator CLI → Ansible → Credentials → Verification → Troubleshooting. The Ansible section ships a copyable role tree (`beaconry_hub` + `beaconry_scout`), a complete playbook using `community.docker`, and a Vault example that scopes the three secret tokens (`telegram_bot_token`, `hub_scout_token`, `hub_cli_token`). The Credentials section enumerates three safe places (`.env` 0600, Ansible Vault, systemd `EnvironmentFile=`) and explicitly says tokens must never be committed to git. The up-front banner repeats the rule so operators who skim see it before any step.
+- **supports:** CAP-B023
+- **verified by:**
+  - `poc/tests/integration/test_BC_056_install_doc.py`
+
+### CAP-T112: `verify-install-doc` drift lint
+- **type:** technical
+- **status:** active
+- **origin:** BC-056
+- **description:** `poc/scripts/verify_install_doc.py` runs three checks against `docs/INSTALL.md`: (1) every backticked uppercase-identifier shaped like an env var must have a row in `docs/VARIABLES.md`; (2) every `make <target>` referenced must appear in Makefile `.PHONY:`; (3) every `poc/…` or `docs/…` path mentioned must exist on disk. Install-destination paths (`/etc/…`, `~/…`) and `roles/…` Ansible-example paths are definitionally not in the repo and are ignored. Wired into `make check`.
+- **supports:** CAP-B039
+- **verified by:**
+  - `poc/tests/integration/test_BC_056_install_doc.py`

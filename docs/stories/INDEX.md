@@ -49,3 +49,5 @@ One-line status board for operator scenarios. Full stories in `BC-NNN-<slug>.md`
 
 Lifecycle: `draft → ready → in-progress → shipped`. Status matches each story's frontmatter.
 | BC-055 | HTTP-only CLI → hub (laptop manages hetzner-staging; split scout/CLI tokens) | shipped     | branch `feat/BC-055-multi-host-deploy`     |
+| BC-055 | HTTP-only CLI → hub (laptop manages hetzner-staging; split scout/CLI tokens) | shipped     | — (merged to dev)                   |
+| BC-056 | INSTALL.md + verify-install-doc (short-name reshape) | shipped     | branch `feat/BC-056-install-doc`     |
