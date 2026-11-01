@@ -1147,6 +1147,24 @@ Enforcement: `poc/scripts/verify_traceability.py` runs as part of `make check`. 
   - `poc/tests/unit/test_hub_helpers.py`
   - `poc/tests/integration/test_BC_043_kev_cve_alias.py`
 
+### CAP-B028: Operator confidence in CLI output after any PR
+- **type:** business
+- **status:** active
+- **origin:** BC-044 — three live-only bugs in two weeks (BC-030 Dockerfile COPY, BC-035 import scope, BC-042 FOLLOW buffering) reached production state before manual exercise caught them
+- **description:** `make test-cli` runs 10 non-destructive scenarios against the live stack, each asserting a specific operator-visible contract (column presence, exit code semantics, formatted-vs-raw-JSON output, idempotence). Three scenarios are explicit regression guards for the live-only bugs that motivated the story: scenario 05 (bad SINCE must exit 2 cleanly, no traceback), scenario 06 (FOLLOW emits the TIME header through pipes), scenario 10 (hub container can `import notifiers`).
+- **supports:** CAP-B018
+- **verified by:**
+  - `poc/tests/unit/test_cli_smoke_scenarios.py`
+
+### CAP-T093: `make test-cli` live-smoke harness
+- **type:** technical
+- **status:** active
+- **origin:** BC-044
+- **description:** `poc/scripts/cli_smoke.py` mirrors BC-038's scenario pattern — ABC `CliScenario` + explicit registry + Make target. Each scenario invokes a real `make <target>` via subprocess, asserts on stdout/stderr/returncode. Fast-fails with "run `make live-rebuild` first" if `beaconry-hub` isn't up. Opt-out: `BEACONRY_SKIP_CLI_SMOKE=1`. Wired into `make check-full` so CI catches the regression class pre-merge. Scenarios include FOLLOW-formatted-output check, bad-SINCE clean-error check, and in-container `import notifiers` check.
+- **supports:** CAP-B028
+- **verified by:**
+  - `poc/tests/unit/test_cli_smoke_scenarios.py`
+
 ### CAP-T080: Digest cadence throttle with content-hash fallback
 - **type:** technical
 - **status:** active

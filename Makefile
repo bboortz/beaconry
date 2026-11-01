@@ -1,4 +1,4 @@
-.PHONY: help lint format type test check check-full demo smoke clean install-hooks verify-traceability verify-dockerfile-health-copy verify-dockerfile-sources verify-memory-drift verify-compose-env-propagation verify-docs-drift verify-evidence-pointers verify-per-file-coverage verify-variables findings status audit test-e2e live-rebuild live-status scan test-scenarios
+.PHONY: help lint format type test check check-full demo smoke clean install-hooks verify-traceability verify-dockerfile-health-copy verify-dockerfile-sources verify-memory-drift verify-compose-env-propagation verify-docs-drift verify-evidence-pointers verify-per-file-coverage verify-variables findings status audit test-e2e live-rebuild live-status scan test-scenarios test-cli
 
 PYTHON ?= python3
 PYTEST_ARGS ?=
@@ -25,9 +25,10 @@ help:
 	@echo ""
 	@echo "Tiers:"
 	@echo "  make check         FAST TIER — all gates above (~7s)"
-	@echo "  make check-full    FULL TIER — check + pytest -m 'compose or real_tools' + make test-e2e + make test-scenarios (~1-2m)"
+	@echo "  make check-full    FULL TIER — check + opt-in markers + make test-e2e + make test-scenarios + make test-cli (~1-2m)"
 	@echo ""
 	@echo "Operator CLIs:"
+	@: # BC-044 BEGIN OPERATOR_CLI_TARGETS — authoritative list the live-smoke harness autodetects.
 	@echo "  make status                     one-line-per-service health table (BC-013)"
 	@echo "  make findings                   read-only CLI view of findings DB"
 	@echo "                                  STATUS=regressed|open|verification_failed|snoozed|accepted|fixed|fixed_verified"
@@ -36,8 +37,11 @@ help:
 	@echo "                                  LAST=N SINCE=1h EVENT=a,b CVE=X HOST=X FINDING=X COUNT=1 FOLLOW=1"
 	@echo "  make scan                       trigger an immediate scout scan (BC-037)"
 	@echo "                                  bypasses SCAN_INTERVAL — useful after an out-of-band fix"
+	@: # BC-044 END OPERATOR_CLI_TARGETS
 	@echo "  make test-scenarios             run live-stack behavior scenarios (BC-038)"
 	@echo "                                  spins up isolated hub w/ BEACONRY_TEST_MODE=1 and runs 10 scenarios"
+	@echo "  make test-cli                   live-smoke operator CLIs against the running stack (BC-044)"
+	@echo "                                  requires live-rebuild first; set BEACONRY_SKIP_CLI_SMOKE=1 to opt out"
 	@echo ""
 	@echo "Demo:"
 	@echo "  make demo                       docker compose up (real pipeline, host inventory)"
@@ -120,6 +124,9 @@ check-full: check
 	@echo "==> Full tier: running scenario harness (BC-038; isolated hub + 10 behavior scenarios)"
 	$(MAKE) test-scenarios
 	@echo ""
+	@echo "==> Full tier: running CLI-smoke harness (BC-044; against live stack; BEACONRY_SKIP_CLI_SMOKE=1 to opt out)"
+	$(MAKE) test-cli
+	@echo ""
 	@echo "✓ Full tier (make check-full) passed"
 
 findings:
@@ -155,6 +162,14 @@ scan:
 # BCs, tears down. See `poc/scenarios/run.sh`.
 test-scenarios:
 	bash poc/scenarios/run.sh
+
+# BC-044: live-smoke operator CLI harness. Non-destructive scenarios against
+# the running stack — catches the class of bug (Dockerfile COPY omissions,
+# docker-exec inline-script bugs, output buffering) that unit tests miss.
+# BEACONRY_SKIP_CLI_SMOKE=1 is the escape hatch for environments without
+# a running stack.
+test-cli:
+	@$(PYTHON) -m poc.scripts.cli_smoke
 
 demo:
 	@if [ "$$BEACONRY_MOCK" = "1" ]; then \

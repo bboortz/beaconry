@@ -121,4 +121,10 @@ See also:
 | `BEACONRY_SCENARIO_HUB_URL` | `http://127.0.0.1:8004` | URL | `poc/scenarios/__main__.py` | Base URL the scenario runner POSTs to. Overridable so a developer can target an already-running test-mode hub (e.g. hand-debugged with breakpoints) instead of the compose project the shell wrapper boots. | BC-038 |
 | `BEACONRY_SCENARIO_DATA_DIR` | `/tmp/beaconry-scenarios` | path | `poc/scenarios/__main__.py` | Shared `DATA_DIR` mounted into the scenario hub container; the runner reads SQLite + audit directly from the host side. Overridable for parallel runs on CI runners. | BC-038 |
 
+## Live-smoke CLI harness
+
+| Variable | Default | Type | Where read | Reason | Origin |
+|---|---|---|---|---|---|
+| `BEACONRY_SKIP_CLI_SMOKE` | *(empty)* | bool (`0`/`1`) | `poc/scripts/cli_smoke.py` | Opt out of the live-stack CLI smoke harness. Needed on CI runners without a privileged Docker daemon, dev laptops without the stack booted, or when the BC-038 scenario stack owns the hub container (double-boot avoidance). Any non-empty value → the gate exits 0 with "skipped per env". | BC-044 |
+
 <!-- BC-039 END VARIABLES TABLE -->

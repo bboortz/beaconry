@@ -45,6 +45,13 @@ ALLOWLIST: dict[str, tuple[float, str]] = {
         "CLI entry glue (argparse + pass/fail reporter); exercised end-to-end "
         "by `make test-scenarios` and the in-process integration test.",
     ),
+    "poc/scripts/cli_smoke.py": (
+        50.0,
+        "Live-smoke scenarios shell out to the real `make` targets against the "
+        "running stack — not reachable from unit tests. Parsers + runner glue + "
+        "stack-detection are unit-tested; scenario bodies are exercised by "
+        "`make test-cli` in check-full.",
+    ),
 }
 
 

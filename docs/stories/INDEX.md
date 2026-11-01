@@ -45,5 +45,6 @@ One-line status board for operator scenarios. Full stories in `BC-NNN-<slug>.md`
 | BC-041 | verify-evidence-pointers reverse check | shipped     | — (merged to dev)                   |
 | BC-042 | `make audit` CLI + `scan_received` audit event | shipped     | — (merged to dev)                   |
 | BC-043 | CVE alias on non-CVE primary ids (KEV paper trail) | shipped     | — (merged to dev)                   |
+| BC-044 | Live-smoke CLI harness (`make test-cli`) | shipped     | — (merged to dev)                   |
 
 Lifecycle: `draft → ready → in-progress → shipped`. Status matches each story's frontmatter.
