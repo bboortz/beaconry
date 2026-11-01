@@ -91,6 +91,18 @@ def test_filter_by_cve_id() -> None:
     assert a.apply_filters(events, cve_id="CVE-X") == [_ev(cve_id="CVE-X")]
 
 
+def test_filter_by_cve_id_matches_cve_alias() -> None:
+    """BC-043: CVE filter also matches `cve_alias` so `make audit CVE=X`
+    works on non-CVE primary findings whose alias is X."""
+    events = [
+        _ev(cve_id="GO-2026-6604", cve_alias="CVE-2024-12345"),
+        _ev(cve_id="GO-2026-7777"),
+        _ev(cve_id="CVE-2024-12345"),
+    ]
+    result = a.apply_filters(events, cve_id="CVE-2024-12345")
+    assert len(result) == 2
+
+
 def test_filter_by_finding_id() -> None:
     events = [_ev(finding_id="abc"), _ev(finding_id="def"), _ev()]
     assert a.apply_filters(events, finding_id="abc") == [_ev(finding_id="abc")]
@@ -111,7 +123,7 @@ def test_filters_and_together() -> None:
 
 def test_enrich_event_resolves_finding_id() -> None:
     e = _ev(event="status_change", finding_id="abc")
-    lookup = {"abc": ("CVE-FOO", "h1")}
+    lookup: dict[str, tuple[str, str, str | None]] = {"abc": ("CVE-FOO", "h1", None)}
     a.enrich_event(e, lookup)
     assert e["cve_id"] == "CVE-FOO"
     assert e["host"] == "h1"
@@ -127,9 +139,19 @@ def test_enrich_event_does_not_overwrite() -> None:
     """Events that carry their own cve_id (e.g. heartbeat_reminder_sent) must
     not be overwritten by the DB lookup."""
     e = _ev(event="heartbeat_reminder_sent", finding_id="abc", cve_id="CVE-ORIGINAL")
-    lookup = {"abc": ("CVE-DB-DIFFERENT", "h1")}
+    lookup: dict[str, tuple[str, str, str | None]] = {"abc": ("CVE-DB-DIFFERENT", "h1", None)}
     a.enrich_event(e, lookup)
     assert e["cve_id"] == "CVE-ORIGINAL"
+
+
+def test_enrich_event_populates_cve_alias() -> None:
+    """BC-043: when the DB row has `cve_alias`, enrichment copies it onto
+    the event so the CVE filter can match via alias."""
+    e = _ev(event="status_change", finding_id="abc")
+    lookup: dict[str, tuple[str, str, str | None]] = {"abc": ("GO-2026-X", "h1", "CVE-2024-REAL")}
+    a.enrich_event(e, lookup)
+    assert e["cve_id"] == "GO-2026-X"
+    assert e["cve_alias"] == "CVE-2024-REAL"
 
 
 # ── Formatting ──────────────────────────────────────────────────────────────

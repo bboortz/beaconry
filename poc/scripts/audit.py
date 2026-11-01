@@ -136,28 +136,47 @@ def read_audit_log(path: Path) -> list[dict]:
 # ── DB cross-reference (finding_id → cve_id, host) ──────────────────────────
 
 
-def load_finding_lookup(db_path: Path) -> dict[str, tuple[str, str]]:
-    """Return `{finding_id: (cve_id, host)}`. Empty dict if DB missing."""
+def load_finding_lookup(db_path: Path) -> dict[str, tuple[str, str, str | None]]:
+    """Return `{finding_id: (cve_id, host, cve_alias)}`. Empty dict if DB missing.
+
+    BC-043: cve_alias included so audit events on non-CVE primaries can be
+    enriched with their CVE paper trail — operator can filter `make audit
+    CVE=CVE-2024-X` and match findings whose primary is `GO-2026-Y` as well.
+    """
     if not db_path.exists():
         return {}
     try:
         con = sqlite3.connect(f"file:{db_path}?mode=ro", uri=True)
         try:
-            rows = con.execute("SELECT id, cve_id, host FROM findings").fetchall()
+            # Degrade gracefully for pre-BC-043 DBs — the column may be missing.
+            cols = {row[1] for row in con.execute("PRAGMA table_info(findings)")}
+            has_alias = "cve_alias" in cols
+            select_cols = "id, cve_id, host, cve_alias" if has_alias else "id, cve_id, host"
+            rows = con.execute(f"SELECT {select_cols} FROM findings").fetchall()
         finally:
             con.close()
     except sqlite3.OperationalError:
         return {}
-    return {row[0]: (row[1], row[2]) for row in rows}
+    out: dict[str, tuple[str, str, str | None]] = {}
+    for row in rows:
+        if has_alias:
+            out[row[0]] = (row[1], row[2], row[3])
+        else:
+            out[row[0]] = (row[1], row[2], None)
+    return out
 
 
-def enrich_event(event: dict, lookup: dict[str, tuple[str, str]]) -> dict:
-    """Mutate `event` in-place: add `cve_id` + `host` if resolvable from `finding_id`."""
+def enrich_event(event: dict, lookup: dict[str, tuple[str, str, str | None]]) -> dict:
+    """Mutate `event` in-place: add `cve_id`, `host`, `cve_alias` if resolvable
+    from `finding_id`. BC-043: cve_alias enrichment lets the CVE filter match
+    non-CVE primaries via their alias."""
     finding_id = event.get("finding_id")
     if finding_id and finding_id in lookup:
-        cve, host = lookup[finding_id]
+        cve, host, alias = lookup[finding_id]
         event.setdefault("cve_id", cve)
         event.setdefault("host", host)
+        if alias is not None:
+            event.setdefault("cve_alias", alias)
     return event
 
 
@@ -183,7 +202,10 @@ def apply_filters(
             continue
         if event_types and e.get("event") not in event_types:
             continue
-        if cve_id and e.get("cve_id") != cve_id:
+        if cve_id and e.get("cve_id") != cve_id and e.get("cve_alias") != cve_id:
+            # BC-043: match either direct primary id OR the CVE alias so
+            # `make audit CVE=CVE-2024-X` works on `GO-2026-Y` findings
+            # whose alias is CVE-2024-X.
             continue
         if host and e.get("host") != host:
             continue
@@ -549,17 +571,22 @@ lookup = {}
 if os.path.exists(DB):
     try:
         con = sqlite3.connect(f"file:{DB}?mode=ro", uri=True)
-        for r in con.execute("SELECT id, cve_id, host FROM findings"):
-            lookup[r[0]] = (r[1], r[2])
+        cols = {r[1] for r in con.execute("PRAGMA table_info(findings)")}
+        has_alias = "cve_alias" in cols
+        sel = "id, cve_id, host, cve_alias" if has_alias else "id, cve_id, host"
+        for r in con.execute(f"SELECT {sel} FROM findings"):
+            lookup[r[0]] = (r[1], r[2], r[3] if has_alias else None)
         con.close()
     except Exception: pass
 
 for e in events:
     fid = e.get("finding_id")
     if fid and fid in lookup:
-        c, h = lookup[fid]
+        c, h, a = lookup[fid]
         e.setdefault("cve_id", c)
         e.setdefault("host", h)
+        if a is not None:
+            e.setdefault("cve_alias", a)
 
 since_ts = parse_time(SINCE, now) if SINCE else None
 until_ts = parse_time(UNTIL, now) if UNTIL else None
@@ -571,7 +598,7 @@ for e in events:
     if since_ts is not None and ts<since_ts: continue
     if until_ts is not None and ts>until_ts: continue
     if event_types and e.get("event") not in event_types: continue
-    if CVE and e.get("cve_id") != CVE: continue
+    if CVE and e.get("cve_id") != CVE and e.get("cve_alias") != CVE: continue
     if HOST and e.get("host") != HOST: continue
     if FINDING and e.get("finding_id") != FINDING: continue
     filtered.append(e)
