@@ -297,6 +297,26 @@ class S10NotifiersImportInsideHub(CliScenario):
             )
 
 
+class S11SetStatusInvalidExits2(CliScenario):
+    """BC-055 — `make set-status` on an unknown finding exits 2 cleanly
+    (no traceback). Validates the HTTP CLI's PATCH + friendly error path."""
+
+    order = 11
+    name = "set_status_404_exits_cleanly"
+    description = "`make set-status FINDING=nope STATUS=snoozed` exits 2 with a 404 line (BC-055)"
+
+    def run(self) -> None:
+        r = run_make("set-status", FINDING="nope-does-not-exist", STATUS="snoozed")
+        combined = r.stdout + r.stderr
+        if "Traceback" in combined:
+            raise AssertionError(f"got a Python traceback:\n{combined[:400]}")
+        if r.returncode == 0:
+            raise AssertionError(f"expected non-zero exit, got 0. stdout: {r.stdout[:200]}")
+        # Hub returns 404 or "no finding"; friendly_http_error passes "returned 404" through.
+        if "404" not in combined and "no finding" not in combined.lower():
+            raise AssertionError(f"expected 404 in output, got: {combined[:300]}")
+
+
 SCENARIOS: list[CliScenario] = [
     S01FindingsColumns(),
     S02StatusShowsBothServices(),
@@ -308,6 +328,7 @@ SCENARIOS: list[CliScenario] = [
     S08ScanIdempotent(),
     S09FindingsFilterByStatus(),
     S10NotifiersImportInsideHub(),
+    S11SetStatusInvalidExits2(),
 ]
 
 

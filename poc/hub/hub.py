@@ -23,7 +23,8 @@ import uvicorn
 from executor.base import ExecutorPlugin, Finding
 from executor.docker_adapter import DockerAdapter
 from executor.manual_adapter import ManualAdapter
-from fastapi import FastAPI
+from fastapi import Depends, FastAPI, HTTPException
+from fastapi import Request as _FastAPIRequest
 from fastapi import Response as _FastAPIResponse
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup, Update
 from telegram.ext import Application, CallbackQueryHandler, ContextTypes
@@ -1179,6 +1180,9 @@ async def lifespan(
 ):  # pragma: no cover - async Telegram startup/shutdown; exercised live via make demo + make test-e2e
     global tg_app, _startup_complete
 
+    # BC-055: warn operators who exposed the hub to the LAN without a token.
+    _warn_if_exposed_without_auth()
+
     init_db()
 
     # BC-020: warm KEV in-memory from disk cache so the first scan already has
@@ -1283,6 +1287,334 @@ async def lifespan(
 
 
 api = FastAPI(title="Beaconry Hub", version="0.1.0", lifespan=lifespan)
+
+
+# ── BC-055: Bearer auth + HTTP management surface ─────────────────────────
+
+
+def _check_bearer(request: _FastAPIRequest, expected: str) -> None:
+    """Shared bearer check. Empty `expected` = auth disabled."""
+    import hmac as _hmac
+
+    if not expected:
+        return
+    header = request.headers.get("Authorization", "")
+    prefix = "Bearer "
+    if not header.startswith(prefix):
+        raise HTTPException(status_code=401, detail="unauthorized")
+    provided = header[len(prefix) :]
+    if not _hmac.compare_digest(provided, expected):
+        raise HTTPException(status_code=401, detail="unauthorized")
+
+
+async def require_scout_token(request: _FastAPIRequest) -> None:
+    """BC-055: gates `/scan` (scout → hub ingest). Reads `HUB_SCOUT_TOKEN`.
+    Separate from the CLI token so a scout-side leak doesn't compromise
+    the operator surface and vice versa.
+    """
+    _check_bearer(request, os.environ.get("HUB_SCOUT_TOKEN", ""))
+
+
+async def require_cli_token(request: _FastAPIRequest) -> None:
+    """BC-055: gates the operator surface (/findings, /audit, /fleet,
+    /scan/trigger, PATCH /findings). Reads `HUB_CLI_TOKEN`.
+    """
+    _check_bearer(request, os.environ.get("HUB_CLI_TOKEN", ""))
+
+
+_LOOPBACK_ADDRS: frozenset[str] = frozenset({"127.0.0.1", "localhost", "::1", ""})
+
+
+def _warn_if_exposed_without_auth() -> None:
+    """BC-055 safety net: operator opened the hub to the LAN but forgot
+    one of the tokens. Non-fatal — reverse proxy may terminate auth upstream.
+    """
+    publish = os.environ.get("HUB_PUBLISH_ADDR", "127.0.0.1")
+    if publish in _LOOPBACK_ADDRS:
+        return
+    missing = [
+        name for name in ("HUB_SCOUT_TOKEN", "HUB_CLI_TOKEN") if not os.environ.get(name, "")
+    ]
+    if missing:
+        log.warning(
+            "BC-055: hub bound to %r but %s empty — reachable without auth. "
+            "Set the token(s) or terminate auth at a reverse proxy.",
+            publish,
+            " + ".join(missing),
+        )
+
+
+_FINDINGS_ENDPOINT_COLS = (
+    "kev",
+    "internet_facing",
+    "cve_id",
+    "severity",
+    "cvss",
+    "host",
+    "source_ref",
+    "package",
+    "status",
+    "tier",
+)
+
+
+@api.get("/findings", dependencies=[Depends(require_cli_token)])
+async def http_findings(
+    status: str | None = None,
+    host: str | None = None,
+    limit: int = 500,
+) -> list[dict]:
+    """BC-055: read-only JSON view of findings matching `make findings`."""
+    if not DB_PATH.exists():
+        return []
+    con = sqlite3.connect(f"file:{DB_PATH}?mode=ro", uri=True)
+    try:
+        schema_cols = {row[1] for row in con.execute("PRAGMA table_info(findings)")}
+        selected = [c for c in _FINDINGS_ENDPOINT_COLS if c in schema_cols]
+        if not selected:
+            # `findings` table absent or has none of the expected columns —
+            # schema not initialized yet. Treat as empty, not SQL error.
+            return []
+        sql = f"SELECT {', '.join(selected)} FROM findings"
+        conds: list[str] = []
+        params: list[str | int] = []
+        if status:
+            conds.append("status = ?")
+            params.append(status)
+        if host:
+            conds.append("host = ?")
+            params.append(host)
+        if conds:
+            sql += " WHERE " + " AND ".join(conds)
+        sql += " LIMIT ?"
+        params.append(max(1, min(limit, 10000)))
+        rows: list[dict] = []
+        for r in con.execute(sql, tuple(params)).fetchall():
+            row = dict(zip(selected, r, strict=True))
+            for mc in _FINDINGS_ENDPOINT_COLS:
+                row.setdefault(mc, None)
+            rows.append(row)
+    finally:
+        con.close()
+    return rows
+
+
+def _read_audit_events() -> list[dict]:
+    audit_path = DATA_DIR / "audit.log"
+    if not audit_path.exists():
+        return []
+    events: list[dict] = []
+    for line in audit_path.read_text().splitlines():
+        line = line.strip()
+        if not line:
+            continue
+        try:
+            events.append(json.loads(line))
+        except json.JSONDecodeError:
+            continue
+    events.reverse()
+    return events
+
+
+def _load_finding_lookup() -> dict[str, tuple[str, str, str | None]]:
+    lookup: dict[str, tuple[str, str, str | None]] = {}
+    if not DB_PATH.exists():
+        return lookup
+    try:
+        con = sqlite3.connect(f"file:{DB_PATH}?mode=ro", uri=True)
+        try:
+            cols = {row[1] for row in con.execute("PRAGMA table_info(findings)")}
+            has_alias = "cve_alias" in cols
+            select_cols = "id, cve_id, host, cve_alias" if has_alias else "id, cve_id, host"
+            for r in con.execute(f"SELECT {select_cols} FROM findings").fetchall():
+                lookup[r[0]] = (r[1], r[2], r[3] if has_alias else None)
+        finally:
+            con.close()
+    except sqlite3.Error:
+        pass
+    return lookup
+
+
+def _audit_event_matches(
+    e: dict,
+    *,
+    since: int | None,
+    until: int | None,
+    event_types: set[str] | None,
+    cve: str | None,
+    host: str | None,
+    finding: str | None,
+) -> bool:
+    ts = e.get("ts", 0)
+    if since is not None and ts < since:
+        return False
+    if until is not None and ts > until:
+        return False
+    if event_types and e.get("event") not in event_types:
+        return False
+    if cve and e.get("cve_id") != cve and e.get("cve_alias") != cve:
+        return False
+    if host and e.get("host") != host:
+        return False
+    return not (finding and e.get("finding_id") != finding)
+
+
+@api.get("/audit", dependencies=[Depends(require_cli_token)])
+async def http_audit(
+    last: int = 50,
+    since: int | None = None,
+    until: int | None = None,
+    event: str | None = None,
+    cve: str | None = None,
+    host: str | None = None,
+    finding: str | None = None,
+) -> list[dict]:
+    """BC-055: enriched audit tail (newest first)."""
+    events = _read_audit_events()
+    lookup = _load_finding_lookup()
+    event_types = {e.strip() for e in event.split(",")} if event else None
+    cap = max(1, min(last, 10000))
+    out: list[dict] = []
+    for e in events:
+        fid = e.get("finding_id")
+        if fid and fid in lookup:
+            cve_id, h, alias = lookup[fid]
+            e.setdefault("cve_id", cve_id)
+            e.setdefault("host", h)
+            if alias is not None:
+                e.setdefault("cve_alias", alias)
+        if not _audit_event_matches(
+            e,
+            since=since,
+            until=until,
+            event_types=event_types,
+            cve=cve,
+            host=host,
+            finding=finding,
+        ):
+            continue
+        out.append(e)
+        if len(out) >= cap:
+            break
+    return out
+
+
+@api.get("/fleet", dependencies=[Depends(require_cli_token)])
+async def http_fleet() -> list[dict]:
+    """BC-055: per-host fleet summary derived from the findings table."""
+    if not DB_PATH.exists():
+        return []
+    try:
+        con = sqlite3.connect(f"file:{DB_PATH}?mode=ro", uri=True)
+        try:
+            schema_cols = {row[1] for row in con.execute("PRAGMA table_info(findings)")}
+            last_seen_expr = "MAX(last_seen_ts)" if "last_seen_ts" in schema_cols else "0"
+            sql = (
+                f"SELECT host, {last_seen_expr}, "
+                "SUM(CASE WHEN status = 'open' THEN 1 ELSE 0 END), "
+                "COUNT(*) FROM findings GROUP BY host"
+            )
+            rows = con.execute(sql).fetchall()
+        finally:
+            con.close()
+    except sqlite3.Error:
+        return []
+    out = [
+        {
+            "host": r[0],
+            "last_seen_ts": int(r[1] or 0),
+            "open_findings": int(r[2] or 0),
+            "total_findings": int(r[3] or 0),
+        }
+        for r in rows
+        if r[0]
+    ]
+    out.sort(key=lambda e: e["last_seen_ts"], reverse=True)
+    return out
+
+
+# Operator-allowed PATCH targets. Reflects the states a human can
+# transition a finding into — system states (`regressed`, `verification_failed`)
+# are not operator-initiated.
+_OPERATOR_MUTABLE_STATUSES: frozenset[str] = frozenset({"snoozed", "accepted", "fixed", "open"})
+
+
+@api.patch("/findings/{finding_id}", dependencies=[Depends(require_cli_token)])
+async def http_patch_finding(finding_id: str, payload: dict) -> dict:
+    """BC-055: mutate finding status from a remote CLI.
+
+    Body: `{"status": "snoozed" | "accepted" | "fixed" | "open"}`.
+    Returns the updated row. 404 on unknown id, 400 on invalid status.
+    """
+    new_status = payload.get("status", "")
+    if new_status not in _OPERATOR_MUTABLE_STATUSES:
+        raise HTTPException(
+            status_code=400,
+            detail=f"invalid status {new_status!r}; must be one of "
+            f"{sorted(_OPERATOR_MUTABLE_STATUSES)}",
+        )
+    con = sqlite3.connect(DB_PATH)
+    try:
+        row = con.execute(
+            "SELECT id, host, cve_id, status FROM findings WHERE id = ?",
+            (finding_id,),
+        ).fetchone()
+        if row is None:
+            raise HTTPException(status_code=404, detail=f"no finding with id={finding_id!r}")
+        old_status = row[3]
+        con.execute(
+            "UPDATE findings SET status = ? WHERE id = ?",
+            (new_status, finding_id),
+        )
+        con.commit()
+    finally:
+        con.close()
+    _audit.append(
+        "status_change",
+        finding_id=finding_id,
+        host=row[1],
+        cve_id=row[2],
+        old_status=old_status,
+        new_status=new_status,
+        source="http",
+    )
+    return {
+        "id": finding_id,
+        "host": row[1],
+        "cve_id": row[2],
+        "old_status": old_status,
+        "status": new_status,
+    }
+
+
+@api.post("/scan/trigger", dependencies=[Depends(require_cli_token)])
+async def http_scan_trigger() -> dict:
+    """BC-055: proxy to the scout's local scan trigger.
+
+    Scout stays bound inside the compose network — no host-side port
+    exposure. The hub reaches it on `scout:8001` (Docker DNS).
+    """
+    import urllib.error
+    import urllib.request
+
+    scout_url = os.environ.get("SCOUT_TRIGGER_URL", "http://scout:8001/scan/trigger")
+    req = urllib.request.Request(scout_url, method="POST", data=b"")
+    try:
+        with urllib.request.urlopen(req, timeout=5) as resp:  # noqa: S310 — internal URL
+            status_code = resp.status
+            body = resp.read().decode() or "{}"
+    except urllib.error.HTTPError as exc:
+        return {"status": "error", "code": exc.code, "detail": exc.read().decode()[:200]}
+    except (urllib.error.URLError, ConnectionError, TimeoutError, OSError) as exc:
+        raise HTTPException(
+            status_code=503, detail=f"scout unreachable: {exc.__class__.__name__}"
+        ) from exc
+    try:
+        parsed = json.loads(body)
+    except json.JSONDecodeError:
+        parsed = {"raw": body[:200]}
+    parsed.setdefault("code", status_code)
+    return parsed
 
 
 def _grype_db_dir() -> Path:
@@ -1558,7 +1890,7 @@ def _mark_scan_now() -> None:
     _last_scan_ts = int(time.time())
 
 
-@api.post("/scan")
+@api.post("/scan", dependencies=[Depends(require_scout_token)])
 async def receive_scan(payload: dict) -> dict:
     """BC-005: apply CVE dedup + per-run cap across the whole inventory before notifying.
 

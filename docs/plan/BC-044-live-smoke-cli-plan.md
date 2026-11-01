@@ -178,7 +178,7 @@ losing anything they had.
 
 | Scenario / goal | Evidence type | Pointer | Status |
 |---|---|---|---|
-| 10 scenarios in registry (ordered, unique names) | unit | `test_cli_smoke_scenarios.py::test_registry_has_ten_scenarios` | ✓ |
+| 10 scenarios in registry (ordered, unique names) | unit | `test_cli_smoke_scenarios.py::test_registry_has_eleven_scenarios` | ✓ |
 | Scenario base class is abstract | unit | `test_cli_smoke_scenarios.py::test_scenario_base_is_abstract` | ✓ |
 | `make findings` row counter (data rows only) | unit | `test_cli_smoke_scenarios.py::test_findings_body_row_counter_counts_only_data_rows` | ✓ |
 | `make audit` row-count parser | unit | `test_cli_smoke_scenarios.py::test_audit_body_row_counter` | ✓ |

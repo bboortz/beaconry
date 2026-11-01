@@ -96,7 +96,13 @@ See also:
 
 | Variable | Default | Type | Where read | Reason | Origin |
 |---|---|---|---|---|---|
-| `HUB_URL` | `http://hub:8000` | URL | `poc/scout/scout.py` | Where scout POSTs SBOMs. Externalized so an operator with multiple hubs (e.g. staging + prod) can run one scout against each. | BC-002 |
+| `HUB_URL` | `http://hub:8000` | URL | `poc/scout/scout.py`, `poc/scripts/cli_config.py` | Where scout POSTs SBOMs AND where the operator CLI reaches the hub. Externalized so a scout on `laptop` can hit a hub on `hetzner-staging` over Tailscale. | BC-002, BC-055 |
+| `HUB_TOKEN` | *(empty)* | string | `poc/scout/scout.py`, `poc/scripts/cli_config.py` | Client-side bearer the scout OR the operator CLI sends. On the scout host this must match the hub's `HUB_SCOUT_TOKEN`; on the laptop/CLI host it must match `HUB_CLI_TOKEN`. Scout and CLI live on different hosts and never share this value — each sees its own secret only. | BC-055 |
+| `HUB_SCOUT_TOKEN` | *(empty)* | string | `poc/hub/hub.py` | Hub-side bearer gating `/scan` (scout → hub ingest). Independent from `HUB_CLI_TOKEN`: a scout-side leak doesn't compromise the operator surface. Empty = scout auth disabled. | BC-055 |
+| `HUB_CLI_TOKEN` | *(empty)* | string | `poc/hub/hub.py` | Hub-side bearer gating `/findings`, `/audit`, `/fleet`, `/scan/trigger`, `PATCH /findings/{id}` (CLI → hub management). Independent from `HUB_SCOUT_TOKEN`. Empty = CLI auth disabled. | BC-055 |
+| `HUB_PUBLISH_ADDR` | `127.0.0.1` | string | `poc/hub/hub.py`, `poc/docker-compose.yml` | Host-side interface the hub port is published on. Default `127.0.0.1` keeps the hub reachable only from the host. Set to `0.0.0.0` or a specific LAN/Tailscale IP for multi-host deployments. Must pair with `HUB_AUTH_TOKEN` or the hub logs a startup `WARNING` about unauthenticated exposure. | BC-055 |
+| `BEACONRY_CLI_CONFIG` | *(xdg path)* | path | `poc/scripts/cli_config.py` | Path to the operator-CLI YAML. Empty = `$XDG_CONFIG_HOME/beaconry/cli.yml` (fallback `~/.config/beaconry/cli.yml`). YAML carries `hub_url` + `hub_token`. Env (`HUB_URL`/`HUB_TOKEN`) overrides YAML. | BC-055 |
+| `SCOUT_TRIGGER_URL` | `http://scout:8001/scan/trigger` | URL | `poc/hub/hub.py` | Where `POST /scan/trigger` on the hub proxies to. Default is the scout's Docker-DNS name on the compose network. Override only in test harnesses that run the hub without a scout alongside. | BC-055 |
 
 ## Developer / dev-mode dials
 

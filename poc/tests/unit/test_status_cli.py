@@ -82,7 +82,7 @@ def _mock_fetchers(
     # Both services use fetch_healthz; parametrize via URL
     original = _hub_fetch
 
-    def _dispatch(url: str) -> dict:
+    def _dispatch(url: str, token: str = "") -> dict:
         if "8000" in url:
             return original(url)
         return _scout_fetch(url)

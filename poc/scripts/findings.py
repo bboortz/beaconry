@@ -230,12 +230,46 @@ for r in rows:
 """
 
 
+def _findings_via_http(cfg, status: str | None) -> int:  # type: ignore[no-untyped-def]
+    """BC-055 HTTP path for remote hubs. Returns the CLI exit code."""
+    import urllib.parse
+
+    from poc.scripts.cli_http import friendly_http_error, http_get
+
+    url = cfg.hub_url.rstrip("/") + "/findings"
+    if status:
+        url += "?" + urllib.parse.urlencode({"status": status})
+    try:
+        rows = http_get(url, token=cfg.hub_token)
+    except Exception as exc:  # noqa: BLE001 — single friendly line.
+        print("✗ " + friendly_http_error(url, exc), file=sys.stderr)
+        return 2
+    if not isinstance(rows, list) or not rows:
+        print(f"No findings on remote hub {cfg.hub_url}.")
+        return 0
+    print(format_table(rows))
+    return 0
+
+
 def main(argv: list[str] | None = None) -> int:
     args = parse_args(argv if argv is not None else sys.argv[1:])
 
-    # BC-007 close-gap: if the Compose hub container is running, route the query there
-    # so operators see the live volume DB, not their stale `.beaconry-cache/` file.
-    if _running_compose_hub() and not os.environ.get("BEACONRY_FINDINGS_LOCAL"):
+    # BC-055: triage source — remote hub → HTTP; local compose → docker-exec;
+    # else local DB file.
+    from poc.scripts.cli_config import load_cli_config
+    from poc.scripts.cli_http import choose_source
+
+    cfg = load_cli_config()
+    source = choose_source(
+        cfg,
+        compose_hub_running=_running_compose_hub(),
+        force_local=bool(os.environ.get("BEACONRY_FINDINGS_LOCAL")),
+    )
+
+    if source == "http":
+        return _findings_via_http(cfg, args.status)
+
+    if source == "local-compose":
         return _run_in_container([args.status] if args.status else [])
 
     data_dir = Path(os.environ.get("DATA_DIR", ".beaconry-cache"))

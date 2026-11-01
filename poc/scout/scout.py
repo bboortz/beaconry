@@ -168,7 +168,7 @@ def syft_scan(
         ["syft", target, "-o", "syft-json", "--quiet"],
         capture_output=True,
         text=True,
-        timeout=120,
+        timeout=1800,
     )
     if result.returncode != 0:
         log.warning("syft failed for %s: %s", target, result.stderr[:200])
@@ -401,9 +401,13 @@ def collect_and_post():  # pragma: no cover - orchestrator; integration-tested l
         body = json.dumps(payload)
         bytes_posted = len(body)
         _bytes_posted = bytes_posted
-        resp = requests.post(
-            f"{HUB_URL}/scan", data=body, headers={"Content-Type": "application/json"}, timeout=120
-        )
+        # BC-055: attach Bearer when HUB_TOKEN is set; empty = no header
+        # (back-compat for single-host operators who don't need auth).
+        headers = {"Content-Type": "application/json"}
+        token = os.environ.get("HUB_TOKEN", "")
+        if token:
+            headers["Authorization"] = f"Bearer {token}"
+        resp = requests.post(f"{HUB_URL}/scan", data=body, headers=headers, timeout=1800)
         resp.raise_for_status()
         data = resp.json()
         log.info("Hub response: %d new finding(s)", data.get("findings", 0))

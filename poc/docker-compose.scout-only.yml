@@ -1,0 +1,44 @@
+---
+# Standalone scout compose — no hub dependency.
+# Used on hosts that run ONLY a scout (server2, laptop).
+# Configuration is read from a .env file deployed by Ansible:
+#   HUB_URL, HUB_TOKEN, HOST_NAME, SCAN_INTERVAL, SCOUT_INCLUDE
+#
+# network_mode: host — required so the scout container can reach
+# the hub's Tailscale IP (100.x.x.x) from inside the container.
+# The scout's /readyz endpoint binds to 0.0.0.0:8001 on the host.
+#
+# Build: docker compose -f docker-compose.scout-only.yml build
+# Run:   docker compose -f docker-compose.scout-only.yml up
+
+services:
+  scout:
+    build:
+      context: ./
+      dockerfile: scout/Dockerfile
+    image: beaconry-scout:latest
+    container_name: beaconry-scout
+    restart: on-failure
+    network_mode: host
+    environment:
+      - HUB_URL=${HUB_URL:-http://hub:8000}
+      - HUB_TOKEN=${HUB_TOKEN:-}
+      - HOST_NAME=${HOST_NAME}
+      - SCAN_INTERVAL=${SCAN_INTERVAL:-300}
+      - SCOUT_INCLUDE=${SCOUT_INCLUDE:-*}
+      - PACMAN_DB=/host/var/lib/pacman
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - /var/lib/pacman:/host/var/lib/pacman:ro
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request,sys;sys.exit(0 if urllib.request.urlopen('http://localhost:8001/readyz').status==200 else 1)"]
+      interval: 60s
+      start_interval: 2s
+      timeout: 5s
+      start_period: 60s
+      retries: 3
+    logging:
+      driver: json-file
+      options:
+        max-size: "10m"
+        max-file: "3"

@@ -23,8 +23,18 @@ import urllib.error
 import urllib.request
 from dataclasses import dataclass
 
-HUB_HEALTHZ_URL = os.environ.get("BEACONRY_HUB_HEALTHZ_URL", "http://localhost:8000/healthz")
+from poc.scripts.cli_config import load_cli_config
+
+# BC-055: CLI config (hub_url + hub_token) drives the healthz target.
+# `BEACONRY_HUB_HEALTHZ_URL` remains a fully-qualified escape hatch for
+# tests + edge cases where the full URL must diverge from the config.
+_CLI_CFG = load_cli_config()
+HUB_HEALTHZ_URL = os.environ.get(
+    "BEACONRY_HUB_HEALTHZ_URL",
+    _CLI_CFG.hub_url.rstrip("/") + "/healthz",
+)
 SCOUT_HEALTHZ_URL = os.environ.get("BEACONRY_SCOUT_HEALTHZ_URL", "http://localhost:8001/healthz")
+HUB_AUTH_TOKEN = _CLI_CFG.hub_token
 
 STATE_RUNNING = "running"
 STATE_DOWN = "down"
@@ -42,10 +52,57 @@ class ServiceStatus:
     details: str
 
 
-def fetch_healthz(url: str, timeout: float = 2.0) -> dict:
-    """Return parsed /healthz JSON; raises urllib/connection errors on failure."""
-    with urllib.request.urlopen(url, timeout=timeout) as resp:  # noqa: S310 — localhost
+def fetch_healthz(url: str, timeout: float = 2.0, token: str = "") -> dict:
+    """Return parsed /healthz JSON; raises urllib/connection errors on failure.
+
+    BC-055: `/healthz` never requires auth, but if the operator put a
+    reverse proxy in front of the hub that forces auth on everything,
+    the token lets the probe through.
+    """
+    req = urllib.request.Request(url)
+    if token:
+        req.add_header("Authorization", f"Bearer {token}")
+    with urllib.request.urlopen(req, timeout=timeout) as resp:  # noqa: S310 — operator-configured URL
         return json.loads(resp.read().decode())
+
+
+def fetch_fleet(url: str, timeout: float = 2.0, token: str = "") -> list[dict]:
+    """BC-055: GET /fleet; empty list on any error (never block compose rows)."""
+    try:
+        req = urllib.request.Request(url)
+        if token:
+            req.add_header("Authorization", f"Bearer {token}")
+        with urllib.request.urlopen(req, timeout=timeout) as resp:  # noqa: S310 — operator-configured URL
+            data = json.loads(resp.read().decode())
+    except (urllib.error.URLError, ConnectionError, TimeoutError, OSError, ValueError):
+        return []
+    return data if isinstance(data, list) else []
+
+
+def format_fleet(rows: list[dict]) -> str:
+    """BC-055: render FLEET section (empty = empty string, caller suppresses)."""
+    if not rows:
+        return ""
+    header = ["HOST", "LAST SEEN", "OPEN", "TOTAL"]
+    body = [
+        [
+            r.get("host", "?"),
+            _format_age(int(r.get("last_seen_ts") or 0)),
+            str(r.get("open_findings") or 0),
+            str(r.get("total_findings") or 0),
+        ]
+        for r in rows
+    ]
+    all_rows = [header, *body]
+    widths = [max(len(row[i]) for row in all_rows) for i in range(len(header))]
+    lines = ["", "FLEET:"]
+    for row in all_rows:
+        lines.append(
+            "  ".join(
+                cell.ljust(widths[i]) if i < len(widths) - 1 else cell for i, cell in enumerate(row)
+            )
+        )
+    return "\n".join(lines)
 
 
 def _format_age(ts: int) -> str:
@@ -98,9 +155,9 @@ def _down_detail(stack_down_hint: bool) -> str:
     return "container not up"
 
 
-def gather_hub_status(url: str = HUB_HEALTHZ_URL) -> ServiceStatus:
+def gather_hub_status(url: str = HUB_HEALTHZ_URL, token: str = HUB_AUTH_TOKEN) -> ServiceStatus:
     try:
-        body = fetch_healthz(url)
+        body = fetch_healthz(url, token=token)
     except (urllib.error.URLError, ConnectionError, TimeoutError, OSError):
         return ServiceStatus(
             name="beaconry-hub",
@@ -174,6 +231,13 @@ def main() -> int:
         statuses = [hub, scout]
 
     print(_format_table(statuses))
+
+    # BC-055: FLEET section below services table.
+    fleet_url = _CLI_CFG.hub_url.rstrip("/") + "/fleet"
+    fleet_rows = fetch_fleet(fleet_url, token=HUB_AUTH_TOKEN)
+    fleet_text = format_fleet(fleet_rows)
+    if fleet_text:
+        print(fleet_text)
 
     if any(s.state == STATE_DOWN for s in statuses):
         return 2

@@ -39,11 +39,18 @@ services:
       # BC-038: /test/* routes gate. Default empty = routes NOT registered.
       # DO NOT set to 1 in production operator stacks.
       - BEACONRY_TEST_MODE=${BEACONRY_TEST_MODE:-}
+      # BC-055: separate bearer tokens for scout → hub ingest vs CLI → hub
+      # management. Independent blast radius: scout token leak doesn't
+      # compromise the operator surface. Both empty = auth disabled.
+      - HUB_SCOUT_TOKEN=${HUB_SCOUT_TOKEN:-}
+      - HUB_CLI_TOKEN=${HUB_CLI_TOKEN:-}
+      # BC-055: hub reads its own publish addr to warn on unauthenticated LAN exposure.
+      - HUB_PUBLISH_ADDR=${HUB_PUBLISH_ADDR:-127.0.0.1}
     volumes:
       - beaconry-data:/data
       - /var/run/docker.sock:/var/run/docker.sock
     ports:
-      - "127.0.0.1:8000:8000"
+      - "${HUB_PUBLISH_ADDR:-127.0.0.1}:8000:8000"
     healthcheck:
       test: ["CMD", "python3", "-c", "import urllib.request,sys;sys.exit(0 if urllib.request.urlopen('http://localhost:8000/readyz').status==200 else 1)"]
       interval: 60s
@@ -71,6 +78,8 @@ services:
       - SCOUT_INCLUDE=${SCOUT_INCLUDE:-nginx*,redis*,postgres*}
       - SCOUT_EXCLUDE=${SCOUT_EXCLUDE:-}
       - PACMAN_DB=/host/var/lib/pacman
+      # BC-055: scout sends this on POST /scan. Must match hub's HUB_SCOUT_TOKEN.
+      - HUB_TOKEN=${HUB_TOKEN:-${HUB_SCOUT_TOKEN:-}}
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
       - /var/lib/pacman:/host/var/lib/pacman:ro

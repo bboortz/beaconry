@@ -466,31 +466,70 @@ def _follow_mode(audit_path: Path) -> int:
         return 0
 
 
-def main(argv: list[str] | None = None) -> int:
-    args = parse_args(argv if argv is not None else sys.argv[1:])
+def _audit_qs_from_args(args) -> dict[str, str]:  # type: ignore[no-untyped-def]
+    now = int(time.time())
+    qs: dict[str, str] = {}
+    if args.last:
+        qs["last"] = str(args.last)
+    if args.since:
+        qs["since"] = str(parse_time_spec(args.since, now=now))
+    if args.until:
+        qs["until"] = str(parse_time_spec(args.until, now=now))
+    if args.event:
+        qs["event"] = args.event
+    if args.cve:
+        qs["cve"] = args.cve
+    if args.host:
+        qs["host"] = args.host
+    if args.finding:
+        qs["finding"] = args.finding
+    return qs
 
-    # Compose-aware routing — docker-exec into the live hub if present.
-    if (
-        _running_compose_hub()
-        and not os.environ.get("BEACONRY_FINDINGS_LOCAL")
-        and not args.follow  # follow has its own compose path
-    ):
-        return _run_in_container([])
 
-    data_dir = Path(os.environ.get("DATA_DIR", ".beaconry-cache"))
-    audit_path = data_dir / "audit.log"
-    db_path = data_dir / "beaconry.db"
+def _audit_via_http(cfg, args) -> int:  # type: ignore[no-untyped-def]
+    """BC-055 HTTP path for remote hubs."""
+    import urllib.parse
 
-    if args.follow:
-        return _follow_mode(audit_path)
+    from poc.scripts.cli_http import friendly_http_error, http_get
 
+    url = cfg.hub_url.rstrip("/") + "/audit"
+    try:
+        qs = _audit_qs_from_args(args)
+    except ValueError as exc:
+        print(f"✗ time parse error: {exc}", file=sys.stderr)
+        return 2
+    if qs:
+        url += "?" + urllib.parse.urlencode(qs)
+    try:
+        raw = http_get(url, token=cfg.hub_token)
+    except Exception as exc:  # noqa: BLE001
+        print("✗ " + friendly_http_error(url, exc), file=sys.stderr)
+        return 2
+    if not isinstance(raw, list):
+        print(f"✗ unexpected response shape from {url}", file=sys.stderr)
+        return 3
+    events: list[dict] = raw
+    now = int(time.time())
+    if args.count:
+        if not events:
+            print("No events match the filters.")
+            return 0
+        print(format_count_summary(events, now=now))
+        return 0
+    if not events:
+        print(f"No events on remote hub {cfg.hub_url}.")
+        return 0
+    print(format_timeline(events, now=now))
+    return 0
+
+
+def _audit_render_local(args, audit_path: Path, db_path: Path) -> int:  # type: ignore[no-untyped-def]
     now = int(time.time())
     events = read_audit_log(audit_path)
     lookup = load_finding_lookup(db_path)
     for e in events:
         enrich_event(e, lookup)
 
-    # Parse filter env/flags.
     since_ts: int | None = None
     until_ts: int | None = None
     try:
@@ -535,6 +574,37 @@ def main(argv: list[str] | None = None) -> int:
             "raise LAST=N to see more.)"
         )
     return 0
+
+
+def main(argv: list[str] | None = None) -> int:
+    args = parse_args(argv if argv is not None else sys.argv[1:])
+
+    # BC-055: triage source — remote hub → HTTP; local compose → docker-exec.
+    # FOLLOW mode stays on the compose path (streaming is a follow-up).
+    from poc.scripts.cli_config import load_cli_config
+    from poc.scripts.cli_http import choose_source
+
+    cfg = load_cli_config()
+    source = choose_source(
+        cfg,
+        compose_hub_running=_running_compose_hub(),
+        force_local=bool(os.environ.get("BEACONRY_FINDINGS_LOCAL")),
+    )
+
+    if source == "http" and not args.follow:
+        return _audit_via_http(cfg, args)
+
+    if source == "local-compose" and not args.follow:
+        return _run_in_container([])
+
+    data_dir = Path(os.environ.get("DATA_DIR", ".beaconry-cache"))
+    audit_path = data_dir / "audit.log"
+    db_path = data_dir / "beaconry.db"
+
+    if args.follow:
+        return _follow_mode(audit_path)
+
+    return _audit_render_local(args, audit_path, db_path)
 
 
 # ── In-container inline script ─────────────────────────────────────────────

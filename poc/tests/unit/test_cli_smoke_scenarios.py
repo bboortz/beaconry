@@ -72,10 +72,11 @@ def test_scenario_base_is_abstract() -> None:
         cs.CliScenario()  # type: ignore[abstract]
 
 
-def test_registry_has_ten_scenarios() -> None:
-    assert len(cs.SCENARIOS) == 10
+def test_registry_has_eleven_scenarios() -> None:
+    """BC-055 added S11 for `make set-status`."""
+    assert len(cs.SCENARIOS) == 11
     orders = sorted(s.order for s in cs.SCENARIOS)
-    assert orders == list(range(1, 11))
+    assert orders == list(range(1, 12))
     names = [s.name for s in cs.SCENARIOS]
     assert len(set(names)) == len(names)
 
@@ -177,7 +178,7 @@ def test_operator_targets_from_makefile_matches_known_set() -> None:
     # findings/status/scan/audit are the current four. If this fails on a
     # new BC, update the Makefile markers to match + consider whether the
     # new target needs its own scenario.
-    assert expected == {"findings", "status", "scan", "audit"}, (
+    assert expected == {"findings", "status", "scan", "audit", "set-status"}, (
         f"operator-CLI set drifted — autodetected: {sorted(expected)}. "
         "Update this test when the Makefile markers legitimately change."
     )

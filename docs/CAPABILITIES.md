@@ -1192,3 +1192,39 @@ Enforcement: `poc/scripts/verify_traceability.py` runs as part of `make check`. 
 - **supports:** CAP-B006
 - **verified by:**
   - `poc/tests/integration/test_BC_004_traceability.py`
+
+### CAP-B038: Operator manages beaconry on a remote hub over HTTP only
+- **type:** business
+- **status:** active
+- **origin:** BC-055 — homelab key user runs the hub on hetzner-staging (Tailscale) and manages beaconry from their laptop with no SSH.
+- **description:** Every operator action (read findings, read audit, see fleet, trigger a scan, change a finding's status) is exposed as a bearer-authed HTTP endpoint on the hub. `~/.config/beaconry/cli.yml` carries `hub_url` + `hub_token`; env (`HUB_URL`/`HUB_TOKEN`) overrides YAML; empty env doesn't clobber YAML. Operator CLIs auto-route: non-localhost `hub_url` → HTTP; localhost + compose up → `docker exec` (unchanged); else local DB file. No SSH anywhere.
+- **supports:** CAP-B023
+- **verified by:**
+  - `poc/tests/integration/test_BC_055_http_cli.py`
+
+### CAP-T109: Hub HTTP management surface
+- **type:** technical
+- **status:** active
+- **origin:** BC-055
+- **description:** `GET /findings` (query: `status`, `host`, `limit`), `GET /audit` (query: `last`, `since`, `until`, `event`, `cve`, `host`, `finding`), `GET /fleet` (per-host aggregates, sorted by last_seen_ts desc), `POST /scan/trigger` (proxies to the scout's compose-DNS URL), and `PATCH /findings/{id}` (status mutation) — all gated by `require_cli_token` (reads `HUB_CLI_TOKEN`). The `/scan` ingest endpoint is gated separately by `require_scout_token` (reads `HUB_SCOUT_TOKEN`) so scout-side and CLI-side token leaks have independent blast radius. Health endpoints (`/livez`, `/readyz`, `/healthz`, `/startupz`) never declare any dependency. Startup warning fires when hub is bound non-loopback with either token empty.
+- **supports:** CAP-B038
+- **verified by:**
+  - `poc/tests/integration/test_BC_055_http_cli.py`
+
+### CAP-T110: Operator-CLI config loader + HTTP routing
+- **type:** technical
+- **status:** active
+- **origin:** BC-055
+- **description:** `poc/scripts/cli_config.py` exposes `CliConfig` + `load_cli_config`. Default YAML path respects `XDG_CONFIG_HOME` → `~/.config/beaconry/cli.yml`. Env overrides YAML; empty env values are skipped so a shell default of `export HUB_URL=""` can't clobber the config. `poc/scripts/cli_http.py::choose_source()` returns `"http" | "local-compose" | "local-file"` based on `is_localhost_url(hub_url)` + whether the compose hub is running. `findings.py` + `audit.py` + `status.py` + `scan_cli.py` all dispatch on `choose_source`. FOLLOW stays on the compose path (streaming is a follow-up).
+- **supports:** CAP-B038
+- **verified by:**
+  - `poc/tests/integration/test_BC_055_http_cli.py`
+
+### CAP-T111: PATCH /findings/{id} mutation endpoint
+- **type:** technical
+- **status:** active
+- **origin:** BC-055
+- **description:** `PATCH /findings/{finding_id}` with `{"status": "snoozed"|"accepted"|"fixed"|"open"}` updates the DB row, appends a `status_change` audit event with `source="http"`, returns the updated row. 404 on unknown id, 400 on a status outside the operator-allowed set (system states `regressed` / `verification_failed` are not operator-initiated). Backs `make set-status FINDING=<id> STATUS=<status>` which always goes through HTTP — no local-DB fallback for mutations.
+- **supports:** CAP-B038
+- **verified by:**
+  - `poc/tests/integration/test_BC_055_http_cli.py`

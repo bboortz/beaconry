@@ -83,6 +83,8 @@ CLI_ONLY_ALLOWLIST: frozenset[str] = frozenset(
 NON_BEACONRY_IGNORED: frozenset[str] = frozenset(
     {
         "PATH",
+        # BC-055: FreeDesktop var, not beaconry's to document.
+        "XDG_CONFIG_HOME",
     }
 )
 
@@ -216,6 +218,10 @@ ENV_EXAMPLE_DEV_ONLY_ALLOWLIST: dict[str, str] = {
     "BEACONRY_TEST_MODE": "DO NOT SET IN PROD — exposes destructive /test/* routes",
     "BEACONRY_SCENARIO_HUB_URL": "scenario harness; only set by poc/scenarios/run.sh",
     "BEACONRY_SCENARIO_DATA_DIR": "scenario harness; only set by poc/scenarios/run.sh",
+    # BC-055: CLI config path override; default is $XDG_CONFIG_HOME/beaconry/cli.yml.
+    # Server-side .env.example is for operators configuring the hub + scout
+    # host, not the laptop CLI, so this stays out of the starter template.
+    "BEACONRY_CLI_CONFIG": "CLI-side path override; set on the laptop, not hub host",
 }
 
 # Where .env.example and docker-compose.yml live, relative to the repo root.

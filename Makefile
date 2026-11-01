@@ -1,4 +1,4 @@
-.PHONY: help lint format type test check check-full demo smoke clean install-hooks verify-traceability verify-dockerfile-health-copy verify-dockerfile-sources verify-memory-drift verify-compose-env-propagation verify-docs-drift verify-evidence-pointers verify-per-file-coverage verify-variables findings status audit test-e2e live-rebuild live-status scan test-scenarios test-cli
+.PHONY: help lint format type test check check-full demo smoke clean install-hooks verify-traceability verify-dockerfile-health-copy verify-dockerfile-sources verify-memory-drift verify-compose-env-propagation verify-docs-drift verify-evidence-pointers verify-per-file-coverage verify-variables findings status audit test-e2e live-rebuild live-status scan set-status test-scenarios test-cli
 
 PYTHON ?= python3
 PYTEST_ARGS ?=
@@ -35,8 +35,10 @@ help:
 	@echo "                                  BEACONRY_FINDINGS_LOCAL=1 forces local .beaconry-cache DB over compose volume"
 	@echo "  make audit                      operator CLI view of /data/audit.log (BC-042)"
 	@echo "                                  LAST=N SINCE=1h EVENT=a,b CVE=X HOST=X FINDING=X COUNT=1 FOLLOW=1"
-	@echo "  make scan                       trigger an immediate scout scan (BC-037)"
-	@echo "                                  bypasses SCAN_INTERVAL — useful after an out-of-band fix"
+	@echo "  make scan                       trigger an immediate scout scan (BC-037/BC-055)"
+	@echo "                                  bypasses SCAN_INTERVAL — local scout or remote hub /scan/trigger"
+	@echo "  make set-status                 mutate finding status over HTTP (BC-055)"
+	@echo "                                  FINDING=<id> STATUS=snoozed|accepted|fixed|open"
 	@: # BC-044 END OPERATOR_CLI_TARGETS
 	@echo "  make test-scenarios             run live-stack behavior scenarios (BC-038)"
 	@echo "                                  spins up isolated hub w/ BEACONRY_TEST_MODE=1 and runs 10 scenarios"
@@ -142,20 +144,12 @@ audit:
 # (`docker compose pull`, manual rebuild) — operator doesn't want to wait
 # up to SCAN_INTERVAL for the next cycle to re-verify.
 scan:
-	@if ! docker inspect --format='{{.State.Running}}' beaconry-scout 2>/dev/null | grep -q true; then \
-		echo "✗ scout container not running — start the stack with 'make demo' first"; \
-		exit 1; \
-	fi
-	@echo "==> triggering scan via POST http://127.0.0.1:8001/scan/trigger"
-	@response=$$(curl -sS -w '\n%{http_code}' -X POST http://127.0.0.1:8001/scan/trigger); \
-	body=$$(echo "$$response" | head -n 1); \
-	code=$$(echo "$$response" | tail -n 1); \
-	case "$$code" in \
-	  202) echo "✓ scan scheduled — $$body"; echo "   tail scout logs to watch: docker logs -f beaconry-scout" ;; \
-	  409) echo "⚠️  scan already running — $$body"; exit 2 ;; \
-	  503) echo "✗ scout 503 — $$body"; exit 3 ;; \
-	  *)   echo "✗ unexpected HTTP $$code — $$body"; exit 4 ;; \
-	esac
+	@$(PYTHON) -m poc.scripts.scan_cli
+
+# BC-055: mutate finding status on the hub (local or remote).
+# make set-status FINDING=<finding_id> STATUS=snoozed|accepted|fixed|open
+set-status:
+	@$(PYTHON) -m poc.scripts.set_status
 
 # BC-038: live-stack scenario harness. Spins up an isolated hub (test-mode
 # enabled, grype skipped), runs 10 behavior scenarios covering the shipped
