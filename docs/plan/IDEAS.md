@@ -249,12 +249,6 @@ See per-decision review dates in `memory/`:
   priority: later
   Scope sketch: tiny Python module `poc/scripts/audit.py` wrapping `audit.read_events()` with `--limit N` + `--event <type>` filter + `--since <ts>` ranges. Compose-aware routing like `findings.py` (docker exec into running hub).
 
-- **verify-evidence-pointers: catch missing rows, not just dead pointers**
-  trigger: BC-031 close-gap audit 2026-10-31 — the 3 backfill tests shipped without rows in the plan's evidence table. BC-019's lint caught zero mismatches because the policy is "pointer → test", not "test → pointer".
-  priority: later
-  Scope sketch: extend `verify_evidence_pointers.py` with a second pass: for every integration test file `test_BC_NNN_*.py`, assert each `test_*` node is referenced by at least one shipping-evidence row in the matching `BC-NNN-*-plan.md`. Allowlist for intentional meta-tests or helpers. Error msg: "test_x.py::test_backfill is a shipped test but no plan row references it — add an evidence row or move the test to a helper file." Pairs with BC-024's reverse-traceability.
-  Related memories: [[live-testing-requires-rebuild]], [[fix-is-not-forget]], [[breaking-changes-in-planning]] — all "move vigilance to lint".
-
 - **Extend `/ultrareview` to lint for exposed `/test/*` endpoints — needs BC-038 shipped**
   trigger: BC-038 shipped 2026-10-31 — `/test/wipe`, `/test/scan`, `/test/sweep` endpoints are env-gated at import time (`BEACONRY_TEST_MODE=1`). Correct by construction today, but a prod operator could accidentally set the var in their `.env` and expose destructive routes to anyone reaching 127.0.0.1:8000.
   priority: later
