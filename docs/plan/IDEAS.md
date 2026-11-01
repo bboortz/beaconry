@@ -244,11 +244,6 @@ See per-decision review dates in `memory/`:
   priority: soon (promoted from "later" after live confirmation)
   Scope sketch: in `format_notification`, if `finding.kev` and primary doesn't start with `CVE-`, append a tiny second line: `<i>KEV via CVE-...</i>`. Requires storing the alias at ingest time → new `Finding.kev_cve_alias: str | None` field + DB migration. ~0.5 day. Audit log entry gains the field for free via `**details`.
 
-- **`make audit` CLI to view the audit log**
-  trigger: BC-029 shipped 2026-10-31 — log lands at `/data/audit.log` as JSONL. Operators have to `docker exec beaconry-hub tail -f /data/audit.log` to view. Adding a `make audit` would mirror `make findings` + `make status` ergonomics.
-  priority: later
-  Scope sketch: tiny Python module `poc/scripts/audit.py` wrapping `audit.read_events()` with `--limit N` + `--event <type>` filter + `--since <ts>` ranges. Compose-aware routing like `findings.py` (docker exec into running hub).
-
 - **Extend `/ultrareview` to lint for exposed `/test/*` endpoints — needs BC-038 shipped**
   trigger: BC-038 shipped 2026-10-31 — `/test/wipe`, `/test/scan`, `/test/sweep` endpoints are env-gated at import time (`BEACONRY_TEST_MODE=1`). Correct by construction today, but a prod operator could accidentally set the var in their `.env` and expose destructive routes to anyone reaching 127.0.0.1:8000.
   priority: later
