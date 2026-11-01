@@ -1072,6 +1072,24 @@ Enforcement: `poc/scripts/verify_traceability.py` runs as part of `make check`. 
 - **verified by:**
   - `poc/tests/unit/test_verify_variables_documented.py`
 
+### CAP-B025: Pre-ship audit catches partial close-gap fixes
+- **type:** business
+- **status:** active
+- **origin:** BC-041 — repeated BC-031 + BC-040 pattern of close-gap tests landing without plan rows; audit "all green" never caught it
+- **description:** The developer running the pre-ship audit sees a mechanical signal (`verify-evidence-pointers` fails on orphan tests) in addition to the Gherkin coverage lens. Catches the specific class of miss where a close-gap commit adds `test_x` to an integration test file but forgets the matching shipping-evidence row.
+- **supports:** CAP-B006
+- **verified by:**
+  - `poc/tests/integration/test_BC_041_reverse_check.py`
+
+### CAP-T088: `verify-evidence-pointers` reverse pass — every integration test referenced by a plan row
+- **type:** technical
+- **status:** active
+- **origin:** BC-041
+- **description:** `reverse_check` iterates `poc/tests/integration/test_BC_NNN_*.py`, resolves the matching `docs/plan/BC-NNN-*-plan.md` by `BC-NNN-` prefix, and asserts every top-level `def test_*(...)` function in the file is mentioned somewhere in the plan's shipping-evidence table (plain name match, parametrization-agnostic). Soft-passes when the plan file is missing OR has no `## Shipping evidence` section — BC-019 owns those checks. Empty-but-present table is NOT soft-pass. Explicit `REVERSE_CHECK_ALLOWLIST: dict[str, str]` for intentional helpers / grandfathered pre-BC-041 tests, reason per entry. Error message surfaces a copy-pasteable row template.
+- **supports:** CAP-B025
+- **verified by:**
+  - `poc/tests/integration/test_BC_041_reverse_check.py`
+
 ### CAP-T080: Digest cadence throttle with content-hash fallback
 - **type:** technical
 - **status:** active

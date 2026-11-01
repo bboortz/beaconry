@@ -167,6 +167,155 @@ def check_plan(plan_path: Path, collected_nodes: set[str], tests_root: Path) -> 
     return errors
 
 
+# ── BC-041: reverse check — every integration test referenced by a plan row ──
+
+# Match `BC-NNN-<slug>` from `test_BC_NNN_<slug>.py` filenames.
+# Returns the dash-form slug (`BC-041-reverse-check`) suitable for plan-file
+# lookup, since plan files follow `BC-NNN-<slug>-plan.md`.
+_BC_FILENAME_RE = re.compile(r"^test_BC_(\d+)_([a-zA-Z0-9_]+)\.py$")
+
+# Match `def test_<name>(...)` at top of line.
+_TEST_FN_RE = re.compile(r"^def\s+(test_[a-zA-Z0-9_]+)\s*\(", re.MULTILINE)
+
+# Functions intentionally present in a BC-tagged test file but not expected
+# to have a plan row (helpers, cross-BC smoke tests, fixtures-only).
+# Each entry needs a one-line reason — visible, auditable, extensible.
+#
+# Policy for pre-BC-041 entries ("grandfathered"): these tests shipped
+# before the reverse-check gate existed. They're real, correct, and
+# protect behavior — just not referenced by the plan's shipping-evidence
+# table. We allowlist them rather than backfill 24 plan rows for stories
+# that have long moved on. New BCs after BC-041 are expected to be clean.
+REVERSE_CHECK_ALLOWLIST: dict[str, str] = {
+    # BC-008 pre-ship audit protocol tests — structural self-tests of the
+    # audit template, orthogonal to the plan's acceptance scenarios.
+    "test_bc_003_has_shipping_evidence_table": "pre-BC-041 — BC-008 structural self-test",
+    "test_claude_md_names_step_6a": "pre-BC-041 — BC-008 structural self-test",
+    "test_plan_template_has_shipping_evidence_section": "pre-BC-041 — BC-008 structural self-test",
+    "test_readme_mentions_pre_ship_audit": "pre-BC-041 — BC-008 structural self-test",
+    "test_shipping_evidence_rows_mentioned_in_cap_t026": "pre-BC-041 — BC-008 structural self-test",
+    "test_workflow_memory_names_step_6a": "pre-BC-041 — BC-008 structural self-test",
+    # BC-010 compose-health-chain assertions on docker-compose.yml structure.
+    "test_hub_healthcheck_targets_readyz": "pre-BC-041 — BC-010 compose config assertion",
+    "test_scout_depends_on_hub_service_healthy": "pre-BC-041 — BC-010 compose config assertion",
+    "test_scout_exposes_http_port": "pre-BC-041 — BC-010 compose config assertion",
+    "test_scout_healthcheck_targets_readyz": "pre-BC-041 — BC-010 compose config assertion",
+    "test_scout_mounts_beaconry_data_volume": "pre-BC-041 — BC-010 compose config assertion",
+    # BC-012 shared beaconry_health — Dockerfile lint + pyright trap tests.
+    "test_hub_dockerfile_passes_lint": "pre-BC-041 — BC-012 lint self-test",
+    "test_lint_flags_fixture_dockerfile_missing_copy": "pre-BC-041 — BC-012 lint self-test",
+    "test_lint_tolerates_service_that_doesnt_use_beaconry_health": "pre-BC-041 — BC-012 lint self-test",
+    "test_scout_dockerfile_passes_lint": "pre-BC-041 — BC-012 lint self-test",
+    "test_fixture_aliases_match_production_aliases": "pre-BC-041 — BC-012 pyright trap check",
+    "test_pyright_accepts_correct_usage": "pre-BC-041 — BC-012 pyright trap check",
+    # BC-019 self-test of the evidence-pointer parser.
+    "test_bare_test_file_without_node_id_still_checked": "pre-BC-041 — BC-019 parser self-test",
+    # BC-020 KEV ingest — notification-format tests orthogonal to the ingest Gherkin.
+    "test_tier_0_notification_has_kev_header": "pre-BC-041 — BC-020 notification format self-test",
+    "test_non_tier_0_notification_omits_kev_header": "pre-BC-041 — BC-020 notification format self-test",
+    "test_findings_cli_surfaces_kev_and_sorts_tier_first": "pre-BC-041 — BC-020 findings CLI self-test",
+    # BC-021 Dockerfile sources — directory-copy equivalence check.
+    "test_dir_copy_matches_all": "pre-BC-041 — BC-021 lint helper",
+    # BC-037 on-demand scan — HTTP handler non-blocking + lock-release checks.
+    "test_trigger_after_release_returns_202": "pre-BC-041 — BC-037 round-trip helper",
+    "test_trigger_does_not_block_handler_on_long_scan": "pre-BC-041 — BC-037 handler-latency guard",
+}
+
+
+def _bc_slug_from_test_file(path: Path) -> str | None:
+    """Return `BC-NNN-slug` for a `test_BC_NNN_slug.py`, else None."""
+    m = _BC_FILENAME_RE.match(path.name)
+    if not m:
+        return None
+    num, slug = m.group(1), m.group(2)
+    return f"BC-{num}-{slug.replace('_', '-')}"
+
+
+def _find_plan_for_bc(plans_dir: Path, bc_slug: str) -> Path | None:
+    """Return the plan file matching `BC-NNN-*-plan.md` for a given BC slug.
+
+    Slug matching is prefix-based on the BC number since the test file's
+    slug and the plan's slug can diverge by a word (e.g. `test_BC_038_scenario_harness.py`
+    ↔ `BC-038-scenario-harness-plan.md`). We match by `BC-NNN-` prefix.
+    """
+    prefix = bc_slug.split("-")[0] + "-" + bc_slug.split("-")[1] + "-"
+    for plan in plans_dir.glob("BC-*-plan.md"):
+        if plan.name.startswith(prefix):
+            return plan
+    return None
+
+
+def _test_functions_in_file(test_file: Path) -> list[str]:
+    """Return the list of `test_*` function names defined in `test_file`.
+
+    Skips private helpers (names starting with `_`). Finds top-level
+    `def test_...(` declarations via regex — doesn't execute the file.
+    """
+    try:
+        text = test_file.read_text()
+    except (OSError, UnicodeDecodeError):
+        return []
+    return _TEST_FN_RE.findall(text)
+
+
+def _emit_reverse_template(test_file: Path, test_name: str) -> str:
+    """Copy-pasteable shipping-evidence row for an orphan test."""
+    return f"| <scenario / goal> | integration | `{test_file.name}::{test_name}` | ✓ |"
+
+
+def reverse_check(
+    *,
+    plans_dir: Path | None = None,
+    tests_dir: Path | None = None,
+) -> list[str]:
+    """Return a list of orphan-test violations. Empty = clean.
+
+    For every `poc/tests/integration/test_BC_NNN_*.py`:
+      - Resolve the matching `BC-NNN-*-plan.md`.
+      - If no matching plan → soft-pass (BC-019 handles plan presence).
+      - If plan has no `## Shipping evidence` section → soft-pass.
+      - Otherwise: for every `test_*` function in the file, assert the
+        plan body mentions that function name somewhere in the shipping-
+        evidence table.
+    """
+    plans_dir = plans_dir or (_REPO_ROOT / "docs" / "plan")
+    tests_dir = tests_dir or (_REPO_ROOT / "poc" / "tests" / "integration")
+    if not plans_dir.is_dir() or not tests_dir.is_dir():
+        return []
+
+    violations: list[str] = []
+    for test_file in sorted(tests_dir.glob("test_BC_*.py")):
+        bc_slug = _bc_slug_from_test_file(test_file)
+        if bc_slug is None:
+            continue
+        plan = _find_plan_for_bc(plans_dir, bc_slug)
+        if plan is None:
+            continue  # soft-pass: BC-019 enforces plan presence
+        plan_text = plan.read_text()
+        rows = _parse_shipping_evidence_rows(plan_text)
+        if rows is None:
+            continue  # soft-pass: no `## Shipping evidence` section at all
+        # Empty-list (section exists, no rows) is NOT soft-pass — otherwise
+        # a plan can escape the gate by having a header + separator only.
+        # Flatten rows into one blob — reverse check is "is the test name
+        # mentioned anywhere in the table?", not strict pointer parsing.
+        table_blob = "\n".join("|".join(row) for row in rows) if rows else ""
+        for test_name in _test_functions_in_file(test_file):
+            if test_name in REVERSE_CHECK_ALLOWLIST:
+                continue
+            if test_name not in table_blob:
+                violations.append(
+                    f"{test_file.relative_to(_REPO_ROOT)}::{test_name}: "
+                    f"shipped as integration test but no shipping-evidence row "
+                    f"in `{plan.relative_to(_REPO_ROOT)}` references it. "
+                    f"Add a row OR allowlist with reason in "
+                    f"`poc/scripts/verify_evidence_pointers.py::REVERSE_CHECK_ALLOWLIST`.\n"
+                    f"        Template:\n"
+                    f"        {_emit_reverse_template(test_file, test_name)}"
+                )
+    return violations
+
+
 def main() -> int:  # pragma: no cover - entry-point wrapper exercised via make check, not pytest
     plans_dir = Path(os.environ.get("BEACONRY_PLANS_DIR", str(_REPO_ROOT / "docs" / "plan")))
     tests_root = Path(os.environ.get("BEACONRY_TESTS_ROOT", str(_REPO_ROOT / "poc" / "tests")))
@@ -181,19 +330,28 @@ def main() -> int:  # pragma: no cover - entry-point wrapper exercised via make 
     for plan_path in plans:
         all_errors.extend(check_plan(plan_path, collected_nodes, tests_root))
 
+    # BC-041: reverse pass — every integration test referenced by a plan row.
+    reverse_errors = reverse_check(plans_dir=plans_dir, tests_dir=tests_root / "integration")
+    for e in reverse_errors:
+        all_errors.append(f"  {e}")
+
     if all_errors:
         print(
-            f"verify-evidence-pointers: {len(all_errors)} dead pointer(s):",
+            f"verify-evidence-pointers: {len(all_errors)} violation(s):",
             file=sys.stderr,
         )
         for err in all_errors:
             print(err, file=sys.stderr)
         print(
-            "Fix: either implement the missing test or revise the plan row.",
+            "Fix: either implement the missing test, revise the plan row, "
+            "or (reverse pass only) allowlist the helper.",
             file=sys.stderr,
         )
         return 1
-    print(f"✓ {len(plans)} plan(s) checked — all shipping-evidence pointers resolve")
+    print(
+        f"✓ {len(plans)} plan(s) checked — "
+        f"all pointers resolve + every integration test is referenced"
+    )
     return 0
 
 
