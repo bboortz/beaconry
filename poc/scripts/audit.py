@@ -409,19 +409,49 @@ def _run_in_container(argv_rest: list[str]) -> int:
 
 
 def _follow_mode(audit_path: Path) -> int:
-    """Tail -f semantic. If compose hub is up, delegate to docker exec tail;
-    otherwise read local file."""
+    """Tail -f semantic — format each new JSONL line as a pretty row.
+
+    If the compose hub is up, docker-exec a `tail -f` and pipe each line
+    through our formatter in a subprocess loop. Otherwise read the local
+    file directly. Filters other than `--follow` are intentionally ignored
+    in follow mode (the stream has no cross-event state to filter on
+    retrospectively; apply filters offline instead)."""
     if _running_compose_hub() and not os.environ.get("BEACONRY_FINDINGS_LOCAL"):
-        return subprocess.run(
+        # Stream raw JSONL from the container, format on this side.
+        proc = subprocess.Popen(
             ["docker", "exec", HUB_CONTAINER, "tail", "-f", "/data/audit.log"],
-            check=False,
-        ).returncode
+            stdout=subprocess.PIPE,
+            text=True,
+        )
+        try:
+            assert proc.stdout is not None
+            # Line-buffer stdout so pipes/make-wrapped invocations get rows
+            # immediately rather than batched. Mirrors `tail -f` ergonomics.
+            print(format_header(), flush=True)
+            print(format_separator(), flush=True)
+            for line in proc.stdout:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    event = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                print(format_row(event, now=int(time.time())), flush=True)
+        except KeyboardInterrupt:
+            proc.terminate()
+            return 0
+        finally:
+            proc.wait()
+        return 0
     if not audit_path.exists():
         print(f"audit.log not found at {audit_path}", file=sys.stderr)
         return 1
     try:
         with audit_path.open() as f:
             f.seek(0, 2)  # EOF
+            print(format_header(), flush=True)
+            print(format_separator(), flush=True)
             while True:
                 line = f.readline()
                 if not line:
@@ -429,7 +459,7 @@ def _follow_mode(audit_path: Path) -> int:
                     continue
                 try:
                     event = json.loads(line.strip())
-                    print(format_row(event, now=int(time.time())))
+                    print(format_row(event, now=int(time.time())), flush=True)
                 except json.JSONDecodeError:
                     continue
     except KeyboardInterrupt:
@@ -588,8 +618,12 @@ for e in events:
         if a is not None:
             e.setdefault("cve_alias", a)
 
-since_ts = parse_time(SINCE, now) if SINCE else None
-until_ts = parse_time(UNTIL, now) if UNTIL else None
+try:
+    since_ts = parse_time(SINCE, now) if SINCE else None
+    until_ts = parse_time(UNTIL, now) if UNTIL else None
+except ValueError as _exc:
+    sys.stderr.write("✗ time parse error: " + str(_exc) + "\n")
+    sys.exit(2)
 event_types = {x.strip() for x in EVENT.split(",")} if EVENT else None
 
 filtered = []

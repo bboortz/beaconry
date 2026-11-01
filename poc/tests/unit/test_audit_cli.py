@@ -91,6 +91,13 @@ def test_filter_by_cve_id() -> None:
     assert a.apply_filters(events, cve_id="CVE-X") == [_ev(cve_id="CVE-X")]
 
 
+def test_parse_duration_rejects_pure_whitespace() -> None:
+    """BC-042 follow-up: ensure the parser doesn't silently accept blanks
+    (which would hide operator typos like `SINCE=   `)."""
+    with pytest.raises(ValueError):
+        a.parse_duration("   ")
+
+
 def test_filter_by_cve_id_matches_cve_alias() -> None:
     """BC-043: CVE filter also matches `cve_alias` so `make audit CVE=X`
     works on non-CVE primary findings whose alias is X."""
