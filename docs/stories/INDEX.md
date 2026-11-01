@@ -52,3 +52,4 @@ Lifecycle: `draft → ready → in-progress → shipped`. Status matches each st
 | BC-055 | HTTP-only CLI → hub (laptop manages hetzner-staging; split scout/CLI tokens) | shipped     | — (merged to dev)                   |
 | BC-056 | INSTALL.md + verify-install-doc (short-name reshape) | shipped     | branch `feat/BC-056-install-doc`     |
 | BC-057 | Multi-host polish — `make findings HOST=` + 🖥️ Telegram lead | shipped     | — (merged to dev)                   |
+| BC-058 | Mutation + audit cleanup — set_status fail-fast, rich audit, notify_sent, friendlier Telegram error | shipped     | — (merged to dev)                   |

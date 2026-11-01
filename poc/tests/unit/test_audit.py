@@ -101,4 +101,9 @@ def test_set_status_appends_audit_event(audit_env: Path, monkeypatch: pytest.Mon
     assert len(events) == 1
     assert events[0]["event"] == "status_change"
     assert events[0]["finding_id"] == "abc123"
-    assert events[0]["status"] == "fixed"
+    # BC-058: rich audit shape — old_status/new_status/host/cve_id/source.
+    assert events[0]["new_status"] == "fixed"
+    assert events[0]["old_status"] == "open"
+    assert events[0]["host"] == "h"
+    assert events[0]["cve_id"] == "CVE-X"
+    assert events[0]["source"] == "telegram"

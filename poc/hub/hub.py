@@ -335,21 +335,56 @@ def load_finding(finding_id: str) -> Finding | None:
     )
 
 
-def set_status(finding_id: str, status: str) -> None:
+class FindingNotFound(Exception):
+    """BC-058: raised by set_status when finding_id has no row in the DB.
+
+    Pre-BC-058 the UPDATE was a silent no-op and set_status still wrote
+    a status_change audit event — a correctness landmine for every
+    caller that didn't pre-check with load_finding. Raising surfaces
+    the drift immediately.
+    """
+
+
+def set_status(finding_id: str, status: str, *, source: str = "telegram") -> None:
+    """BC-058: mutate a finding's status, emit a rich audit event.
+
+    Payload shape matches the BC-055 PATCH /findings/{id} handler so
+    `make audit` enrichment is uniform regardless of mutation path:
+    `{finding_id, host, cve_id, old_status, new_status, source}`.
+
+    Raises `FindingNotFound` when the id has no row.
+    """
     con = sqlite3.connect(DB_PATH)
-    # BC-031: record when the fix landed so reconcile_scan can display
-    # "regressed since <date>" if the finding ever reappears.
-    if status in ("fixed", "fixed_verified"):
-        con.execute(
-            "UPDATE findings SET status=?, last_fixed_ts=? WHERE id=?",
-            (status, int(time.time()), finding_id),
-        )
-    else:
-        con.execute("UPDATE findings SET status=? WHERE id=?", (status, finding_id))
-    con.commit()
-    con.close()
-    # BC-029: every operator-visible state transition lands in the audit log.
-    _audit.append("status_change", finding_id=finding_id, status=status)
+    try:
+        row = con.execute(
+            "SELECT host, cve_id, status FROM findings WHERE id = ?",
+            (finding_id,),
+        ).fetchone()
+        if row is None:
+            raise FindingNotFound(finding_id)
+        host, cve_id, old_status = row
+        # BC-031: record when the fix landed so reconcile_scan can display
+        # "regressed since <date>" if the finding ever reappears.
+        if status in ("fixed", "fixed_verified"):
+            con.execute(
+                "UPDATE findings SET status=?, last_fixed_ts=? WHERE id=?",
+                (status, int(time.time()), finding_id),
+            )
+        else:
+            con.execute("UPDATE findings SET status=? WHERE id=?", (status, finding_id))
+        con.commit()
+    finally:
+        con.close()
+    # BC-029/BC-058: operator-visible state transition. Shape mirrors BC-055 PATCH.
+    _audit.append(
+        "status_change",
+        finding_id=finding_id,
+        host=host,
+        cve_id=cve_id,
+        old_status=old_status,
+        new_status=status,
+        source=source,
+    )
 
 
 def bump_last_seen(host: str, scanned_ids: set[str], *, now_ts: int | None = None) -> None:
@@ -707,7 +742,7 @@ def is_multi_host_inventory() -> bool:
     return bool(row and row[0] and row[0] > 1)
 
 
-def format_notification(finding: Finding) -> str:
+def format_notification(finding: Finding, *, multi_host: bool | None = None) -> str:
     """Build the message body in Telegram HTML (parse_mode='HTML').
 
     HTML is used instead of legacy Markdown because Markdown v1 has no escape
@@ -726,7 +761,10 @@ def format_notification(finding: Finding) -> str:
     lines: list[str] = []
     # BC-057: lead with host when the hub has findings from ≥2 distinct
     # hosts. Single-host inventories keep today's format unchanged.
-    if is_multi_host_inventory():
+    # BC-058: caller may pass `multi_host` as a hint to skip the DB
+    # lookup when rendering a batch (digest, sweep). None → DB lookup.
+    is_multi = multi_host if multi_host is not None else is_multi_host_inventory()
+    if is_multi:
         lines.append(f"🖥️ <code>{esc(finding.host)}</code>")
     # BC-020: Tier 0 (KEV) gets a visually distinct header above the severity row.
     if finding.tier == 0:
@@ -972,28 +1010,46 @@ def _mock_print(label: str, text: str) -> None:
     print(_render_mock_telegram(text))
 
 
+def _emit_notify_sent(finding: Finding, kind: str) -> None:
+    """BC-058: durable audit record of every notification send so stale-
+    tap debugging is possible later. One event per finding-channel send."""
+    _audit.append(
+        "notify_sent",
+        finding_id=finding.id,
+        cve_id=finding.cve_id,
+        host=finding.host,
+        kind=kind,
+    )
+
+
 async def notify_regression(finding: Finding, last_fixed_ts: int) -> None:
     """BC-031: 🔥 FIX REGRESSED. Dispatched to all enabled notification adapters."""
     if MOCK and not _notifiers_pkg.enabled_adapters():
         _mock_print("Regression", format_regression(finding, last_fixed_ts))
+        _emit_notify_sent(finding, "regression")
         return
     await _dispatch_regression(finding, last_fixed_ts)
+    _emit_notify_sent(finding, "regression")
 
 
 async def notify(finding: Finding) -> None:
     """BC-003: first-fire notification. Dispatched to all enabled adapters."""
     if MOCK and not _notifiers_pkg.enabled_adapters():
         _mock_print("Notification", format_notification(finding))
+        _emit_notify_sent(finding, "finding")
         return
     await _dispatch_finding(finding)
+    _emit_notify_sent(finding, "finding")
 
 
 async def notify_heartbeat(finding: Finding, open_since_ts: int) -> None:
     """BC-035: periodic reminder. Dispatched to all enabled adapters."""
     if MOCK and not _notifiers_pkg.enabled_adapters():
         _mock_print("Heartbeat", format_heartbeat(finding, open_since_ts))
+        _emit_notify_sent(finding, "heartbeat")
         return
     await _dispatch_heartbeat(finding, open_since_ts)
+    _emit_notify_sent(finding, "heartbeat")
 
 
 CALLBACK_RE = re.compile(r"^(fix|snooze|ack|verify):[a-f0-9]{16}(?::\d+)?$")
@@ -1177,7 +1233,18 @@ async def on_button_click(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 
     finding = load_finding(finding_id)
     if not finding:
-        await query.edit_message_text("⚠️ Finding not found or already resolved.")
+        # BC-058: diagnosable error — include the finding_id prefix + a
+        # hint that this is almost always a stale notification pointing
+        # at an id the current DB doesn't carry (older ingest with
+        # different source_ref/host inputs, pre-reset volume, etc.).
+        short_id = finding_id[:8]
+        verb = action.capitalize()
+        await query.edit_message_text(
+            f"⚠️ {verb} failed — finding <code>{short_id}…</code> is not in the "
+            f"current DB.\n<i>Likely a stale notification from before a scan "
+            f"reset. Safe to ignore.</i>",
+            parse_mode="HTML",
+        )
         return
 
     # BC-003: idempotence — if a Snooze/Accept tap lands on a finding already in
@@ -1786,7 +1853,10 @@ def should_send_digest(host: str, suppressed: list[Finding], *, now: int) -> tup
 
 
 def record_digest_sent(host: str, suppressed: list[Finding], *, now: int) -> None:
-    """BC-036: persist last-sent state + emit `digest_sent` audit event."""
+    """BC-036: persist last-sent state + emit `digest_sent` audit event.
+    BC-058: also emit `notify_digest_sent` with the full list of
+    suppressed finding_ids so operators can trace which items the
+    digest covered."""
     content_hash = _digest_hash(suppressed)
     con = sqlite3.connect(DB_PATH)
     try:
@@ -1800,6 +1870,12 @@ def record_digest_sent(host: str, suppressed: list[Finding], *, now: int) -> Non
     finally:
         con.close()
     _audit.append("digest_sent", host=host, hash=content_hash, count=len(suppressed))
+    _audit.append(
+        "notify_digest_sent",
+        host=host,
+        finding_ids=[f.id for f in suppressed],
+        count=len(suppressed),
+    )
 
 
 def record_digest_throttled(host: str, suppressed: list[Finding], *, now: int, reason: str) -> None:

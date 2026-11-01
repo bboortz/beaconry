@@ -1273,3 +1273,39 @@ Enforcement: `poc/scripts/verify_traceability.py` runs as part of `make check`. 
 - **supports:** CAP-B040
 - **verified by:**
   - `poc/tests/integration/test_BC_057_multi_host.py`
+
+### CAP-B041: Operator can diagnose stale-notification taps + has consistent audit coverage
+- **type:** business
+- **status:** active
+- **origin:** BC-058 — debugging the "Finding not found or already resolved" Telegram error surfaced four interacting bugs across the mutation + notification paths.
+- **description:** Every mutation path now emits the same rich `status_change` audit payload (`{finding_id, host, cve_id, old_status, new_status, source}`), so `make audit CVE=X` enrichment is uniform whether the operator tapped a Telegram button or ran `make set-status`. Every successful notification send emits a `notify_sent` audit event (digest sends emit `notify_digest_sent` with the full suppressed-finding_ids list), so stale-tap debugging is possible after the fact. `set_status` raises `FindingNotFound` instead of silently no-op'ing on missing ids. The Telegram "Finding not found" error now includes the finding_id prefix + a hint about stale notifications — operator can tell at a glance that this is an old message safe to ignore.
+- **supports:** CAP-B023
+- **verified by:**
+  - `poc/tests/integration/test_BC_058_cleanup.py`
+
+### CAP-T115: set_status fail-fast + rich audit shape
+- **type:** technical
+- **status:** active
+- **origin:** BC-058
+- **description:** `set_status(finding_id, status, *, source="telegram")` first looks up the row; raises `FindingNotFound` if the id has no row (pre-BC-058 it UPDATE'd 0 rows and emitted a status_change audit event anyway). Loads `host`/`cve_id`/`old_status` from the lookup and emits the audit event with the same shape BC-055's `PATCH /findings/{id}` handler uses: `{finding_id, host, cve_id, old_status, new_status, source}`. All existing callers (Telegram button handlers) pass `source="telegram"`; the HTTP PATCH handler uses `source="http"`.
+- **supports:** CAP-B041
+- **verified by:**
+  - `poc/tests/integration/test_BC_058_cleanup.py`
+
+### CAP-T116: notify_sent + notify_digest_sent audit events
+- **type:** technical
+- **status:** active
+- **origin:** BC-058
+- **description:** `_emit_notify_sent(finding, kind)` appends a `notify_sent` audit event with `{finding_id, cve_id, host, kind}` after every successful `_dispatch_finding`/`_dispatch_regression`/`_dispatch_heartbeat`. `record_digest_sent` additionally emits `notify_digest_sent` with the full list of suppressed finding_ids. Drive-by: `format_notification` accepts an optional `multi_host: bool | None` hint so dispatchers rendering a batch don't re-query the DB per message. When the hint is None, falls back to today's `is_multi_host_inventory()` lookup.
+- **supports:** CAP-B041
+- **verified by:**
+  - `poc/tests/integration/test_BC_058_cleanup.py`
+
+### CAP-T117: Diagnosable Telegram "Finding not found" error
+- **type:** technical
+- **status:** active
+- **origin:** BC-058
+- **description:** The pre-BC-058 message was "⚠️ Finding not found or already resolved." — the "or already resolved" clause implied a terminal-state check that didn't exist, and the message had no clue which finding failed. Post-BC-058: `⚠️ Snooze failed — finding <code>f0b442fb…</code> is not in the current DB. Likely a stale notification from before a scan reset. Safe to ignore.` Includes the finding_id prefix (first 8 chars) + the action verb + an explicit stale-notification hint.
+- **supports:** CAP-B041
+- **verified by:**
+  - `poc/tests/integration/test_BC_058_cleanup.py`
