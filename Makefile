@@ -1,4 +1,4 @@
-.PHONY: help lint format type test check check-full demo smoke clean install-hooks verify-traceability verify-dockerfile-health-copy verify-dockerfile-sources verify-memory-drift verify-compose-env-propagation verify-docs-drift verify-evidence-pointers verify-per-file-coverage verify-variables findings status test-e2e live-rebuild live-status scan test-scenarios
+.PHONY: help lint format type test check check-full demo smoke clean install-hooks verify-traceability verify-dockerfile-health-copy verify-dockerfile-sources verify-memory-drift verify-compose-env-propagation verify-docs-drift verify-evidence-pointers verify-per-file-coverage verify-variables findings status audit test-e2e live-rebuild live-status scan test-scenarios
 
 PYTHON ?= python3
 PYTEST_ARGS ?=
@@ -32,6 +32,8 @@ help:
 	@echo "  make findings                   read-only CLI view of findings DB"
 	@echo "                                  STATUS=regressed|open|verification_failed|snoozed|accepted|fixed|fixed_verified"
 	@echo "                                  BEACONRY_FINDINGS_LOCAL=1 forces local .beaconry-cache DB over compose volume"
+	@echo "  make audit                      operator CLI view of /data/audit.log (BC-042)"
+	@echo "                                  LAST=N SINCE=1h EVENT=a,b CVE=X HOST=X FINDING=X COUNT=1 FOLLOW=1"
 	@echo "  make scan                       trigger an immediate scout scan (BC-037)"
 	@echo "                                  bypasses SCAN_INTERVAL — useful after an out-of-band fix"
 	@echo "  make test-scenarios             run live-stack behavior scenarios (BC-038)"
@@ -122,6 +124,12 @@ check-full: check
 
 findings:
 	@$(PYTHON) -m poc.scripts.findings $(if $(STATUS),--status $(STATUS))
+
+# BC-042: operator view of audit.log with filters + compose-aware routing.
+# All filters propagate via env (LAST, SINCE, UNTIL, EVENT, CVE, HOST, FINDING,
+# COUNT, FOLLOW) so `make audit SINCE=1h` just works.
+audit:
+	@$(PYTHON) -m poc.scripts.audit
 
 # BC-037: on-demand scan trigger. Useful after an out-of-band fix
 # (`docker compose pull`, manual rebuild) — operator doesn't want to wait

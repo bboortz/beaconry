@@ -1090,6 +1090,34 @@ Enforcement: `poc/scripts/verify_traceability.py` runs as part of `make check`. 
 - **verified by:**
   - `poc/tests/integration/test_BC_041_reverse_check.py`
 
+### CAP-B026: Operator can answer every post-hoc troubleshooting question without parsing JSON
+- **type:** business
+- **status:** active
+- **origin:** BC-042 — every debugging conversation this session needed audit data via `docker exec … tail /data/audit.log` + eye-grep
+- **description:** `make audit` renders `/data/audit.log` as an aligned timeline, filterable by time window, event type, CVE id, host, finding id. Resolves `finding_id → cve_id + host` via the DB so operators can query by CVE even for `status_change` events that store only `finding_id`. `COUNT=1` provides a one-line-per-type summary; `FOLLOW=1` tails live. Pairs with `make findings` (state) + `make status` (health) + `make scan` (re-check) as the operator-triage quartet.
+- **supports:** CAP-B018
+- **verified by:**
+  - `poc/tests/integration/test_BC_042_make_audit_cli.py`
+
+### CAP-T089: `make audit` CLI with filters + compose-aware routing
+- **type:** technical
+- **status:** active
+- **origin:** BC-042
+- **description:** `poc/scripts/audit.py` parses `${DATA_DIR}/audit.log`, applies AND-combined filters (LAST/SINCE/UNTIL/EVENT/CVE/HOST/FINDING, COUNT/FOLLOW mutually with LAST). Time parsing accepts `1h30m` / `2d` relative durations or ISO `YYYY-MM-DDTHH:MM[:SS]`. Compose-aware: docker-exec into `beaconry-hub` when the live stack is up; otherwise local file. Inline-script path for in-container execution so operators don't need `audit.py` COPY'd into the image.
+- **supports:** CAP-B026
+- **verified by:**
+  - `poc/tests/unit/test_audit_cli.py`
+  - `poc/tests/integration/test_BC_042_make_audit_cli.py`
+
+### CAP-T090: Hub emits `scan_received` audit event per `/scan` POST
+- **type:** technical
+- **status:** active
+- **origin:** BC-042
+- **description:** `receive_scan` emits one `scan_received` entry with `host`, `sbom_count`, `exposed_count` BEFORE processing SBOMs. Closes the blind spot where "scout silently stopped" and "scout posted zero candidates" were indistinguishable in audit — both produced empty audit output. Post-match stats (new findings) continue to live in `finding_ingested` events.
+- **supports:** CAP-B026
+- **verified by:**
+  - `poc/tests/integration/test_BC_042_make_audit_cli.py`
+
 ### CAP-T080: Digest cadence throttle with content-hash fallback
 - **type:** technical
 - **status:** active

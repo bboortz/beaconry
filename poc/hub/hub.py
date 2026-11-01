@@ -1507,11 +1507,21 @@ async def receive_scan(payload: dict) -> dict:
     sboms: list[dict] = payload.get("sboms", [])
     # BC-030: optional per-image exposure map from scout — absent on older scouts.
     port_exposure: dict[str, bool] = payload.get("container_exposure") or {}
+    exposed_count = sum(1 for v in port_exposure.values() if v)
     log.info(
         "Scan from %s: %d SBOM(s), %d exposed image(s)",
         host,
         len(sboms),
-        sum(1 for v in port_exposure.values() if v),
+        exposed_count,
+    )
+    # BC-042: audit every scan reception, even if 0 candidates. Closes the
+    # "did scout even post?" blind spot — a silent scout and a scout-with-0
+    # candidates were indistinguishable in the audit log pre-BC-042.
+    _audit.append(
+        "scan_received",
+        host=host,
+        sbom_count=len(sboms),
+        exposed_count=exposed_count,
     )
 
     candidates: list[Finding] = []

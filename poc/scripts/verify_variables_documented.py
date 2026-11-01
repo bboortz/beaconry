@@ -59,6 +59,25 @@ TEST_ONLY_ALLOWLIST: frozenset[str] = frozenset(
     }
 )
 
+# BC-042: Makefile-argument env vars read by CLI scripts (e.g. `SINCE=1h make audit`).
+# These are per-invocation CLI arguments, not persistent operator config —
+# documenting them in VARIABLES.md would mislead operators about what's
+# runtime-tunable. Each entry is read by exactly one CLI script.
+CLI_ONLY_ALLOWLIST: frozenset[str] = frozenset(
+    {
+        "LAST",  # make audit — number of events to show
+        "SINCE",  # make audit — time-window start
+        "UNTIL",  # make audit — time-window end
+        "EVENT",  # make audit — event-type filter
+        "CVE",  # make audit — CVE id filter
+        "HOST",  # make audit — host filter
+        "FINDING",  # make audit — finding_id filter
+        "COUNT",  # make audit — summary mode flag
+        "FOLLOW",  # make audit — tail -f mode flag
+        "STATUS",  # make findings — status filter
+    }
+)
+
 # System vars we don't own and don't document (PATH, HOME, TERM, …).
 # Keep tight: anything beaconry-prefixed is documentation-required.
 NON_BEACONRY_IGNORED: frozenset[str] = frozenset(
@@ -366,7 +385,7 @@ def check(
       8. Default literal mismatch between VARIABLES.md and `.env.example`.
     """
     reads = scan_source_tree(poc_root)
-    reads = {v for v in reads if v not in TEST_ONLY_ALLOWLIST}
+    reads = {v for v in reads if v not in TEST_ONLY_ALLOWLIST and v not in CLI_ONLY_ALLOWLIST}
 
     rows = parse_variables_md_rows(variables_md)
     documented = set(rows.keys())
