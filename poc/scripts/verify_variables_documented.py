@@ -219,6 +219,10 @@ ENV_EXAMPLE_DEV_ONLY_ALLOWLIST: dict[str, str] = {
     "BEACONRY_SCENARIO_HUB_URL": "scenario harness; only set by poc/scenarios/run.sh",
     "BEACONRY_SCENARIO_DATA_DIR": "scenario harness; only set by poc/scenarios/run.sh",
     "BEACONRY_SKIP_VERSION_BUMP": "BC-062 pre-push bypass — dev-only emergency escape; never in operator env",
+    "BEACONRY_SKIP_CHANGELOG": "BC-069 CHANGELOG regen + pre-push gate bypass — dev-only emergency",
+    # BC-069: SOAK_WINDOW_S is operator-tunable per invocation (`SOAK_WINDOW_S=1800 make soak`),
+    # not persistent config. Documented in VARIABLES.md but kept out of .env.example.
+    "SOAK_WINDOW_S": "BC-069 per-invocation CLI knob for `make soak` window",
     # BC-055: CLI config path override; default is $XDG_CONFIG_HOME/beaconry/cli.yml.
     # Server-side .env.example is for operators configuring the hub + scout
     # host, not the laptop CLI, so this stays out of the starter template.

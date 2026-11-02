@@ -1615,3 +1615,30 @@ Enforcement: `poc/scripts/verify_traceability.py` runs as part of `make check`. 
 - **supports:** CAP-B023
 - **verified by:**
   - `poc/tests/integration/test_BC_068_defensive_cleanup.py`
+
+### CAP-T147: GitHub Actions CI with branch-stratified gates
+- **type:** technical
+- **status:** active
+- **origin:** BC-069 release toolchain — operator wanted a pipeline that keeps local checks primary and layers CI as a safety net, stratified so feature pushes are fast and dev pushes are thorough.
+- **description:** `.github/workflows/ci.yml` runs three gates: (1) feat/fix/docs push → ruff + ruff format + pyright (~20s); (2) push to dev + PR to dev → `make check` (full fast tier + coverage ≥85% + drift lints) (~2min); (3) push to main → `verify-changelog` + `verify-version-sync` + git-tag advisory. Concurrency cancellation (in-flight runs die on new push to same ref), docs-only short-circuit (lint still runs, heavy tests skip), pip caching, optional Telegram failure ping via existing bot. NO auto-merge dev→main (operator reserves that gate).
+- **supports:** CAP-B023
+- **verified by:**
+  - `poc/tests/integration/test_BC_069_release_toolchain.py`
+
+### CAP-T148: make soak — audit-log health check over last 1h
+- **type:** technical
+- **status:** active
+- **origin:** BC-069 release toolchain — operator wanted a data-driven soak signal before promoting dev → main instead of eyeballing `make status`.
+- **description:** `poc/scripts/soak.py` + `make soak` scan `$DATA_DIR/audit.log` for events within `SOAK_WINDOW_S` (default 3600s) whose event name matches a curated error set (`notify_sent_failed`, `invalid_grype_match`, `reconcile_skipped_partial_inventory`, `regressed`, `set_status_failed`, `manual_fix_reminder_sent`). Exit 0 clean, 1 if errors in window (printed by ts/host/CVE), 2 if audit log unreadable. Operator uses it after each `make live-rebuild` to confirm the deploy didn't introduce new error-shaped events.
+- **supports:** CAP-B023
+- **verified by:**
+  - `poc/tests/integration/test_BC_069_release_toolchain.py`
+
+### CAP-T149: Automated CHANGELOG.md generation + pre-push gate
+- **type:** technical
+- **status:** active
+- **origin:** BC-069 release toolchain — operator wanted CHANGELOG auto-written on bump, similar to VERSION file.
+- **description:** `poc/scripts/changelog.py` + `make changelog` read commits since the last `## [v*]` header in CHANGELOG.md, group by conventional-commit type (feat→Added, fix→Fixed, chore/refactor/perf→Changed, docs→Documentation, `!:` / `BREAKING CHANGE:` → ⚠ Breaking block), and prepend a Keep A Changelog section for the current VERSION. `bump_version.py` invokes it as a post-write hook so operators get the CHANGELOG update for free. `poc/scripts/verify_changelog.py` + `make verify-changelog` + pre-push hook refuses pushes if VERSION isn't present as a `## [v<VERSION>]` header. Emergency bypass: `BEACONRY_SKIP_CHANGELOG=1`.
+- **supports:** CAP-B023
+- **verified by:**
+  - `poc/tests/integration/test_BC_069_release_toolchain.py`

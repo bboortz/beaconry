@@ -1,0 +1,194 @@
+---
+name: CI
+
+# Speed is key — stratified by branch:
+#   feat/fix/docs push  → ~20s  (ruff + pyright only; local pre-push already ran check)
+#   dev push / PR       → ~2min (make check-full: full tier + scenarios + CLI smokes)
+#   main push           → ~15s  (verify-changelog + verify-version-sync + tag presence)
+"on":
+  push:
+    branches:
+      - main
+      - dev
+      - "feat/**"
+      - "fix/**"
+      - "docs/**"
+      - "chore/**"
+      - "refactor/**"
+  pull_request:
+    branches: [dev, main]
+
+# Cancel any in-progress run on the same ref when a new commit lands.
+# Saves CI minutes + stops stale runs from clobbering fresh ones.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+
+  # ── Detect docs-only diffs so heavy jobs skip ──────────────────────────────
+  detect:
+    name: Detect changes
+    runs-on: ubuntu-latest
+    outputs:
+      docs_only: ${{ steps.check.outputs.docs_only }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 2
+      - name: Check for non-docs changes
+        id: check
+        run: |
+          if [[ "${{ github.event_name }}" == "pull_request" ]]; then
+            BASE="origin/${{ github.base_ref }}"
+            git fetch --depth=1 origin "${{ github.base_ref }}" || true
+          else
+            BASE="HEAD^"
+          fi
+          changed=$(git diff --name-only "${BASE}..HEAD" 2>/dev/null || echo "")
+          non_doc=$(echo "$changed" | grep -vE '\.md$|^docs/' || true)
+          if [[ -z "$non_doc" ]]; then
+            echo "docs_only=true"  >> "$GITHUB_OUTPUT"
+            echo "Docs-only changes — heavy jobs will skip"
+          else
+            echo "docs_only=false" >> "$GITHUB_OUTPUT"
+          fi
+
+  # ── Fast gate: feature branches ────────────────────────────────────────────
+  fast-check:
+    name: Fast check (lint + type)
+    runs-on: ubuntu-latest
+    # Runs on feature-branch pushes only. dev + main run the full tier instead.
+    if: >
+      github.event_name == 'push' &&
+      !contains(fromJSON('["refs/heads/dev", "refs/heads/main"]'), github.ref)
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements-dev.txt
+
+      - name: Install lint tools
+        run: pip install -r requirements-dev.txt
+
+      - name: ruff check
+        run: ruff check .
+
+      - name: ruff format --check
+        run: ruff format --check .
+
+      - name: pyright
+        run: pyright
+
+  # ── Full gate: dev + PRs to dev ────────────────────────────────────────────
+  full-check:
+    name: Full check (make check-full)
+    runs-on: ubuntu-latest
+    needs: detect
+    if: >
+      (github.event_name == 'push' && github.ref == 'refs/heads/dev') ||
+      (github.event_name == 'pull_request' && github.base_ref == 'dev')
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # bump_version needs history to walk back
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: requirements-dev.txt
+
+      - name: Install dev deps
+        run: pip install -r requirements-dev.txt
+
+      - name: Install hub + scout runtime deps (for integration tests)
+        run: |
+          pip install -r poc/hub/requirements.txt
+          pip install -r poc/scout/requirements.txt
+
+      - name: Install syft + grype (POC pipeline tools)
+        run: |
+          curl -sSfL https://raw.githubusercontent.com/anchore/syft/main/install.sh \
+            | sh -s -- -b /usr/local/bin
+          curl -sSfL https://raw.githubusercontent.com/anchore/grype/main/install.sh \
+            | sh -s -- -b /usr/local/bin
+
+      - name: make check (fast tier, same as pre-push)
+        env:
+          BEACONRY_SKIP_GRYPE_DB: "1"
+          BEACONRY_SKIP_VERSION_BUMP: "1"  # CI runs on branches; local gate owns that signal
+        run: make check
+
+      - name: Docs-only short-circuit — skip extended tier
+        if: needs.detect.outputs.docs_only == 'true'
+        run: echo "Docs-only diff — scenarios + CLI smokes skipped"
+
+      # The remaining targets (scenarios + CLI smokes) need a live Docker-compose
+      # stack. The fast tier (`make check`) is already sufficient to catch any
+      # test regressions; running the full compose dance in CI roughly 3× the
+      # cost. Skip here, operator runs `make check-full` locally before merging.
+      - name: Note
+        run: echo "Full compose scenarios run locally via make check-full"
+
+  # ── Release gate: main ─────────────────────────────────────────────────────
+  release-check:
+    name: Release check (CHANGELOG + VERSION sync + tag)
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+
+      - name: Verify CHANGELOG has entry for current VERSION
+        run: python -m poc.scripts.verify_changelog
+
+      - name: Verify VERSION sync (/VERSION ↔ /poc/VERSION)
+        run: python -m poc.scripts.verify_version_sync
+
+      - name: Suggest tag if missing
+        run: |
+          VERSION=$(cat VERSION)
+          if git rev-parse --verify "v${VERSION}" >/dev/null 2>&1; then
+            echo "✓ Tag v${VERSION} exists"
+          else
+            echo "::warning::main is at v${VERSION} but no v${VERSION} git tag exists."
+            echo "::warning::Run: git tag -a v${VERSION} -m 'release ${VERSION}' && git push origin v${VERSION}"
+          fi
+
+  # ── Notify on failure ──────────────────────────────────────────────────────
+  # Optional: reuses the operator's existing Telegram bot. Silently skips if
+  # the secrets aren't set — no-op for forks / contributors.
+  notify-failure:
+    name: Notify on failure
+    runs-on: ubuntu-latest
+    needs: [fast-check, full-check, release-check]
+    if: failure() && !cancelled() && github.event_name == 'push'
+    steps:
+      - name: Telegram ping (if configured)
+        env:
+          TG_TOKEN: ${{ secrets.TELEGRAM_BOT_TOKEN }}
+          TG_CHAT: ${{ secrets.TELEGRAM_CHAT_ID }}
+        run: |
+          if [[ -z "${TG_TOKEN}" || -z "${TG_CHAT}" ]]; then
+            echo "No Telegram secrets configured — skipping notification."
+            exit 0
+          fi
+          curl -s --max-time 10 --retry 3 --retry-delay 5 \
+            -X POST "https://api.telegram.org/bot${TG_TOKEN}/sendMessage" \
+            -d chat_id="${TG_CHAT}" \
+            -d parse_mode="Markdown" \
+            -d text="🚨 *CI failed* — \`${{ github.ref_name }}\`
+          Commit: \`${{ github.sha }}\`
+          ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}" || true

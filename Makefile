@@ -1,4 +1,4 @@
-.PHONY: help lint format type test check check-full demo smoke clean install-hooks verify-traceability verify-dockerfile-health-copy verify-dockerfile-sources verify-memory-drift verify-compose-env-propagation verify-docs-drift verify-evidence-pointers verify-per-file-coverage verify-variables verify-install-doc verify-version-sync verify-version-bumped bump-patch bump-minor bump-major bump-auto findings status audit test-e2e live-rebuild live-status scan set-status test-scenarios test-cli
+.PHONY: help lint format type test check check-full demo smoke clean install-hooks verify-traceability verify-dockerfile-health-copy verify-dockerfile-sources verify-memory-drift verify-compose-env-propagation verify-docs-drift verify-evidence-pointers verify-per-file-coverage verify-variables verify-install-doc verify-version-sync verify-version-bumped verify-changelog bump-patch bump-minor bump-major bump-auto changelog findings status audit soak test-e2e live-rebuild live-status scan set-status test-scenarios test-cli
 
 PYTHON ?= python3
 PYTEST_ARGS ?=
@@ -24,13 +24,17 @@ help:
 	@echo "  make verify-install-doc         docs/INSTALL.md env vars + .PHONY entries + file paths exist (BC-056)"
 	@echo "  make verify-version-sync        /VERSION ↔ /poc/VERSION + hardcoded-literal drift (BC-062)"
 	@echo "  make verify-version-bumped      pre-push: VERSION must bump relative to origin/dev (BC-062)"
+	@echo "  make verify-changelog           pre-push: CHANGELOG.md has entry for current VERSION (BC-069)"
 	@echo "  make smoke                      bash poc/demo.sh --smoke (non-interactive mock, CI)"
 	@echo ""
-	@echo "Version management (BC-062):"
-	@echo "  make bump-patch                 X.Y.Z -> X.Y.(Z+1)"
+	@echo "Version management (BC-062, BC-069):"
+	@echo "  make bump-patch                 X.Y.Z -> X.Y.(Z+1); also regenerates CHANGELOG.md"
 	@echo "  make bump-minor                 X.Y.Z -> X.(Y+1).0"
 	@echo "  make bump-major                 X.Y.Z -> (X+1).0.0"
 	@echo "  make bump-auto                  infer kind from `git log origin/dev..HEAD` (feat → minor, ! → major, else patch)"
+	@echo "  make changelog                  regenerate CHANGELOG.md for current VERSION (BC-069)"
+	@echo "  make soak                       audit.log scan over last 1h; non-zero if error events (BC-069)"
+	@echo "                                  SOAK_WINDOW_S=1800 for 30m; DATA_DIR=/data for alt path"
 	@echo ""
 	@echo "Tiers:"
 	@echo "  make check         FAST TIER — all gates above (~7s)"
@@ -138,6 +142,7 @@ verify-version-bumped:
 
 # BC-062: SemVer bump helpers. `bump-auto` infers from conventional-commit
 # messages since origin/dev. Writes both VERSION + poc/VERSION.
+# BC-069: bump_version also regenerates CHANGELOG.md automatically.
 bump-patch:
 	$(PYTHON) -m poc.scripts.bump_version --patch
 bump-minor:
@@ -147,7 +152,23 @@ bump-major:
 bump-auto:
 	$(PYTHON) -m poc.scripts.bump_version --auto
 
-check: lint type test verify-per-file-coverage verify-traceability verify-dockerfile-health-copy verify-dockerfile-sources verify-memory-drift verify-compose-env-propagation verify-docs-drift verify-evidence-pointers verify-variables verify-install-doc verify-version-sync smoke
+# BC-069: regenerate CHANGELOG.md for the current VERSION. Reads commits
+# since the last `## [v*]` header; appends a Keep-A-Changelog section.
+changelog:
+	$(PYTHON) -m poc.scripts.changelog
+
+# BC-069: pre-push lint — refuse pushes without a CHANGELOG entry for VERSION.
+verify-changelog:
+	$(PYTHON) -m poc.scripts.verify_changelog
+
+# BC-069: operator soak check — scan audit.log for error events in the
+# last hour. Returns non-zero if anything suspicious landed.
+#   SOAK_WINDOW_S=1800 make soak    # 30-min window
+#   DATA_DIR=/data make soak        # override audit log path
+soak:
+	$(PYTHON) -m poc.scripts.soak
+
+check: lint type test verify-per-file-coverage verify-traceability verify-dockerfile-health-copy verify-dockerfile-sources verify-memory-drift verify-compose-env-propagation verify-docs-drift verify-evidence-pointers verify-variables verify-install-doc verify-version-sync verify-changelog smoke
 	@echo ""
 	@echo "✓ Fast tier (make check) passed"
 

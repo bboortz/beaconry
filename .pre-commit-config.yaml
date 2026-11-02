@@ -39,3 +39,11 @@ repos:
         language: system
         pass_filenames: false
         stages: [pre-push]
+      # BC-069: refuse pushes without a CHANGELOG entry for the current
+      # VERSION. Bypass with BEACONRY_SKIP_CHANGELOG=1 only in emergencies.
+      - id: verify-changelog
+        name: verify CHANGELOG entry (pre-push)
+        entry: python -m poc.scripts.verify_changelog
+        language: system
+        pass_filenames: false
+        stages: [pre-push]

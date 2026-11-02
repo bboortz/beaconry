@@ -24,6 +24,7 @@ Exit codes: 0 = bumped (prints old → new on stdout), 2 = usage error,
 from __future__ import annotations
 
 import argparse
+import os
 import re
 import subprocess
 import sys
@@ -157,7 +158,22 @@ def main(argv: list[str] | None = None) -> int:
 
     write(repo_root, new)
     print(f"bumped {kind}: {current} -> {new}")
-    print("remember to `git add VERSION poc/VERSION` + commit before pushing.")
+    # BC-069: regenerate CHANGELOG.md so the operator never has to remember
+    # a second step. Skip in dry-run and when explicitly bypassed.
+    if os.environ.get("BEACONRY_SKIP_CHANGELOG") == "1":
+        print("CHANGELOG regeneration skipped (BEACONRY_SKIP_CHANGELOG=1).")
+    else:
+        try:
+            # Local import so bump_version remains usable even if changelog.py
+            # has a syntax error (defensive — tooling must not block itself).
+            from poc.scripts.changelog import write as write_changelog
+
+            write_changelog(repo_root=repo_root)
+            print(f"✓ CHANGELOG.md updated for v{new}")
+        except Exception as e:  # noqa: BLE001
+            print(f"⚠ CHANGELOG regeneration failed: {e}", file=sys.stderr)
+            print("  Run `make changelog` manually before pushing.", file=sys.stderr)
+    print("remember to `git add VERSION poc/VERSION CHANGELOG.md` + commit before pushing.")
     return 0
 
 

@@ -63,3 +63,4 @@ Lifecycle: `draft → ready → in-progress → shipped`. Status matches each st
 | BC-066 | Manual executor as default + configurable adapter + 1h reminder sweep     | shipped     | — (merged to dev)                   |
 | BC-067 | Quality sweep — 5 severity-1 bugs from autonomous audit                   | shipped     | — (merged to dev)                   |
 | BC-068 | Defensive cleanup — reconcile FD-leak guard + fix_version blank sanitize  | shipped     | — (merged to dev)                   |
+| BC-069 | Release toolchain — CI + make soak + auto-CHANGELOG                       | shipped     | — (merged to dev)                   |
