@@ -1619,20 +1619,49 @@ Enforcement: `poc/scripts/verify_traceability.py` runs as part of `make check`. 
 ### CAP-T147: GitHub Actions CI with branch-stratified gates
 - **type:** technical
 - **status:** active
-- **origin:** BC-069 release toolchain — operator wanted a pipeline that keeps local checks primary and layers CI as a safety net, stratified so feature pushes are fast and dev pushes are thorough.
-- **description:** `.github/workflows/ci.yml` runs three gates: (1) feat/fix/docs push → ruff + ruff format + pyright (~20s); (2) push to dev + PR to dev → `make check` (full fast tier + coverage ≥85% + drift lints) (~2min); (3) push to main → `verify-changelog` + `verify-version-sync` + git-tag advisory. Concurrency cancellation (in-flight runs die on new push to same ref), docs-only short-circuit (lint still runs, heavy tests skip), pip caching, optional Telegram failure ping via existing bot. NO auto-merge dev→main (operator reserves that gate).
+- **origin:** BC-069 release toolchain — operator wanted a pipeline that keeps local checks primary and layers CI as a safety net, stratified so feature pushes are fast and dev pushes are thorough. BC-074 added the gated auto-promote path.
+- **description:** `.github/workflows/ci.yml` runs three validation gates: (1) feat/fix/docs push → ruff + ruff format + pyright (~20s); (2) push to dev + PR to dev → `make check` (full fast tier + coverage ≥85% + drift lints) (~2min); (3) push to main → `verify-changelog` + `verify-version-sync` + git-tag advisory. Concurrency cancellation (in-flight runs die on new push to same ref), docs-only short-circuit (lint still runs, heavy tests skip), pip caching, optional Telegram failure ping via existing bot. BC-074 adds a sibling `release.yml` with `workflow_dispatch` trigger — the review step the operator kept — that checks CI is green on dev HEAD, fast-forwards main, tags `v<VERSION>`, and pushes. Full automation downstream of the "ship it" click.
 - **supports:** CAP-B023
 - **verified by:**
   - `poc/tests/integration/test_BC_069_release_toolchain.py`
+  - `poc/tests/integration/test_BC_074_release_automation.py`
 
-### CAP-T148: make soak — audit-log health check over last 1h
+### CAP-T152: Release automation — gated workflow_dispatch promotion
 - **type:** technical
 - **status:** active
-- **origin:** BC-069 release toolchain — operator wanted a data-driven soak signal before promoting dev → main instead of eyeballing `make status`.
-- **description:** `poc/scripts/soak.py` + `make soak` scan `$DATA_DIR/audit.log` for events within `SOAK_WINDOW_S` (default 3600s) whose event name matches a curated error set (`notify_sent_failed`, `invalid_grype_match`, `reconcile_skipped_partial_inventory`, `regressed`, `set_status_failed`, `manual_fix_reminder_sent`). Exit 0 clean, 1 if errors in window (printed by ts/host/CVE), 2 if audit log unreadable. Operator uses it after each `make live-rebuild` to confirm the deploy didn't introduce new error-shaped events.
+- **origin:** BC-074 — operator asked for a fully automated release cycle gated by a reviewable trigger. Replaces the earlier manual `git checkout main && git merge --ff-only dev` dance.
+- **description:** `.github/workflows/release.yml` triggered by `workflow_dispatch` (the review step). Workflow asserts the latest "Full check" check-run on dev HEAD is `success`, fast-forwards main from dev, tags `v<VERSION>` (reads VERSION file), pushes main + tag. Fails loudly if CI isn't green yet. Uses default `GITHUB_TOKEN` with `contents: write` — swap to `GH_PAT` if main becomes a protected branch.
+- **supports:** CAP-B023
+- **verified by:**
+  - `poc/tests/integration/test_BC_074_release_automation.py`
+
+### CAP-T153: Feature-completeness lint — shipped story ⇒ closed plan
+- **type:** technical
+- **status:** active
+- **origin:** BC-074 — operator asked to ensure "whole features have been implemented". The DD-TGD pre-ship audit was discipline-only; this makes it a gate.
+- **description:** `poc/scripts/verify_feature_complete.py` + `make verify-feature-complete` + pre-push hook. Rules: (1) a `docs/stories/BC-NNN-*.md` with `status: shipped` must have ZERO `❌`/`⚠️` rows in its paired `docs/plan/BC-NNN-*-plan.md` shipping-evidence table; (2) in-progress stories can have open rows; (3) orphan plans (plan with no paired story) are flagged. Emergency bypass: `BEACONRY_SKIP_FEATURE_COMPLETE=1`.
+- **supports:** CAP-B023
+- **verified by:**
+  - `poc/tests/integration/test_BC_074_release_automation.py`
+
+### CAP-T154: CI-failure learning log
+- **type:** technical
+- **status:** active
+- **origin:** BC-074 — operator asked to "learn from every failed pipeline to ensure that issue never happens twice".
+- **description:** `docs/plan/CI-FAILURES.md` is an append-only log. One section per CI failure with trigger, root cause, fix (link to BC), regression test, and a one-line lesson. Backfilled with two entries: BC-071 (BEACONRY_SKIP_VERSION_BUMP env leak into pytest) and PR #1 (pytest-asyncio transitive-constraint trap closed via BC-072). Not auto-enforced — discipline is "every CI-failure-fix BC appends a line here in the same commit".
+- **supports:** CAP-B023
+- **verified by:**
+  - `poc/tests/integration/test_BC_074_release_automation.py`
+
+### CAP-T148: make soak — audit-log health check over configurable window (default 24h)
+- **type:** technical
+- **status:** active
+- **origin:** BC-069 release toolchain — operator wanted a data-driven soak signal before promoting dev → main. BC-074 raised the default window from 1h → 24h.
+- **description:** `poc/scripts/soak.py` + `make soak` scan `$DATA_DIR/audit.log` for events within `SOAK_WINDOW_S` (default **86400s = 24h** since BC-074) whose event name matches a curated error set (`notify_sent_failed`, `invalid_grype_match`, `reconcile_skipped_partial_inventory`, `regressed`, `set_status_failed`, `manual_fix_reminder_sent`). Timestamps show `MM-DD HH:MM:SS` since 24h windows cross midnight. Exit 0 clean, 1 if errors in window (printed by ts/host/CVE), 2 if audit log unreadable. Operator uses it after each `make live-rebuild` to confirm the deploy didn't introduce new error-shaped events.
 - **supports:** CAP-B023
 - **verified by:**
   - `poc/tests/integration/test_BC_069_release_toolchain.py`
+  - `poc/tests/integration/test_BC_074_release_automation.py`
 
 ### CAP-T151: Hermetic bump-verify tests + no CI env leak
 - **type:** technical

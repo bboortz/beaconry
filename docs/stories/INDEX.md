@@ -68,3 +68,4 @@ Lifecycle: `draft → ready → in-progress → shipped`. Status matches each st
 | BC-071 | Fix CI env leak — BEACONRY_SKIP_VERSION_BUMP leaking into pytest          | shipped     | — (merged to dev)                   |
 | BC-072 | pytest 8 → 9 (CVE-2025-71176) + cascading pytest-asyncio bump             | shipped     | — (merged to dev)                   |
 | BC-073 | python-dotenv + requests dep bumps (closes PRs #2, #3)                    | shipped     | — (merged to dev)                   |
+| BC-074 | Release automation + 24h soak + feature-complete lint + CI-failure log   | shipped     | — (merged to dev)                   |
