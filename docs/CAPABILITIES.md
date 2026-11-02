@@ -1490,6 +1490,24 @@ Enforcement: `poc/scripts/verify_traceability.py` runs as part of `make check`. 
 - **verified by:**
   - `poc/tests/integration/test_BC_063_fleet_health.py`
 
+### CAP-T135: /fleet surfaces last_heartbeat_ts + heartbeat_stale; status.py renders LAST HEARTBEAT column
+- **type:** technical
+- **status:** active
+- **origin:** BC-064 — operator reported ambiguous `LAST SEEN` column; live-stack output showed `LAST SEEN 12m ago · LAST SCAN 57s ago` which is impossible for a column that's supposed to be a superset of scans. Root cause: `LAST SEEN` was reading `MAX(findings.last_seen_ts)` since BC-055, not `scouts.last_posted_ts`.
+- **description:** `GET /fleet` response gains `last_heartbeat_ts` (=`scouts.last_posted_ts`) + `heartbeat_stale` (bool, `now - last_posted_ts > max(2 × SCOUT_HEARTBEAT_INTERVAL_S, 300)`). Threshold reads env at request time so operator tuning tracks automatically. `scripts/status.py::format_fleet` renders the column as `LAST HEARTBEAT` backed by `last_heartbeat_ts` (fallback to `last_posted_ts` for pre-BC-064 hub paired with BC-064 CLI). Legacy `last_seen_ts` field stays in the response for back-compat but is no longer surfaced in the FLEET table.
+- **supports:** CAP-B046
+- **verified by:**
+  - `poc/tests/integration/test_BC_064_fleet_clarity.py`
+
+### CAP-T136: HEALTH cell renders '? unknown' on stale heartbeat
+- **type:** technical
+- **status:** active
+- **origin:** BC-064 — a scout that stopped heartbeating 1h ago still rendered `● healthy` because the cell read a cached `last_health` from the last successful post. The cached label can't be trusted beyond ~2× heartbeat interval.
+- **description:** `_format_fleet_health` short-circuits to `? unknown` when `row["heartbeat_stale"]` is true, regardless of what `last_health` says. The legacy `last_health IS NULL → '? unknown'` path is preserved. Scouts within the staleness threshold continue to render their reported health.
+- **supports:** CAP-B046
+- **verified by:**
+  - `poc/tests/integration/test_BC_064_fleet_clarity.py`
+
 ### CAP-T134: Scout heartbeat (POST /heartbeat on short interval)
 - **type:** technical
 - **status:** active

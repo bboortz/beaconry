@@ -1912,12 +1912,21 @@ async def http_fleet() -> list[dict]:
         ]
         out.sort(key=lambda e: e["last_seen_ts"], reverse=True)
         return out
+    # BC-064: heartbeat-stale threshold. 2× scout interval (default 60s)
+    # with a 300s floor so operators who disabled heartbeats
+    # (SCOUT_HEARTBEAT_INTERVAL_S=0) fall back to BC-061 scan-cadence
+    # semantics instead of flapping every scout to stale instantly.
+    _hb_interval = int(os.environ.get("SCOUT_HEARTBEAT_INTERVAL_S", "60"))
+    _hb_stale_threshold = max(2 * _hb_interval, 300)
     out = [
         {
             "host": r[0],
             "first_seen_ts": int(r[1] or 0),
             "last_posted_ts": int(r[2] or 0),
             "last_sbom_count": int(r[3] or 0),
+            # BC-055 legacy: findings-derived watermark. Kept in the response
+            # for back-compat; `status.py` reads `last_heartbeat_ts` instead
+            # since BC-064 (findings watermark was misleading in FLEET UX).
             "last_seen_ts": int(r[4] or 0),
             "open_findings": int(r[5] or 0),
             "total_findings": int(r[6] or 0),
@@ -1927,6 +1936,10 @@ async def http_fleet() -> list[dict]:
             "api_version": r[8],
             "last_health": r[9],
             "last_scan_ts": int(r[10]) if r[10] is not None else None,
+            # BC-064: honest "last contact" + stale flag so the UI can
+            # drop a cached last_health label that we can't trust anymore.
+            "last_heartbeat_ts": int(r[2] or 0),
+            "heartbeat_stale": bool(int(r[2] or 0) > 0 and now - int(r[2]) > _hb_stale_threshold),
         }
         for r in rows
         if r[0]

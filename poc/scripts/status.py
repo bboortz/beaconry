@@ -119,12 +119,18 @@ def _format_fleet_version(row: dict, hub_api: int | None) -> str:
 
 
 def _format_fleet_health(row: dict) -> str:
-    """BC-063: ``'● healthy'`` / ``'⚠ degraded'`` / ``'? unknown'``.
+    """BC-063/BC-064: ``'● healthy'`` / ``'⚠ degraded'`` / ``'? unknown'``.
 
-    Pre-BC-063 scouts (last_health=None) render ``'? unknown'`` — the
-    scout exists but hasn't told us. Explicitly different from a scout
-    that reports ``'degraded'``.
+    - Pre-BC-063 scouts (last_health=None): ``'? unknown'`` — scout
+      exists but hasn't told us.
+    - BC-064: ``'? unknown'`` also when `heartbeat_stale` is true. The
+      cached `last_health` label older than ~2× heartbeat interval
+      can't be trusted — a scout that stopped heartbeating may well
+      have crashed; we don't know its current state.
+    - Otherwise: scout's reported value → glyph.
     """
+    if row.get("heartbeat_stale"):
+        return "? unknown"
     h = row.get("last_health")
     if not h:
         return "? unknown"
@@ -149,7 +155,12 @@ def format_fleet(rows: list[dict], *, hub_api: int | None = None) -> str:
     has_bc063 = any(
         r.get("software_version") or r.get("last_health") or r.get("last_scan_ts") for r in rows
     )
-    header = ["HOST", "LAST SEEN"]
+    # BC-064: `LAST SEEN` was a lie — the column read findings.last_seen_ts
+    # (watermark of CVE observations), not scouts.last_posted_ts (actual
+    # last contact). Column is now `LAST HEARTBEAT`, backed by
+    # last_heartbeat_ts (new BC-064 field) with a fallback to
+    # last_posted_ts for a pre-BC-064 hub paired with a BC-064 CLI.
+    header = ["HOST", "LAST HEARTBEAT"]
     if has_bc063:
         header += ["LAST SCAN", "VERSION", "HEALTH"]
     header += ["OPEN", "TOTAL"]
@@ -157,9 +168,10 @@ def format_fleet(rows: list[dict], *, hub_api: int | None = None) -> str:
         header.append("STATUS")
     body: list[list[str]] = []
     for r in rows:
+        heartbeat_ts = r.get("last_heartbeat_ts") or r.get("last_posted_ts") or 0
         cells = [
             r.get("host", "?"),
-            _format_age(int(r.get("last_seen_ts") or 0)),
+            _format_age(int(heartbeat_ts)),
         ]
         if has_bc063:
             last_scan_ts = r.get("last_scan_ts")
