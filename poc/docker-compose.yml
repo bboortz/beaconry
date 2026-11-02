@@ -90,6 +90,10 @@ services:
       # BC-063: short-interval keepalive so FLEET's HEALTH/VERSION cells stay
       # fresh. Set to 0 to disable.
       - SCOUT_HEARTBEAT_INTERVAL_S=${SCOUT_HEARTBEAT_INTERVAL_S:-60}
+      # BC-075: metrics opt-in. 0 = scout stays out of beaconry metrics
+      # (privacy-first default). 1 = opt in; hub records metrics-fuel
+      # audit events for this scout.
+      - SCOUT_METRICS_ENABLED=${SCOUT_METRICS_ENABLED:-0}
       - SCOUT_INCLUDE=${SCOUT_INCLUDE:-nginx*,redis*,postgres*}
       - SCOUT_EXCLUDE=${SCOUT_EXCLUDE:-}
       - PACMAN_DB=/host/var/lib/pacman

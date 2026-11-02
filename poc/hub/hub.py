@@ -2572,7 +2572,7 @@ def _mark_scan_now() -> None:
 
 
 @api.post("/scan", dependencies=[Depends(require_scout_token)])
-async def receive_scan(payload: dict) -> dict:
+async def receive_scan(payload: dict, request: _FastAPIRequest) -> dict:
     """BC-005: apply CVE dedup + per-run cap across the whole inventory before notifying.
 
     Previously each SBOM's findings were notified independently, flooding the
@@ -2610,12 +2610,16 @@ async def receive_scan(payload: dict) -> dict:
     # BC-042: audit every scan reception, even if 0 candidates. Closes the
     # "did scout even post?" blind spot — a silent scout and a scout-with-0
     # candidates were indistinguishable in the audit log pre-BC-042.
-    _audit.append(
-        "scan_received",
-        host=host,
-        sbom_count=len(sboms),
-        exposed_count=exposed_count,
-    )
+    # BC-075: metrics-fuel audit event — written ONLY when scout opts in via
+    # `X-Beaconry-Metrics-Opt-In: 1`. Privacy-first default. CVE processing,
+    # notifications, DB persistence, fleet view all keep working regardless.
+    if request.headers.get("X-Beaconry-Metrics-Opt-In") == "1":
+        _audit.append(
+            "scan_received",
+            host=host,
+            sbom_count=len(sboms),
+            exposed_count=exposed_count,
+        )
 
     candidates: list[Finding] = []
     for entry in sboms:
@@ -2630,7 +2634,7 @@ async def receive_scan(payload: dict) -> dict:
 
 
 @api.post("/heartbeat", dependencies=[Depends(require_scout_token)])
-async def receive_heartbeat(payload: dict) -> dict:
+async def receive_heartbeat(payload: dict, request: _FastAPIRequest) -> dict:
     """BC-063: lightweight scout keepalive — host + version + health.
 
     No SBOMs. No candidate processing. Hub updates the scouts row's
@@ -2638,6 +2642,10 @@ async def receive_heartbeat(payload: dict) -> dict:
     `last_sbom_count` untouched so FLEET's LAST SCAN column reflects
     real scan activity (not every 60s keepalive). Scout bearer token
     required — same auth surface as /scan.
+
+    BC-075: `heartbeat_received` is a metrics-fuel audit event — written
+    ONLY when scout opts in via `X-Beaconry-Metrics-Opt-In: 1`. Fleet
+    health (scouts registry) still updates for every heartbeat regardless.
     """
     host = payload.get("host", "unknown")
     now = int(time.time())
@@ -2650,11 +2658,12 @@ async def receive_heartbeat(payload: dict) -> dict:
         health=payload.get("health"),
         bump_scan_ts=False,
     )
-    _audit.append(
-        "heartbeat_received",
-        host=host,
-        health=payload.get("health") or "unknown",
-    )
+    if request.headers.get("X-Beaconry-Metrics-Opt-In") == "1":
+        _audit.append(
+            "heartbeat_received",
+            host=host,
+            health=payload.get("health") or "unknown",
+        )
     return {"ok": True, "host": host, "ts": now}
 
 

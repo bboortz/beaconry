@@ -76,13 +76,30 @@ _SUBCOMMANDS: dict[str, tuple[str, str, str]] = {
     ),
     "soak": (
         "poc.scripts.soak",
-        "audit-log health check over the last 1h (BC-069)",
+        "audit-log health check over the last 24h (BC-069/BC-074/BC-075)",
         "Usage: beaconry soak\n"
         "\n"
-        "Scans $DATA_DIR/audit.log for error events in the last SOAK_WINDOW_S\n"
-        "seconds (default 3600). Exit codes: 0 clean, 1 errors, 2 missing log.\n"
+        "Scans $DATA_DIR/audit.log for error events + threshold anomalies in the\n"
+        "last SOAK_WINDOW_S seconds (default 86400 = 24h). Exit codes: 0 clean,\n"
+        "1 errors or anomalies, 2 missing log.\n"
         "    SOAK_WINDOW_S=1800 beaconry soak   # 30-min window\n"
         "    DATA_DIR=/data beaconry soak        # alt audit log path",
+    ),
+    "metrics": (
+        "poc.scripts.metrics",
+        "beaconry usability + feature-usage metrics from audit.log (BC-075)",
+        "Usage: beaconry metrics [usability|features|all] [--since 7d] [--json]\n"
+        "\n"
+        "Two lenses on the same data:\n"
+        "  usability  — key user: 'is this tool worth it?' (action rate,\n"
+        "               time-to-fix, regression rate, ignored rate)\n"
+        "  features   — developer: 'which features earn their keep?' (digest\n"
+        "               fires, heartbeat health, manual-fix uptake)\n"
+        "  all        — both (default)\n"
+        "\n"
+        "    beaconry metrics usability --since 7d\n"
+        "    beaconry metrics features --json\n"
+        "    beaconry metrics all --since 24h",
     ),
 }
 

@@ -538,7 +538,12 @@ async def test_receive_scan_applies_dedup_and_cap(
         ],
     }
 
-    result = await hub.receive_scan(payload)
+    # BC-075: receive_scan now takes a Request parameter; stub it with
+    # a tiny fake since these tests don't exercise the opt-in header path.
+    class _FakeRequest:
+        headers: dict[str, str] = {}
+
+    result = await hub.receive_scan(payload, _FakeRequest())  # type: ignore[arg-type]
 
     # 3 SBOMs × 3 findings = 9 candidates → dedup to 3 unique CVEs (CVE-A, B, C)
     # Cap=2 → notify top 2 by (tier, -cvss), suppress 1
@@ -610,8 +615,12 @@ async def test_receive_scan_notifies_on_fresh_db(
     monkeypatch.setattr(hub, "notify", _fake_notify)
     monkeypatch.setattr(hub, "send_digest", _fake_digest)
 
+    class _FakeRequest:
+        headers: dict[str, str] = {}
+
     result = await hub.receive_scan(
-        {"host": "h", "sboms": [{"source_meta": {"type": "docker", "image": "img:a"}, "sbom": {}}]}
+        {"host": "h", "sboms": [{"source_meta": {"type": "docker", "image": "img:a"}, "sbom": {}}]},
+        _FakeRequest(),  # type: ignore[arg-type]
     )
 
     assert result["findings"] == 1
@@ -632,7 +641,11 @@ async def test_receive_scan_empty_sbom_list(
     monkeypatch.setattr(hub, "DB_PATH", tmp_path / "receive-scan-empty.db")  # type: ignore[operator]
     hub.init_db()
     monkeypatch.setattr(hub, "send_digest", _fake_digest)
-    result = await hub.receive_scan({"host": "h", "sboms": []})
+
+    class _FakeRequest:
+        headers: dict[str, str] = {}
+
+    result = await hub.receive_scan({"host": "h", "sboms": []}, _FakeRequest())  # type: ignore[arg-type]
     assert result == {"status": "ok", "findings": 0, "regressed": 0, "auto_closed": 0}
 
 

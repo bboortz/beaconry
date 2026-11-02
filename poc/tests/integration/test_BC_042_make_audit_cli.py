@@ -197,9 +197,15 @@ def hub_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch):
     importlib.reload(hub)
 
 
+# BC-075: scan_received is gated on `X-Beaconry-Metrics-Opt-In: 1`
+# (privacy-first default). Pass the opt-in header in these audit-event
+# assertion tests so the gate doesn't drop the event we're testing for.
+_OPT_IN = {"X-Beaconry-Metrics-Opt-In": "1"}
+
+
 def test_scan_received_emitted(hub_env: dict) -> None:
     """Hub emits `scan_received` on every /scan POST, including non-empty ones."""
-    r = hub_env["client"].post("/scan", json={"host": "test-host", "sboms": []})
+    r = hub_env["client"].post("/scan", json={"host": "test-host", "sboms": []}, headers=_OPT_IN)
     assert r.status_code == 200
     events = [
         json.loads(line) for line in hub_env["audit"].read_text().splitlines() if line.strip()
@@ -213,7 +219,7 @@ def test_scan_received_emitted(hub_env: dict) -> None:
 
 def test_scan_received_fires_even_with_zero_candidates(hub_env: dict) -> None:
     """BC-042 motivation: scout-posts-nothing is now distinguishable from scout-silent."""
-    r = hub_env["client"].post("/scan", json={"host": "quiet-host", "sboms": []})
+    r = hub_env["client"].post("/scan", json={"host": "quiet-host", "sboms": []}, headers=_OPT_IN)
     assert r.status_code == 200
     events = [
         json.loads(line) for line in hub_env["audit"].read_text().splitlines() if line.strip()
@@ -230,6 +236,7 @@ def test_scan_received_carries_exposed_count(hub_env: dict) -> None:
             "sboms": [],
             "container_exposure": {"img:a": True, "img:b": True, "img:c": False},
         },
+        headers=_OPT_IN,
     )
     assert r.status_code == 200
     events = [

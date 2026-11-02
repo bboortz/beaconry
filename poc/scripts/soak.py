@@ -29,12 +29,22 @@ _ERROR_EVENTS = frozenset(
     {
         "notify_sent_failed",  # Telegram or adapter dispatch failed
         "invalid_grype_match",  # BC-067 malformed CVE data
-        "reconcile_skipped_partial_inventory",  # BC-067 scout glitch
         "regressed",  # BC-031 fix regression (critical)
         "set_status_failed",  # operator action failed
-        "manual_fix_reminder_sent",  # BC-066 operator never acted on claim
+        # BC-075: `manual_fix_reminder_sent` and
+        # `reconcile_skipped_partial_inventory` moved out of per-event flags
+        # into _detect_anomalies() — treated as patterns over the window
+        # (3+ without fix, > 20% rate) so single occurrences don't spam
+        # the operator with false alarms.
     }
 )
+
+# BC-075: anomaly thresholds — a developer would deny merging if any
+# of these fire. Different from hard errors above (which flag EACH
+# occurrence); thresholds flag PATTERNS over the window.
+_NOTIFY_FAILURE_RATIO_THRESHOLD = 0.10  # notifier broken
+_PARTIAL_INV_RATIO_THRESHOLD = 0.20  # scout flaky
+_REMINDER_STORM_THRESHOLD = 3  # same finding, 3+ reminders, not fixed
 
 
 def _resolve_audit_path() -> Path:
@@ -77,6 +87,88 @@ def _format_event(ev: dict) -> str:
     return f"  {stamp}  {name:<40} {' '.join(details)}"
 
 
+def _detect_anomalies(events: list[dict]) -> list[str]:
+    """BC-075: pattern-level anomalies that would make a developer deny
+    the merge. Returns a list of human-readable anomaly strings; empty
+    = clean. Different from `_ERROR_EVENTS` (per-event hard errors);
+    these inspect patterns over the whole window.
+    """
+    from collections import defaultdict
+
+    anomalies: list[str] = []
+    notify_sent = sum(1 for e in events if e.get("event") == "notify_sent")
+    notify_failed = sum(1 for e in events if e.get("event") == "notify_sent_failed")
+    scan_received = sum(1 for e in events if e.get("event") == "scan_received")
+    partial_inv = sum(1 for e in events if e.get("event") == "reconcile_skipped_partial_inventory")
+
+    # Notifier health: > 10% failure ratio
+    total_notify = notify_sent + notify_failed
+    if total_notify >= 10:  # don't flag on tiny samples
+        failure_rate = notify_failed / total_notify
+        if failure_rate > _NOTIFY_FAILURE_RATIO_THRESHOLD:
+            anomalies.append(
+                f"notifier failure rate {failure_rate:.0%} "
+                f"({notify_failed}/{total_notify}) exceeds "
+                f"{_NOTIFY_FAILURE_RATIO_THRESHOLD:.0%} threshold — Telegram token revoked?"
+            )
+
+    # Partial-inventory saves: > 20% of scans tripping BC-067 → scout flaky
+    if scan_received >= 5:
+        partial_rate = partial_inv / scan_received
+        if partial_rate > _PARTIAL_INV_RATIO_THRESHOLD:
+            anomalies.append(
+                f"partial-inventory save rate {partial_rate:.0%} "
+                f"({partial_inv}/{scan_received}) exceeds "
+                f"{_PARTIAL_INV_RATIO_THRESHOLD:.0%} threshold — scout glitching"
+            )
+
+    # Reminder storm: 3+ `manual_fix_reminder_sent` for the same finding
+    # without a terminal transition (operator ignoring the nag).
+    reminders_per_finding: dict[str, int] = defaultdict(int)
+    fixed_finding_ids: set[str] = set()
+    for ev in events:
+        name = ev.get("event")
+        fid = ev.get("finding_id")
+        if not fid:
+            continue
+        if name == "manual_fix_reminder_sent":
+            reminders_per_finding[fid] += 1
+        elif name in {"auto_closed"} or (
+            name == "status_change" and ev.get("new_status") == "fixed_verified"
+        ):
+            fixed_finding_ids.add(fid)
+    stuck = [
+        fid
+        for fid, count in reminders_per_finding.items()
+        if count >= _REMINDER_STORM_THRESHOLD and fid not in fixed_finding_ids
+    ]
+    if stuck:
+        anomalies.append(
+            f"reminder storm — {len(stuck)} finding(s) with "
+            f"≥{_REMINDER_STORM_THRESHOLD} reminders and no fix "
+            f"(operator may be ignoring nags; first: {stuck[0]})"
+        )
+
+    return anomalies
+
+
+def _detect_pipeline_silence(
+    events: list[dict], *, window_s: int, scan_interval_s: int = 300
+) -> list[str]:
+    """BC-075: pipeline-silence anomaly — zero `scan_received` for > 2× the
+    expected cadence. Treated as its own check because it has to meaningfully
+    consider the window size (don't flag silence in a 60s soak window)."""
+    scan_cadence_window = scan_interval_s * 2
+    if window_s < scan_cadence_window * 2:
+        return []  # window too short to meaningfully assert silence
+    if any(e.get("event") == "scan_received" for e in events):
+        return []
+    return [
+        f"zero `scan_received` events in window — pipeline silent "
+        f"(expected at least one scan every {scan_interval_s}s)"
+    ]
+
+
 def soak(now: int | None = None) -> int:
     """Entry point. Returns the exit code."""
     audit_path = _resolve_audit_path()
@@ -103,6 +195,10 @@ def soak(now: int | None = None) -> int:
         return 2
 
     errors = [e for e in events if e.get("event") in _ERROR_EVENTS]
+    # BC-075: anomaly thresholds (pattern-level signals).
+    anomalies = _detect_anomalies(events)
+    anomalies += _detect_pipeline_silence(events, window_s=window_s)
+
     since_human = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(since_ts))
     # BC-074: render window in the chunkiest honest unit so a 24h run
     # doesn't say "1440m" and a 30m run doesn't say "0h".
@@ -112,13 +208,21 @@ def soak(now: int | None = None) -> int:
     else:
         window_label = f"{window_s // 60}m"
     print(f"Scanning {audit_path} (last {window_label}, since {since_human}; {len(events)} events)")
-    if not errors:
-        print(f"✓ 0 error events in last {window_label} — stack looks healthy")
+
+    # Both lists empty → clean exit.
+    if not errors and not anomalies:
+        print(f"✓ 0 error events + 0 anomalies in last {window_label} — stack looks healthy")
         return 0
-    print(f"⚠ {len(errors)} error event(s) in last {window_label}:")
-    # Preserve chronological order for operator readability.
-    for ev in sorted(errors, key=lambda e: e.get("ts", 0)):
-        print(_format_event(ev))
+
+    # BC-075: section the output so operator can tell errors from thresholds.
+    if errors:
+        print(f"⚠ {len(errors)} error event(s) in last {window_label}:")
+        for ev in sorted(errors, key=lambda e: e.get("ts", 0)):
+            print(_format_event(ev))
+    if anomalies:
+        print(f"⚠ {len(anomalies)} anomaly threshold(s) in last {window_label}:")
+        for a in anomalies:
+            print(f"  • {a}")
     return 1
 
 

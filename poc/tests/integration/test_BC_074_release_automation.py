@@ -73,10 +73,17 @@ def test_soak_timestamp_shows_month_day(
 
 def test_soak_window_override_still_works(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
     """CAP-T148 regression guard: operator can still shrink to 1h via env.
-    An event 2h old is OUTSIDE a 1h window → clean."""
+    An event 2h old is OUTSIDE a 1h window → clean. In-window `scan_received`
+    added so BC-075's pipeline-silence check doesn't trip."""
     now = int(time.time())
     (tmp_path / "audit.log").write_text(
-        json.dumps({"ts": now - 7200, "event": "regressed", "cve_id": "CVE-X"}) + "\n"
+        "\n".join(
+            [
+                json.dumps({"ts": now - 7200, "event": "regressed", "cve_id": "CVE-X"}),
+                json.dumps({"ts": now - 60, "event": "scan_received", "host": "h1"}),
+            ]
+        )
+        + "\n"
     )
     monkeypatch.setenv("DATA_DIR", str(tmp_path))
     monkeypatch.setenv("SOAK_WINDOW_S", "3600")

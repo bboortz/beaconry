@@ -4,6 +4,8 @@ All notable changes to beaconry are recorded here. The format is based
 on [Keep a Changelog](https://keepachangelog.com/), and this project
 follows [Semantic Versioning](https://semver.org/).
 
+## [v0.5.0] — 2026-11-02
+
 ## [v0.4.0] — 2026-11-02
 
 ### ⚠ Breaking

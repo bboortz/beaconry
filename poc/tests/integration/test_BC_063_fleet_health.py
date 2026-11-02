@@ -380,7 +380,8 @@ def test_healthz_version_schema_matches_expected(hub_env) -> None:
 
 def test_heartbeat_emits_audit_event(hub_env) -> None:
     """A heartbeat is auditable: operator should be able to see the
-    keepalive stream in `make audit`."""
+    keepalive stream in `make audit` — provided the scout opts in to
+    metrics (BC-075 privacy-first gate)."""
     r = hub_env["client"].post(
         "/heartbeat",
         json={
@@ -389,6 +390,7 @@ def test_heartbeat_emits_audit_event(hub_env) -> None:
             "api_version": 1,
             "health": "ok",
         },
+        headers={"X-Beaconry-Metrics-Opt-In": "1"},
     )
     assert r.status_code == 200
     # Audit JSONL lives in the DATA_DIR.

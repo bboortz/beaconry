@@ -66,6 +66,14 @@ HTTP_PORT = int(os.environ.get("SCOUT_HTTP_PORT", "8001"))
 # disable (falls back to BC-061 behaviour where /scan is the only
 # heartbeat).
 SCOUT_HEARTBEAT_INTERVAL_S = int(os.environ.get("SCOUT_HEARTBEAT_INTERVAL_S", "60"))
+# BC-075: metrics opt-in. Default OFF — scout timing + action patterns are
+# not aggregated by `beaconry metrics` unless explicitly enabled. Scouts
+# running against a hub they don't own (future SaaS, multi-tenant) stay
+# private by default. Setting `SCOUT_METRICS_ENABLED=1` adds the opt-in
+# header to /scan + /heartbeat POSTs; hub honors it by writing the
+# metrics-fuel audit events (`scan_received`, `heartbeat_received`).
+# CVE matching, notifications, fleet view all keep working regardless.
+SCOUT_METRICS_ENABLED = os.environ.get("SCOUT_METRICS_ENABLED", "0") == "1"
 
 # BC-005 defaults — demo-safe allowlist, no excludes by default.
 DEFAULT_INCLUDE_GLOBS = "nginx*,redis*,postgres*"
@@ -444,6 +452,10 @@ def collect_and_post():  # pragma: no cover - orchestrator; integration-tested l
             # BEACONRY_STRICT_API=1.
             "X-Beaconry-API-Expect": str(CLIENT_API_VERSION),
         }
+        # BC-075: explicit per-scout metrics opt-in. Hub honors by writing
+        # the metrics-fuel audit event ONLY when the header is present.
+        if SCOUT_METRICS_ENABLED:
+            headers["X-Beaconry-Metrics-Opt-In"] = "1"
         token = os.environ.get("HUB_TOKEN", "")
         if token:
             headers["Authorization"] = f"Bearer {token}"
@@ -567,6 +579,9 @@ def heartbeat_once() -> bool:
         "Content-Type": "application/json",
         "X-Beaconry-API-Expect": str(CLIENT_API_VERSION),
     }
+    # BC-075: metrics opt-in header on heartbeat path.
+    if SCOUT_METRICS_ENABLED:
+        headers["X-Beaconry-Metrics-Opt-In"] = "1"
     token = os.environ.get("HUB_TOKEN", "")
     if token:
         headers["Authorization"] = f"Bearer {token}"

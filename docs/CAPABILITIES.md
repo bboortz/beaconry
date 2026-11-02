@@ -1644,6 +1644,33 @@ Enforcement: `poc/scripts/verify_traceability.py` runs as part of `make check`. 
 - **verified by:**
   - `poc/tests/integration/test_BC_074_release_automation.py`
 
+### CAP-T155: beaconry metrics — usability + feature-usage reports
+- **type:** technical
+- **status:** active
+- **origin:** BC-075 — operator asked to start measuring to verify beaconry's usefulness + correctness. Two personas (key user, developer) need different lenses on the same audit data.
+- **description:** `poc/scripts/metrics.py` + `make metrics` + `beaconry metrics` subcommand. Three report shapes: `usability` (key-user: alerts delivered, action rate, fix rate, ignored rate, time-to-action p50/p75/p95, regression rate, reminder effectiveness), `features` (developer: digest fire ratio, distinct hosts in 7d, heartbeat gaps per host, scan cadence median, manual-fix uptake, partial-inventory saves, invalid-grype losses), `all` (both, default). Flags: `--since 7d|24h|30m`, `--json` for machine-readable. Reads `$DATA_DIR/audit.log`; exits 2 if missing.
+- **supports:** CAP-B023
+- **verified by:**
+  - `poc/tests/integration/test_BC_075_metrics.py`
+
+### CAP-T156: Threshold-based anomaly signals in make soak
+- **type:** technical
+- **status:** active
+- **origin:** BC-075 — operator asked soak to also flag patterns a developer would deny merging over (not just hard error events).
+- **description:** `poc/scripts/soak.py::_detect_anomalies` + `_detect_pipeline_silence` layer threshold signals on top of the BC-069 hard-error flags: notifier failure ratio > 10% of attempts (with ≥10 sample floor), partial-inventory save ratio > 20% of scans (with ≥5 scan floor), reminder storm (same finding, ≥3 reminders with no fix_verified), pipeline silence (zero `scan_received` in a window ≥ 4× SCAN_INTERVAL). `manual_fix_reminder_sent` and `reconcile_skipped_partial_inventory` moved from per-event hard errors to pattern signals so single occurrences don't spam the operator. Output sections distinguish "error events" from "anomaly thresholds".
+- **supports:** CAP-B023
+- **verified by:**
+  - `poc/tests/integration/test_BC_075_metrics.py`
+
+### CAP-T157: Scout metrics opt-in — privacy-first default
+- **type:** technical
+- **status:** active
+- **origin:** BC-075 — operator flagged privacy concerns mid-scope: scouts shouldn't leak timing + action patterns to a hub they don't own without explicit consent (DESIGN.md Phase 4 heads toward multi-tenant SaaS).
+- **description:** New scout env `SCOUT_METRICS_ENABLED` (default `0` = off). When `1`, scout attaches `X-Beaconry-Metrics-Opt-In: 1` to `/scan` + `/heartbeat` POSTs. Hub's `receive_scan` + `receive_heartbeat` honor the header by writing `scan_received` + `heartbeat_received` audit events only for opted-in scouts. CVE matching, Telegram notifications, DB persistence, `/fleet` endpoint, FLEET view all keep working for every scout regardless — only the metrics-fuel audit records are gated. Only exact `1` opts in (`true`/`yes`/`0`/missing all skip). Default-off trains the right instincts for Phase 4 while keeping the opt-in trivial for POC operators who want their own measurements.
+- **supports:** CAP-B023
+- **verified by:**
+  - `poc/tests/integration/test_BC_075_metrics.py`
+
 ### CAP-T154: CI-failure learning log
 - **type:** technical
 - **status:** active
