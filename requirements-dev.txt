@@ -8,9 +8,14 @@ ruff==0.14.1
 pyright==1.1.414
 
 # Testing
-pytest==8.3.3
+# BC-072: pytest 9.0.3 fixes CVE-2025-71176 (insecure temp dir). The bump
+# cascades: pytest-asyncio 0.24.0 pins pytest<9, so pytest-asyncio must
+# move to 1.x where the constraint widens. Verified clean on
+# `make check-full` before shipping (884 tests + 10/10 scenarios + 11/11
+# CLI smokes).
+pytest==9.0.3
 pytest-cov==6.0.0
-pytest-asyncio==0.24.0
+pytest-asyncio==1.4.1.post1
 pytest-mock==3.14.0
 
 # Pre-commit framework
