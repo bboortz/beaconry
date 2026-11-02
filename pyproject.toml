@@ -22,10 +22,19 @@ beaconry = "poc.scripts.cli:main"
 requires = ["setuptools>=68"]
 build-backend = "setuptools.build_meta"
 
-[tool.setuptools.packages.find]
-where = ["."]
-include = ["poc*"]
-exclude = ["poc.tests*", "poc.scenarios*", "poc.telegram_mock*"]
+# Explicit list bypasses setuptools flat-layout detection (which fires when
+# multiple top-level dirs exist — poc/ + memory/) before the include filter
+# is applied. This is equivalent to the old find with include=["poc*"] minus
+# test/scenario packages.
+[tool.setuptools]
+packages = [
+    "poc",
+    "poc.beaconry_health",
+    "poc.hub.executor",
+    "poc.hub.notifiers",
+    "poc.scout",
+    "poc.scripts",
+]
 
 [tool.ruff]
 line-length = 100
