@@ -1045,13 +1045,44 @@ def _emit_notify_sent(finding: Finding, kind: str) -> None:
     )
 
 
+_NOTIFY_REASON_MAX = 200
+
+
+def _format_fail_reason(exc: Exception) -> str:
+    """BC-060: compact exception summary for audit — class name + short msg.
+
+    Truncated to {_NOTIFY_REASON_MAX} chars. python-telegram-bot errors
+    sometimes include the API URL with the bot token in it; prefer the
+    class name as the primary signal and treat the audit log itself as
+    sensitive. A dedicated token-redaction regex is a follow-up BC.
+    """
+    msg = str(exc)[:_NOTIFY_REASON_MAX]
+    return f"{exc.__class__.__name__}: {msg}"
+
+
+def _emit_notify_sent_failed(finding: Finding, kind: str, exc: Exception) -> None:
+    """BC-060: symmetric audit event for failed dispatches."""
+    _audit.append(
+        "notify_sent_failed",
+        finding_id=finding.id,
+        cve_id=finding.cve_id,
+        host=finding.host,
+        kind=kind,
+        reason=_format_fail_reason(exc),
+    )
+
+
 async def notify_regression(finding: Finding, last_fixed_ts: int) -> None:
     """BC-031: 🔥 FIX REGRESSED. Dispatched to all enabled notification adapters."""
     if MOCK and not _notifiers_pkg.enabled_adapters():
         _mock_print("Regression", format_regression(finding, last_fixed_ts))
         _emit_notify_sent(finding, "regression")
         return
-    await _dispatch_regression(finding, last_fixed_ts)
+    try:
+        await _dispatch_regression(finding, last_fixed_ts)
+    except Exception as exc:
+        _emit_notify_sent_failed(finding, "regression", exc)
+        raise
     _emit_notify_sent(finding, "regression")
 
 
@@ -1061,7 +1092,11 @@ async def notify(finding: Finding) -> None:
         _mock_print("Notification", format_notification(finding))
         _emit_notify_sent(finding, "finding")
         return
-    await _dispatch_finding(finding)
+    try:
+        await _dispatch_finding(finding)
+    except Exception as exc:
+        _emit_notify_sent_failed(finding, "finding", exc)
+        raise
     _emit_notify_sent(finding, "finding")
 
 
@@ -1071,7 +1106,11 @@ async def notify_heartbeat(finding: Finding, open_since_ts: int) -> None:
         _mock_print("Heartbeat", format_heartbeat(finding, open_since_ts))
         _emit_notify_sent(finding, "heartbeat")
         return
-    await _dispatch_heartbeat(finding, open_since_ts)
+    try:
+        await _dispatch_heartbeat(finding, open_since_ts)
+    except Exception as exc:
+        _emit_notify_sent_failed(finding, "heartbeat", exc)
+        raise
     _emit_notify_sent(finding, "heartbeat")
 
 
@@ -1922,10 +1961,22 @@ def record_digest_throttled(host: str, suppressed: list[Finding], *, now: int, r
 
 
 async def send_digest(suppressed: list[Finding]) -> None:
-    """BC-035: thin wrapper — all enabled notification adapters receive the digest."""
+    """BC-035: thin wrapper — all enabled notification adapters receive the digest.
+    BC-060: audit on dispatch failure so operators can see which digests
+    never landed. Exception is re-raised to preserve caller's existing
+    error-handling (log.warning in process_sbom_entry)."""
     if not suppressed:
         return
-    await _dispatch_digest(suppressed)
+    try:
+        await _dispatch_digest(suppressed)
+    except Exception as exc:
+        _audit.append(
+            "notify_digest_sent_failed",
+            finding_ids=[f.id for f in suppressed],
+            count=len(suppressed),
+            reason=_format_fail_reason(exc),
+        )
+        raise
 
 
 async def heartbeat_sweep(*, now_ts: int | None = None) -> int:

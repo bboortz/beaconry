@@ -1336,3 +1336,21 @@ Enforcement: `poc/scripts/verify_traceability.py` runs as part of `make check`. 
 - **supports:** CAP-B042
 - **verified by:**
   - `poc/tests/integration/test_BC_059_callback_data_cve.py`
+
+### CAP-B043: Operator can see which notifications failed in the audit log
+- **type:** business
+- **status:** active
+- **origin:** BC-060 — BC-058 recorded every successful send; this closes the gap by recording failures too. Token revoked / network drop / rate limit → operator can grep the audit log instead of fishing in container logs.
+- **description:** `make audit EVENT=notify_sent_failed` surfaces every failed dispatch with `{finding_id, cve_id, host, kind, reason}`. Digest failures emit `notify_digest_sent_failed` with the full `finding_ids` list that didn't land. Reasons use the exception class name as the primary signal (`HTTPError: 401 Unauthorized` vs `URLError: Name or service not known`) and truncate the message to 200 chars to bound audit size. Audit is additive — exceptions still propagate to callers' existing error-handling.
+- **supports:** CAP-B023
+- **verified by:**
+  - `poc/tests/integration/test_BC_060_notify_failed.py`
+
+### CAP-T120: notify_sent_failed + notify_digest_sent_failed audit events
+- **type:** technical
+- **status:** active
+- **origin:** BC-060
+- **description:** `_emit_notify_sent_failed(finding, kind, exc)` wraps each `_dispatch_*` call in `notify`, `notify_regression`, `notify_heartbeat`. `send_digest` has an analogous wrapper emitting `notify_digest_sent_failed` with the full suppressed finding_ids list. `_format_fail_reason(exc)` composes `ClassName: short_msg[:200]`. All exceptions re-raise after the audit append so caller behavior (log.warning in process_sbom_entry, counter increments in heartbeat_sweep) is unchanged.
+- **supports:** CAP-B043
+- **verified by:**
+  - `poc/tests/integration/test_BC_060_notify_failed.py`
