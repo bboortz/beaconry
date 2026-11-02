@@ -65,20 +65,26 @@ def _read_window(path: Path, now: int, window_s: int) -> list[dict]:
 
 def _format_event(ev: dict) -> str:
     ts = ev.get("ts", 0)
-    hhmm = time.strftime("%H:%M:%S", time.localtime(ts)) if isinstance(ts, int) else "?"
+    # BC-074: 24h window warrants the date too — HH:MM:SS alone is
+    # ambiguous across the midnight boundary.
+    stamp = time.strftime("%m-%d %H:%M:%S", time.localtime(ts)) if isinstance(ts, int) else "?"
     name = ev.get("event", "?")
     details = []
     for k in ("finding_id", "cve_id", "host", "artifact"):
         v = ev.get(k)
         if v:
             details.append(f"{k}={v}")
-    return f"  {hhmm}  {name:<40} {' '.join(details)}"
+    return f"  {stamp}  {name:<40} {' '.join(details)}"
 
 
 def soak(now: int | None = None) -> int:
     """Entry point. Returns the exit code."""
     audit_path = _resolve_audit_path()
-    window_s = int(os.environ.get("SOAK_WINDOW_S", "3600"))
+    # BC-074: default window is 24h — the natural staging soak length
+    # (deploy to hetzner-staging day N → `make soak` day N+1 → promote).
+    # Operators who want the pre-BC-074 1h window can override:
+    # `SOAK_WINDOW_S=3600 make soak`.
+    window_s = int(os.environ.get("SOAK_WINDOW_S", "86400"))
     now_ts = now if now is not None else int(time.time())
     since_ts = now_ts - window_s
 
@@ -98,13 +104,18 @@ def soak(now: int | None = None) -> int:
 
     errors = [e for e in events if e.get("event") in _ERROR_EVENTS]
     since_human = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(since_ts))
-    print(
-        f"Scanning {audit_path} (last {window_s // 60}m, since {since_human}; {len(events)} events)"
-    )
+    # BC-074: render window in the chunkiest honest unit so a 24h run
+    # doesn't say "1440m" and a 30m run doesn't say "0h".
+    if window_s >= 3600:
+        window_h = window_s // 3600
+        window_label = f"{window_h}h" if window_s % 3600 == 0 else f"{window_s / 3600:.1f}h"
+    else:
+        window_label = f"{window_s // 60}m"
+    print(f"Scanning {audit_path} (last {window_label}, since {since_human}; {len(events)} events)")
     if not errors:
-        print(f"✓ 0 error events in last {window_s // 60}m — stack looks healthy")
+        print(f"✓ 0 error events in last {window_label} — stack looks healthy")
         return 0
-    print(f"⚠ {len(errors)} error event(s) in last {window_s // 60}m:")
+    print(f"⚠ {len(errors)} error event(s) in last {window_label}:")
     # Preserve chronological order for operator readability.
     for ev in sorted(errors, key=lambda e: e.get("ts", 0)):
         print(_format_event(ev))

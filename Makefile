@@ -1,4 +1,4 @@
-.PHONY: help lint format type test check check-full demo smoke clean install-hooks verify-traceability verify-dockerfile-health-copy verify-dockerfile-sources verify-memory-drift verify-compose-env-propagation verify-docs-drift verify-evidence-pointers verify-per-file-coverage verify-variables verify-install-doc verify-version-sync verify-version-bumped verify-changelog bump-patch bump-minor bump-major bump-auto changelog findings status audit soak test-e2e live-rebuild live-status scan set-status test-scenarios test-cli
+.PHONY: help lint format type test check check-full demo smoke clean install-hooks verify-traceability verify-dockerfile-health-copy verify-dockerfile-sources verify-memory-drift verify-compose-env-propagation verify-docs-drift verify-evidence-pointers verify-per-file-coverage verify-variables verify-install-doc verify-version-sync verify-version-bumped verify-changelog verify-feature-complete bump-patch bump-minor bump-major bump-auto changelog findings status audit soak test-e2e live-rebuild live-status scan set-status test-scenarios test-cli
 
 PYTHON ?= python3
 PYTEST_ARGS ?=
@@ -25,6 +25,7 @@ help:
 	@echo "  make verify-version-sync        /VERSION ↔ /poc/VERSION + hardcoded-literal drift (BC-062)"
 	@echo "  make verify-version-bumped      pre-push: VERSION must bump relative to origin/dev (BC-062)"
 	@echo "  make verify-changelog           pre-push: CHANGELOG.md has entry for current VERSION (BC-069)"
+	@echo "  make verify-feature-complete    shipped story must have fully-closed plan (no ❌/⚠️) (BC-074)"
 	@echo "  make smoke                      bash poc/demo.sh --smoke (non-interactive mock, CI)"
 	@echo ""
 	@echo "Version management (BC-062, BC-069):"
@@ -161,6 +162,12 @@ changelog:
 verify-changelog:
 	$(PYTHON) -m poc.scripts.verify_changelog
 
+# BC-074: refuse pushes where a shipped story has an incomplete plan.
+# Pairs each `docs/stories/BC-NNN-*.md` with status: shipped against its
+# plan's shipping-evidence table; fails on open ❌ / ⚠️ rows.
+verify-feature-complete:
+	$(PYTHON) -m poc.scripts.verify_feature_complete
+
 # BC-069: operator soak check — scan audit.log for error events in the
 # last hour. Returns non-zero if anything suspicious landed.
 #   SOAK_WINDOW_S=1800 make soak    # 30-min window
@@ -168,7 +175,7 @@ verify-changelog:
 soak:
 	$(PYTHON) -m poc.scripts.soak
 
-check: lint type test verify-per-file-coverage verify-traceability verify-dockerfile-health-copy verify-dockerfile-sources verify-memory-drift verify-compose-env-propagation verify-docs-drift verify-evidence-pointers verify-variables verify-install-doc verify-version-sync verify-changelog smoke
+check: lint type test verify-per-file-coverage verify-traceability verify-dockerfile-health-copy verify-dockerfile-sources verify-memory-drift verify-compose-env-propagation verify-docs-drift verify-evidence-pointers verify-variables verify-install-doc verify-version-sync verify-changelog verify-feature-complete smoke
 	@echo ""
 	@echo "✓ Fast tier (make check) passed"
 

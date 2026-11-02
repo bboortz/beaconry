@@ -47,3 +47,11 @@ repos:
         language: system
         pass_filenames: false
         stages: [pre-push]
+      # BC-074: refuse pushes where a shipped story has an incomplete plan.
+      # Bypass with BEACONRY_SKIP_FEATURE_COMPLETE=1 only in emergencies.
+      - id: verify-feature-complete
+        name: verify feature-complete (pre-push)
+        entry: .venv/bin/python -m poc.scripts.verify_feature_complete
+        language: system
+        pass_filenames: false
+        stages: [pre-push]

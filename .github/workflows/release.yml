@@ -1,0 +1,91 @@
+---
+# BC-074: Gated auto-promotion of dev → main.
+#
+# Trigger: workflow_dispatch (manual button in GitHub Actions tab).
+# The validation half lives in ci.yml; this workflow only runs the
+# promotion when the operator clicks "Run workflow" — the review
+# step that CAP-T147 preserved.
+#
+# Does:
+#   1. Checkout dev HEAD.
+#   2. Assert the latest CI run on dev's HEAD is green.
+#   3. Fast-forward main from dev.
+#   4. Tag v<VERSION> (reads from VERSION file).
+#   5. Push main + tag.
+#
+# Fails loudly if CI on dev is red / not-yet-run (prevents the
+# "operator clicked faster than CI finished" trap).
+
+name: Release
+
+"on":
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: "Branch to promote (default: dev)"
+        default: "dev"
+        required: false
+        type: string
+
+permissions:
+  contents: write
+
+jobs:
+  promote:
+    name: Promote dev → main + tag
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+          # Default GITHUB_TOKEN with contents:write can push to
+          # unprotected branches. If main gets branch protection
+          # later, swap to a PAT: `token: ${{ secrets.GH_PAT }}`.
+
+      - name: Fetch dev HEAD
+        run: |
+          git fetch origin ${{ inputs.ref }}:promote-src --force
+          echo "DEV_SHA=$(git rev-parse promote-src)" >> "$GITHUB_ENV"
+          echo "VERSION=$(git show promote-src:VERSION)" >> "$GITHUB_ENV"
+
+      - name: Assert CI is green on dev HEAD
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # The source-of-truth check-run name is "Full check (make check-full)"
+          # per ci.yml. If CI hasn't finished yet, there's no success record and
+          # we abort — operator should wait for the badge to turn green then re-run.
+          STATUS=$(gh api "repos/${{ github.repository }}/commits/${DEV_SHA}/check-runs" \
+            --jq '[.check_runs[] | select(.name == "Full check (make check-full)")] | sort_by(.started_at) | .[-1].conclusion' \
+            2>/dev/null || echo "")
+          if [[ "$STATUS" != "success" ]]; then
+            echo "::error::CI on ${DEV_SHA:0:8} not green (status=${STATUS:-not-yet-run}). Wait for CI to pass before promoting."
+            exit 1
+          fi
+          echo "✓ CI green on ${DEV_SHA:0:8}"
+
+      - name: Fast-forward main from dev
+        run: |
+          git config user.name "beaconry-release-bot"
+          git config user.email "release-bot@beaconry.local"
+          git fetch origin main
+          git checkout main
+          git merge --ff-only promote-src
+          git push origin main
+
+      - name: Tag v${{ env.VERSION }}
+        run: |
+          if git rev-parse --verify "v${VERSION}" >/dev/null 2>&1; then
+            echo "::warning::Tag v${VERSION} already exists — skipping tag step."
+          else
+            git tag -a "v${VERSION}" -m "release ${VERSION}" "${DEV_SHA}"
+            git push origin "v${VERSION}"
+            echo "✓ Tagged v${VERSION}"
+          fi
+
+      - name: Summary
+        run: |
+          echo "## Promoted" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Source: \`${{ inputs.ref }}\` @ \`${DEV_SHA:0:8}\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Version: \`${VERSION}\`" >> "$GITHUB_STEP_SUMMARY"
+          echo "- Tag: \`v${VERSION}\`" >> "$GITHUB_STEP_SUMMARY"
