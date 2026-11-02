@@ -145,7 +145,22 @@ TEST_MODE = os.environ.get("BEACONRY_TEST_MODE") == "1"
 DATA_DIR.mkdir(parents=True, exist_ok=True)
 DB_PATH = DATA_DIR / "beaconry.db"
 
-EXECUTORS: list[ExecutorPlugin] = [DockerAdapter(), ManualAdapter()]
+# BC-066: executor is a single policy choice, not per-finding dispatch.
+# Default `manual` keeps the POC safe on arbitrary infrastructure — operator
+# does the work, hub logs intent and re-reminds. Opt in to `docker` for
+# auto-pull on homogeneous stacks.
+EXECUTOR_NAME = os.environ.get("BEACONRY_EXECUTOR", "manual").lower()
+_executor_registry: dict[str, ExecutorPlugin] = {
+    "manual": ManualAdapter(),
+    "docker": DockerAdapter(),
+}
+EXECUTOR: ExecutorPlugin = _executor_registry.get(EXECUTOR_NAME, ManualAdapter())
+# BC-066: reminder cadence when operator claimed manual-fix. 0 disables.
+MANUAL_REMINDER_INTERVAL_S = _int_env("BEACONRY_MANUAL_REMINDER_INTERVAL_S", 3600)
+
+# Legacy export — any external callers still iterating EXECUTORS get the
+# single active instance. New code should read EXECUTOR directly.
+EXECUTORS: list[ExecutorPlugin] = [EXECUTOR]
 
 tg_app: Application | None = None
 
@@ -164,7 +179,7 @@ except ImportError:
 
 HUB_VERSION = SOFTWARE_VERSION  # back-compat alias
 API_VERSION = 1
-EXPECTED_SCHEMA_VERSION = 3
+EXPECTED_SCHEMA_VERSION = 4
 STRICT_API = os.environ.get("BEACONRY_STRICT_API") == "1"
 
 
@@ -380,6 +395,11 @@ def init_db() -> None:
     # because the related-id data isn't preserved in-schema for legacy rows).
     with contextlib.suppress(sqlite3.OperationalError):
         con.execute("ALTER TABLE findings ADD COLUMN cve_alias TEXT")
+    # BC-066: last_claim_ts set when the operator taps [Fix now] under the
+    # manual executor — records the intent, drives the 1h reminder sweep.
+    # NULL / 0 = no outstanding claim; manual_claim_sweep ignores the row.
+    with contextlib.suppress(sqlite3.OperationalError):
+        con.execute("ALTER TABLE findings ADD COLUMN last_claim_ts INTEGER DEFAULT 0")
     # BC-036: digest cadence state — per-host last-sent + content hash. Separate
     # table (not a column on `findings`) because the state is per-host, not
     # per-finding.
@@ -909,8 +929,9 @@ def format_notification(finding: Finding, *, multi_host: bool | None = None) -> 
     import html
 
     emoji = {"Critical": "🔴", "High": "🟠", "Medium": "🟡"}.get(finding.severity, "⚪")
-    executor = next((e for e in EXECUTORS if e.can_handle(finding)), ManualAdapter())
-    fix_cmd = executor.describe(finding)
+    # BC-066: single-executor policy (BEACONRY_EXECUTOR). ManualAdapter is
+    # the default; docker is opt-in.
+    fix_cmd = EXECUTOR.describe(finding)
 
     def esc(s: str) -> str:
         return html.escape(s, quote=False)
@@ -1286,7 +1307,12 @@ def _esc(s: str) -> str:
 
 
 async def _handle_fix(query, finding: Finding, finding_id: str, parts: list[str]) -> None:  # noqa: ARG001
-    """Fix action: dispatch to executor, verify, edit the message with the terminal state."""
+    """Fix action: dispatch to the configured executor and edit the message.
+
+    BC-066: `EXECUTOR` is a single policy choice (manual|docker) picked at
+    hub startup. Manual mode logs operator intent + reminds in 1h; docker
+    mode re-pulls the image + verifies via next scan reconcile.
+    """
     if not FIX_ENABLED:
         await query.edit_message_text(
             f"⚙️ Fix execution disabled (BEACONRY_FIX_ENABLED=0) — "
@@ -1295,12 +1321,39 @@ async def _handle_fix(query, finding: Finding, finding_id: str, parts: list[str]
         )
         return
 
+    # BC-066: manual executor short-circuits — audit intent, log claim_ts,
+    # show operator the command, schedule reminder. No execution.
+    if EXECUTOR_NAME == "manual":
+        now = int(time.time())
+        _record_manual_claim(finding.id, now)
+        command = EXECUTOR.describe(finding)
+        _audit.append(
+            "manual_fix_claimed",
+            finding_id=finding.id,
+            cve_id=finding.cve_id,
+            host=finding.host,
+            command=command,
+            claim_ts=now,
+        )
+        reminder_note = (
+            f"We'll re-check in {MANUAL_REMINDER_INTERVAL_S // 60}m."
+            if MANUAL_REMINDER_INTERVAL_S > 0
+            else "Reminders disabled."
+        )
+        await query.edit_message_text(
+            f"📝 <b>Logged</b> · <code>{_esc(finding.cve_id)}</code> on "
+            f"<code>{_esc(finding.host)}</code>\n"
+            f"Run: <code>{_esc(command)}</code>\n"
+            f"<i>{reminder_note}</i>",
+            parse_mode="HTML",
+        )
+        return
+
     await query.edit_message_text(
         f"⏳ Fixing <code>{_esc(finding.cve_id)}</code> on <code>{_esc(finding.host)}</code>…",
         parse_mode="HTML",
     )
-    executor = next((e for e in EXECUTORS if e.can_handle(finding)), ManualAdapter())
-    result = await executor.execute(finding)
+    result = await EXECUTOR.execute(finding)
 
     if not result.success:
         await query.edit_message_text(
@@ -2065,12 +2118,16 @@ def _hub_healthz_summary() -> dict:
         "last_scan_ts": _last_scan_ts,
         # BC-020: KEV freshness. Status is "ok" | "stale" | "unfetched".
         **kev_summary,
+        # BC-066: configured executor (manual|docker). Lets operators
+        # confirm `BEACONRY_EXECUTOR` is wired without reading env.
+        "executor": EXECUTOR_NAME,
     }
     # KEV is non-fatal — stale/unfetched surface in /healthz but don't flip "degraded".
+    # BC-066: executor is a policy label, not a health signal — exclude it too.
     bool_checks = [
         v
         for k, v in checks.items()
-        if k not in ("last_scan_ts", "kev", "kev_last_fetch_s", "kev_count")
+        if k not in ("last_scan_ts", "kev", "kev_last_fetch_s", "kev_count", "executor")
     ]
     degraded = any(v not in ("ok", "polling", "mock") for v in bool_checks)
     return {
@@ -2324,6 +2381,100 @@ async def heartbeat_sweep(*, now_ts: int | None = None) -> int:
     return sent
 
 
+def _record_manual_claim(finding_id: str, now_ts: int) -> None:
+    """BC-066: write `last_claim_ts = now_ts` for a finding. Idempotent;
+    tolerant of pre-BC-066 DBs where the column may not exist yet."""
+    con = sqlite3.connect(DB_PATH)
+    try:
+        with contextlib.suppress(sqlite3.OperationalError):
+            con.execute(
+                "UPDATE findings SET last_claim_ts = ? WHERE id = ?",
+                (now_ts, finding_id),
+            )
+            con.commit()
+    finally:
+        con.close()
+
+
+async def manual_claim_sweep(*, now_ts: int | None = None) -> int:
+    """BC-066: for every open finding with an overdue manual-fix claim,
+    send a reminder notification and bump `last_claim_ts` so the next
+    reminder lands one interval later.
+
+    Returns the number of reminders sent. No-op when
+    `MANUAL_REMINDER_INTERVAL_S == 0`.
+
+    Qualifying criteria:
+      - status='open' (reconcile's auto-close for `fixed_verified` is the
+        natural off-switch — a confirmed fix stops the sweep)
+      - last_claim_ts > 0 (operator actually tapped [Fix now])
+      - now - last_claim_ts > MANUAL_REMINDER_INTERVAL_S
+
+    Called from `_heartbeat_loop_forever` on the same tick as the BC-035
+    sweep — one background loop, two policies.
+    """
+    if MANUAL_REMINDER_INTERVAL_S <= 0:
+        return 0
+    con = sqlite3.connect(DB_PATH)
+    try:
+        now = now_ts if now_ts is not None else int(time.time())
+        cutoff = now - MANUAL_REMINDER_INTERVAL_S
+        rows = con.execute(
+            "SELECT id, host, cve_id, package, version, fixed_version, severity, "
+            "cvss, source_type, source_ref, description, tier, kev, last_claim_ts "
+            "FROM findings "
+            "WHERE status='open' AND last_claim_ts > 0 AND last_claim_ts < ?",
+            (cutoff,),
+        ).fetchall()
+    except sqlite3.OperationalError:
+        con.close()
+        return 0
+
+    sent = 0
+    for row in rows:
+        finding = Finding(
+            id=row[0],
+            host=row[1],
+            cve_id=row[2],
+            package=row[3],
+            version=row[4],
+            fixed_version=row[5],
+            severity=row[6],
+            cvss=row[7],
+            source_type=row[8],
+            source_ref=row[9],
+            description=row[10] or "",
+            tier=row[11],
+            kev=bool(row[12]),
+        )
+        claim_age_s = max(1, now - int(row[13] or 0))
+        try:
+            # Reuse the heartbeat notifier — a reminder "this is still open
+            # N minutes after you claimed you'd fix it" is semantically the
+            # same shape. The notifier adapter formats; the audit event name
+            # distinguishes the two cadences for forensics.
+            await notify_heartbeat(finding, now - claim_age_s)
+        except Exception as e:  # noqa: BLE001
+            log.warning("manual-claim reminder failed for %s: %s", finding.cve_id, e)
+            continue
+        con.execute(
+            "UPDATE findings SET last_claim_ts = ?, last_notified_ts = ? WHERE id = ?",
+            (now, now, finding.id),
+        )
+        _audit.append(
+            "manual_fix_reminder_sent",
+            finding_id=finding.id,
+            cve_id=finding.cve_id,
+            claim_age_s=claim_age_s,
+        )
+        sent += 1
+    con.commit()
+    con.close()
+    if sent:
+        log.info("BC-066: manual-claim sweep sent %d reminder(s)", sent)
+    return sent
+
+
 async def _heartbeat_loop_forever() -> (
     None
 ):  # pragma: no cover - infinite async loop; tested via sweep directly
@@ -2332,6 +2483,11 @@ async def _heartbeat_loop_forever() -> (
             await heartbeat_sweep()
         except Exception as e:  # noqa: BLE001
             log.warning("BC-035: heartbeat sweep failed: %s", e)
+        # BC-066: piggyback the manual-claim sweep on the same tick.
+        try:
+            await manual_claim_sweep()
+        except Exception as e:  # noqa: BLE001
+            log.warning("BC-066: manual-claim sweep failed: %s", e)
         await asyncio.sleep(HEARTBEAT_SWEEP_INTERVAL_S)
 
 

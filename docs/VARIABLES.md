@@ -50,6 +50,8 @@ See also:
 | Variable | Default | Type | Where read | Reason | Origin |
 |---|---|---|---|---|---|
 | `BEACONRY_FIX_ENABLED` | `1` | bool (`0`/`1`) | `poc/hub/hub.py` | Safety-conscious demo switch — operator can run a full stack with real notifications but refuse all Fix buttons until they're ready to trust the automation. Fix taps return an informational message instead of executing. | BC-009 |
+| `BEACONRY_EXECUTOR` | `manual` | enum (`manual`\|`docker`) | `poc/hub/hub.py` | Which executor adapter handles `[Fix now]` taps. `manual` (default) logs operator intent + reminds in 1h; operator does the fix themselves. `docker` runs `docker pull` on the image. Infrastructure-agnostic default — auto-pull depends on homogeneous stacks that beaconry can't verify. | BC-066 |
+| `BEACONRY_MANUAL_REMINDER_INTERVAL_S` | `3600` (1h) | int (s) | `poc/hub/hub.py` | Reminder cadence after operator taps `[Fix now]` under the manual executor. 0 disables reminders entirely (claim still audited). Only applies when `BEACONRY_EXECUTOR=manual`. | BC-066 |
 | `BEACONRY_HEALTH_PROBES` | *(empty)* | DSL | `poc/hub/hub.py` | Policy-driven probe resolver: `image_ref=probe_spec[;...]`. Determines what `verify_fix` runs after a successful Fix. Essential for services that don't expose an HTTP endpoint on 80 — operator points probes at the real health check. | BC-011 |
 
 ## Reconciliation & regression

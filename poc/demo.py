@@ -318,8 +318,15 @@ async def _process_finding(
                 return False
         print()
 
-    executor = next((e for e in hub.EXECUTORS if e.can_handle(finding)), None)
-    assert executor is not None, "no executor matched"
+    # BC-066: the demo is a narrative of the full auto-fix path. Use
+    # DockerAdapter directly (not hub.EXECUTOR) so test suites that may
+    # have imported hub with a different BEACONRY_EXECUTOR still see the
+    # expected [mock] docker pull output. Operators who want to demo the
+    # manual flow can read `make audit EVENT=manual_fix_claimed` from a
+    # live stack instead.
+    from poc.hub.executor.docker_adapter import DockerAdapter
+
+    executor = DockerAdapter()
     result = await executor.execute(finding)
     if not result.success:
         print(f"    ❌ fix failed: {result.message}")

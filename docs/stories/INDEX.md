@@ -59,3 +59,5 @@ Lifecycle: `draft → ready → in-progress → shipped`. Status matches each st
 | BC-062 | Software + API + schema versioning (+ SemVer auto-bump + pre-push gate) | shipped     | — (merged to dev)                   |
 | BC-063 | Fleet rows show version/health/last-scan + scout heartbeat loop         | shipped     | — (merged to dev)                   |
 | BC-064 | FLEET: LAST SEEN → LAST HEARTBEAT (fixed source) + stale-heartbeat unknown | shipped     | — (merged to dev)                   |
+| BC-065 | Digest content-change bypass is now opt-out via env (strict 24h floor)    | shipped     | — (merged to dev)                   |
+| BC-066 | Manual executor as default + configurable adapter + 1h reminder sweep     | shipped     | — (merged to dev)                   |

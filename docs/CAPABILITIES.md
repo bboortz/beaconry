@@ -1516,3 +1516,39 @@ Enforcement: `poc/scripts/verify_traceability.py` runs as part of `make check`. 
 - **supports:** CAP-B046
 - **verified by:**
   - `poc/tests/integration/test_BC_063_fleet_health.py`
+
+### CAP-B047: Operator can run beaconry on infrastructure where auto-pull isn't safe
+- **type:** business
+- **status:** active
+- **origin:** BC-066 — operator feedback: auto-pull depends on homogeneous docker-compose stacks beaconry can't verify. Simplified POC with manual fixing as default.
+- **description:** `[Fix now]` default behaviour is "log intent, show exact command, remind in 1h if still open" instead of "run `docker pull` + verify". Operator does the fix themselves on their shell; beaconry audits the claim and the eventual reconcile. Operators whose stack *is* auto-pull-safe opt in with `BEACONRY_EXECUTOR=docker`.
+- **supports:** CAP-B023
+- **verified by:**
+  - `poc/tests/integration/test_BC_066_manual_executor.py`
+
+### CAP-T137: Configurable executor adapter via BEACONRY_EXECUTOR
+- **type:** technical
+- **status:** active
+- **origin:** BC-066
+- **description:** `BEACONRY_EXECUTOR` env (`manual` default, `docker` opt-in) chooses the single `EXECUTOR` instance at hub startup. Per-finding `can_handle` dispatch replaced with the single-executor policy. `/healthz` exposes the active name under `checks.executor`.
+- **supports:** CAP-B047
+- **verified by:**
+  - `poc/tests/integration/test_BC_066_manual_executor.py`
+
+### CAP-T138: ManualAdapter workflow — log intent, deferred verify via reconcile
+- **type:** technical
+- **status:** active
+- **origin:** BC-066
+- **description:** `[Fix now]` under `BEACONRY_EXECUTOR=manual`: writes `last_claim_ts` on the finding, emits `manual_fix_claimed` audit event, edits the Telegram message to show the command + reminder notice. Does NOT call `verify_fix` (operator hasn't acted yet). Next-scan reconcile (BC-031) closes the finding naturally when the CVE disappears from inventory.
+- **supports:** CAP-B047
+- **verified by:**
+  - `poc/tests/integration/test_BC_066_manual_executor.py`
+
+### CAP-T139: Manual-claim reminder sweep + schema v4 last_claim_ts
+- **type:** technical
+- **status:** active
+- **origin:** BC-066
+- **description:** `manual_claim_sweep` runs on the existing BC-035 heartbeat tick. For each open finding with `last_claim_ts > 0` and `now - last_claim_ts > BEACONRY_MANUAL_REMINDER_INTERVAL_S` (default 3600s): dispatches a reminder via `notify_heartbeat` (reuses the adapter), emits `manual_fix_reminder_sent` audit event, bumps `last_claim_ts` + `last_notified_ts` to dedup against BC-035. `MANUAL_REMINDER_INTERVAL_S=0` disables. Schema v4 adds `findings.last_claim_ts INTEGER` via the BC-063 `PRAGMA table_info` + conditional `ALTER TABLE ADD COLUMN` migration pattern.
+- **supports:** CAP-B047
+- **verified by:**
+  - `poc/tests/integration/test_BC_066_manual_executor.py`

@@ -103,7 +103,7 @@ already the architecture; scout tells hub its state on every scan.
 
 | Scenario / goal | Evidence type | Pointer | Status |
 |---|---|---|---|
-| EXPECTED_SCHEMA_VERSION == 3 | integration | `test_BC_063_fleet_health.py::test_expected_schema_version_is_3` | ✓ |
+| EXPECTED_SCHEMA_VERSION ≥ 3 (BC-066 bumps to 4) | integration | `test_BC_063_fleet_health.py::test_expected_schema_version_at_least_3` | ✓ |
 | Fresh DB has BC-063 scouts columns | integration | `test_BC_063_fleet_health.py::test_fresh_db_v3_has_new_scouts_columns` | ✓ |
 | Schema v2 → v3 migration adds the four columns + preserves rows | integration | `test_BC_063_fleet_health.py::test_schema_v2_to_v3_migration` | ✓ |
 | Schema v3 init_db is idempotent | integration | `test_BC_063_fleet_health.py::test_init_db_v3_idempotent` | ✓ |
@@ -117,7 +117,7 @@ already the architecture; scout tells hub its state on every scan.
 | make status renders ⚠ degraded health | integration | `test_BC_063_fleet_health.py::test_make_status_renders_degraded_health` | ✓ |
 | make status renders '? unknown' for pre-BC-063 row | integration | `test_BC_063_fleet_health.py::test_make_status_renders_unknown_for_legacy_row` | ✓ |
 | Pre-BC-063 response (no fields anywhere) degrades gracefully | integration | `test_BC_063_fleet_health.py::test_make_status_pre_bc063_response_degrades_gracefully` | ✓ |
-| /healthz schema version is 3 | integration | `test_BC_063_fleet_health.py::test_healthz_version_schema_is_3` | ✓ |
+| /healthz schema version tracks EXPECTED_SCHEMA_VERSION | integration | `test_BC_063_fleet_health.py::test_healthz_version_schema_matches_expected` | ✓ |
 | /heartbeat emits audit event | integration | `test_BC_063_fleet_health.py::test_heartbeat_emits_audit_event` | ✓ |
 | CAPs registered | verify-traceability | `docs/CAPABILITIES.md` | ✓ |
 | `make check` + `make check-full` green | multi-gate | logs | ✓ |

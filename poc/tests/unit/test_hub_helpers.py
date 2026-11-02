@@ -235,6 +235,12 @@ async def test_fix_now_pull_clean_sets_status_fixed(monkeypatch: pytest.MonkeyPa
     hub.init_db()
     hub.save_finding(_finding(id="bc9fcafebabe0001", cve_id="CVE-FIX-1", source_type="docker"))
     monkeypatch.setattr(hub, "FIX_ENABLED", True, raising=True)
+    # BC-066: this test exercises the docker-executor path; manual is now the
+    # default so we have to pin for the fixture.
+    from poc.hub.executor.docker_adapter import DockerAdapter
+
+    monkeypatch.setattr(hub, "EXECUTOR_NAME", "docker", raising=True)
+    monkeypatch.setattr(hub, "EXECUTOR", DockerAdapter(), raising=True)
 
     from poc.hub.executor.base import ExecutionResult
 
@@ -244,9 +250,7 @@ async def test_fix_now_pull_clean_sets_status_fixed(monkeypatch: pytest.MonkeyPa
     async def _fake_verify(f: object) -> bool:
         return True
 
-    monkeypatch.setattr(
-        hub.EXECUTORS[0].__class__, "execute", _fake_execute, raising=True
-    )  # DockerAdapter
+    monkeypatch.setattr(DockerAdapter, "execute", _fake_execute, raising=True)
     monkeypatch.setattr(hub, "verify_fix", _fake_verify)
 
     update = await _run_fix_tap("bc9fcafebabe0001")
@@ -261,6 +265,10 @@ async def test_fix_now_pull_upstream_still_present(monkeypatch: pytest.MonkeyPat
     hub.init_db()
     hub.save_finding(_finding(id="bc9fcafebabe0002", cve_id="CVE-FIX-2", source_type="docker"))
     monkeypatch.setattr(hub, "FIX_ENABLED", True, raising=True)
+    from poc.hub.executor.docker_adapter import DockerAdapter
+
+    monkeypatch.setattr(hub, "EXECUTOR_NAME", "docker", raising=True)
+    monkeypatch.setattr(hub, "EXECUTOR", DockerAdapter(), raising=True)
 
     from poc.hub.executor.base import ExecutionResult
 
@@ -270,7 +278,7 @@ async def test_fix_now_pull_upstream_still_present(monkeypatch: pytest.MonkeyPat
     async def _fake_verify_still(f: object) -> bool:
         return False
 
-    monkeypatch.setattr(hub.EXECUTORS[0].__class__, "execute", _fake_execute, raising=True)
+    monkeypatch.setattr(DockerAdapter, "execute", _fake_execute, raising=True)
     monkeypatch.setattr(hub, "verify_fix", _fake_verify_still)
 
     update = await _run_fix_tap("bc9fcafebabe0002")
@@ -285,6 +293,10 @@ async def test_fix_now_pull_fails_message(monkeypatch: pytest.MonkeyPatch) -> No
     hub.init_db()
     hub.save_finding(_finding(id="bc9fcafebabe0003", cve_id="CVE-FIX-3", source_type="docker"))
     monkeypatch.setattr(hub, "FIX_ENABLED", True, raising=True)
+    from poc.hub.executor.docker_adapter import DockerAdapter
+
+    monkeypatch.setattr(hub, "EXECUTOR_NAME", "docker", raising=True)
+    monkeypatch.setattr(hub, "EXECUTOR", DockerAdapter(), raising=True)
 
     from poc.hub.executor.base import ExecutionResult
 
@@ -299,7 +311,7 @@ async def test_fix_now_pull_fails_message(monkeypatch: pytest.MonkeyPatch) -> No
         verify_called.append(True)
         return True
 
-    monkeypatch.setattr(hub.EXECUTORS[0].__class__, "execute", _fake_execute_fail, raising=True)
+    monkeypatch.setattr(DockerAdapter, "execute", _fake_execute_fail, raising=True)
     monkeypatch.setattr(hub, "verify_fix", _tracked_verify)
 
     update = await _run_fix_tap("bc9fcafebabe0003")
@@ -761,6 +773,10 @@ async def test_fix_success_attaches_verify_button_when_policy_matches(
     hub.init_db()
     hub.save_finding(_finding(id="bc11beefcafe0101", source_ref="postgres:16-alpine"))
     monkeypatch.setattr(hub, "FIX_ENABLED", True, raising=True)
+    from poc.hub.executor.docker_adapter import DockerAdapter
+
+    monkeypatch.setattr(hub, "EXECUTOR_NAME", "docker", raising=True)
+    monkeypatch.setattr(hub, "EXECUTOR", DockerAdapter(), raising=True)
 
     from poc.hub.executor.base import ExecutionResult
 
@@ -772,7 +788,7 @@ async def test_fix_success_attaches_verify_button_when_policy_matches(
     async def _fake_verify(f: object) -> bool:
         return True
 
-    monkeypatch.setattr(hub.EXECUTORS[0].__class__, "execute", _fake_execute, raising=True)
+    monkeypatch.setattr(DockerAdapter, "execute", _fake_execute, raising=True)
     monkeypatch.setattr(hub, "verify_fix", _fake_verify)
     monkeypatch.setattr(hub, "_resolve_probe_for", lambda _ref: _probe())
 
@@ -790,6 +806,10 @@ async def test_fix_success_omits_verify_button_when_no_policy(
     hub.init_db()
     hub.save_finding(_finding(id="bc11beefcafe0202", source_ref="rare:custom"))
     monkeypatch.setattr(hub, "FIX_ENABLED", True, raising=True)
+    from poc.hub.executor.docker_adapter import DockerAdapter
+
+    monkeypatch.setattr(hub, "EXECUTOR_NAME", "docker", raising=True)
+    monkeypatch.setattr(hub, "EXECUTOR", DockerAdapter(), raising=True)
 
     from poc.hub.executor.base import ExecutionResult
 
@@ -799,7 +819,7 @@ async def test_fix_success_omits_verify_button_when_no_policy(
     async def _fake_verify(f: object) -> bool:
         return True
 
-    monkeypatch.setattr(hub.EXECUTORS[0].__class__, "execute", _fake_execute, raising=True)
+    monkeypatch.setattr(DockerAdapter, "execute", _fake_execute, raising=True)
     monkeypatch.setattr(hub, "verify_fix", _fake_verify)
     monkeypatch.setattr(hub, "_resolve_probe_for", lambda _ref: None)
 

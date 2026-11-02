@@ -15,6 +15,10 @@ services:
       - BEACONRY_MAX_FINDINGS_PER_RUN=${BEACONRY_MAX_FINDINGS_PER_RUN:-5}
       # BC-009: fix execution opt-in flag; default on
       - BEACONRY_FIX_ENABLED=${BEACONRY_FIX_ENABLED:-1}
+      # BC-066: which executor handles [Fix now]. manual = log + remind;
+      # docker = auto-pull. Default manual (safe on arbitrary infra).
+      - BEACONRY_EXECUTOR=${BEACONRY_EXECUTOR:-}
+      - BEACONRY_MANUAL_REMINDER_INTERVAL_S=${BEACONRY_MANUAL_REMINDER_INTERVAL_S:-}
       # BC-011: policy-driven probe resolver
       - BEACONRY_HEALTH_PROBES=${BEACONRY_HEALTH_PROBES:-}
       # BC-020: optional override of the CISA KEV feed URL (air-gapped setups)

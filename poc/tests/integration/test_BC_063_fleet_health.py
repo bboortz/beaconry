@@ -45,8 +45,10 @@ def hub_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[dict]:
 # ── Schema version ──────────────────────────────────────────────────────────
 
 
-def test_expected_schema_version_is_3(hub_env) -> None:
-    assert hub_env["hub"].EXPECTED_SCHEMA_VERSION == 3
+def test_expected_schema_version_at_least_3(hub_env) -> None:
+    # BC-063 shipped at v3; later BCs bump the version while the BC-063
+    # scouts columns must remain present. Guard the floor, not the point.
+    assert hub_env["hub"].EXPECTED_SCHEMA_VERSION >= 3
 
 
 def test_fresh_db_v3_has_new_scouts_columns(hub_env) -> None:
@@ -95,21 +97,23 @@ def test_schema_v2_to_v3_migration(tmp_path: Path, monkeypatch: pytest.MonkeyPat
         "last_health, last_scan_ts FROM scouts WHERE host = 'legacy-host'"
     ).fetchone()
     con.close()
-    assert ver == 3
+    # BC-063 required ≥ 3. Later BCs bump schema; BC-063's columns + data
+    # must still be present after migration.
+    assert ver >= 3
     assert {"software_version", "api_version", "last_health", "last_scan_ts"} <= cols
     assert row == ("legacy-host", 5, None, None, None, None)
     importlib.reload(hub)
 
 
 def test_init_db_v3_idempotent(hub_env) -> None:
-    """CAP-T130: re-running init_db on an already-v3 DB is a no-op."""
+    """CAP-T130: re-running init_db on an already-v3+ DB is a no-op."""
     hub_env["hub"].init_db()
     hub_env["hub"].init_db()
     con = sqlite3.connect(hub_env["db"])
     (ver,) = con.execute("PRAGMA user_version").fetchone()
     cols = [row[1] for row in con.execute("PRAGMA table_info(scouts)").fetchall()]
     con.close()
-    assert ver == 3
+    assert ver >= 3
     # No duplicate columns from repeated ALTER TABLE runs.
     assert len(cols) == len(set(cols))
 
@@ -363,12 +367,12 @@ def test_make_status_pre_bc063_response_degrades_gracefully() -> None:
     assert "HEALTH" not in header
 
 
-# ── /healthz schema reports v3 ─────────────────────────────────────────────
+# ── /healthz schema version is tracked ─────────────────────────────────────
 
 
-def test_healthz_version_schema_is_3(hub_env) -> None:
+def test_healthz_version_schema_matches_expected(hub_env) -> None:
     body = hub_env["client"].get("/healthz").json()
-    assert body["version"]["schema"] == 3
+    assert body["version"]["schema"] == hub_env["hub"].EXPECTED_SCHEMA_VERSION
 
 
 # ── audit event for heartbeat ──────────────────────────────────────────────
