@@ -25,4 +25,6 @@ pre-commit==4.0.1
 httpx==0.28.1
 
 # BC-002: auto-load poc/.env for `make demo`
-python-dotenv==1.0.1
+# BC-073: 1.0.1 → 1.2.2 bump (Dependabot PR #2; verified clean on
+# `make check-full` before shipping).
+python-dotenv==1.2.2

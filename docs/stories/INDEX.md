@@ -67,3 +67,4 @@ Lifecycle: `draft → ready → in-progress → shipped`. Status matches each st
 | BC-070 | Operator CLI install — `pip install -e . → beaconry …`                    | shipped     | — (merged to dev)                   |
 | BC-071 | Fix CI env leak — BEACONRY_SKIP_VERSION_BUMP leaking into pytest          | shipped     | — (merged to dev)                   |
 | BC-072 | pytest 8 → 9 (CVE-2025-71176) + cascading pytest-asyncio bump             | shipped     | — (merged to dev)                   |
+| BC-073 | python-dotenv + requests dep bumps (closes PRs #2, #3)                    | shipped     | — (merged to dev)                   |
