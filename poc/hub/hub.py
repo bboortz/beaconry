@@ -163,8 +163,57 @@ def _resolve_probe_for(image_ref: str) -> "_waterfall.Probe | None":
 # ── Database ──────────────────────────────────────────────────────────────────
 
 
+FLEET_ACTIVE_WINDOW_S = int(os.environ.get("BEACONRY_FLEET_ACTIVE_WINDOW_S", "600"))
+FLEET_DEAD_AFTER_S = int(os.environ.get("BEACONRY_FLEET_DEAD_AFTER_S", "86400"))
+
+
+def _fleet_status(last_posted_ts: int, now: int) -> str:
+    """BC-061: liveness state from the time since the scout's last POST."""
+    age = now - last_posted_ts
+    if age <= FLEET_ACTIVE_WINDOW_S:
+        return "active"
+    if age <= FLEET_DEAD_AFTER_S:
+        return "stale"
+    return "dead"
+
+
+def record_scout_post(host: str, *, now: int, sbom_count: int) -> None:
+    """BC-061: upsert a scouts-registry row on every /scan POST.
+
+    First-time POST registers the scout. Repeat POSTs bump
+    `last_posted_ts` + `last_sbom_count`. `first_seen_ts` is only set
+    on INSERT, never updated. Tolerant of pre-BC-061 DBs (no scouts
+    table yet) so test fixtures that skip init_db don't break.
+    """
+    con = sqlite3.connect(DB_PATH)
+    try:
+        with contextlib.suppress(sqlite3.OperationalError):
+            con.execute(
+                "INSERT INTO scouts (host, first_seen_ts, last_posted_ts, last_sbom_count) "
+                "VALUES (?, ?, ?, ?) "
+                "ON CONFLICT(host) DO UPDATE SET "
+                "  last_posted_ts = excluded.last_posted_ts, "
+                "  last_sbom_count = excluded.last_sbom_count",
+                (host, now, now, sbom_count),
+            )
+            con.commit()
+    finally:
+        con.close()
+
+
 def init_db() -> None:
     con = sqlite3.connect(DB_PATH)
+    # BC-061: scouts registry — one row per host that has ever POSTed to
+    # /scan. Enables /fleet to show zero-finding scouts and apply
+    # liveness status (active / stale / dead).
+    con.execute("""
+        CREATE TABLE IF NOT EXISTS scouts (
+            host             TEXT PRIMARY KEY,
+            first_seen_ts    INTEGER NOT NULL,
+            last_posted_ts   INTEGER NOT NULL,
+            last_sbom_count  INTEGER NOT NULL DEFAULT 0
+        )
+    """)
     con.execute("""
         CREATE TABLE IF NOT EXISTS findings (
             id           TEXT PRIMARY KEY,
@@ -247,6 +296,18 @@ def init_db() -> None:
             last_hash    TEXT NOT NULL
         )
     """)
+    # BC-061: backfill scouts from findings so pre-BC-061 operators don't
+    # start with an empty registry. Idempotent — ON CONFLICT skips rows
+    # that already exist (e.g. a scout that posted after init_db ran).
+    with contextlib.suppress(sqlite3.OperationalError):
+        con.execute("""
+            INSERT INTO scouts (host, first_seen_ts, last_posted_ts, last_sbom_count)
+            SELECT host, COALESCE(MIN(found_at), 0), COALESCE(MAX(last_seen_ts), 0), 0
+            FROM findings
+            WHERE host IS NOT NULL AND host != ''
+            GROUP BY host
+            ON CONFLICT(host) DO NOTHING
+        """)
     con.commit()
     con.close()
 
@@ -1663,35 +1724,77 @@ async def http_audit(
 
 @api.get("/fleet", dependencies=[Depends(require_cli_token)])
 async def http_fleet() -> list[dict]:
-    """BC-055: per-host fleet summary derived from the findings table."""
+    """BC-055/BC-061: per-host fleet summary.
+
+    BC-061: driven by the `scouts` registry (LEFT JOIN findings) so zero-
+    finding scouts are visible. Each row carries a liveness `status`
+    computed from `now - last_posted_ts` against the configurable
+    thresholds.
+    """
     if not DB_PATH.exists():
         return []
     try:
         con = sqlite3.connect(f"file:{DB_PATH}?mode=ro", uri=True)
         try:
-            schema_cols = {row[1] for row in con.execute("PRAGMA table_info(findings)")}
-            last_seen_expr = "MAX(last_seen_ts)" if "last_seen_ts" in schema_cols else "0"
-            sql = (
-                f"SELECT host, {last_seen_expr}, "
-                "SUM(CASE WHEN status = 'open' THEN 1 ELSE 0 END), "
-                "COUNT(*) FROM findings GROUP BY host"
-            )
-            rows = con.execute(sql).fetchall()
+            schema_tables = {
+                row[0] for row in con.execute("SELECT name FROM sqlite_master WHERE type='table'")
+            }
+            # Pre-BC-061 DBs may not have the scouts table yet (upgrade in flight);
+            # fall back to the findings-derived shape without liveness.
+            if "scouts" not in schema_tables:
+                rows = con.execute(
+                    "SELECT host, MAX(last_seen_ts), "
+                    "SUM(CASE WHEN status = 'open' THEN 1 ELSE 0 END), "
+                    "COUNT(*) FROM findings GROUP BY host"
+                ).fetchall()
+                legacy = True
+            else:
+                rows = con.execute("""
+                    SELECT s.host,
+                           s.first_seen_ts,
+                           s.last_posted_ts,
+                           s.last_sbom_count,
+                           COALESCE(MAX(f.last_seen_ts), 0),
+                           COALESCE(SUM(CASE WHEN f.status = 'open' THEN 1 ELSE 0 END), 0),
+                           COUNT(f.id)
+                    FROM scouts s
+                    LEFT JOIN findings f ON f.host = s.host
+                    GROUP BY s.host, s.first_seen_ts, s.last_posted_ts, s.last_sbom_count
+                """).fetchall()
+                legacy = False
         finally:
             con.close()
     except sqlite3.Error:
         return []
+    now = int(time.time())
+    if legacy:
+        out = [
+            {
+                "host": r[0],
+                "last_seen_ts": int(r[1] or 0),
+                "open_findings": int(r[2] or 0),
+                "total_findings": int(r[3] or 0),
+            }
+            for r in rows
+            if r[0]
+        ]
+        out.sort(key=lambda e: e["last_seen_ts"], reverse=True)
+        return out
     out = [
         {
             "host": r[0],
-            "last_seen_ts": int(r[1] or 0),
-            "open_findings": int(r[2] or 0),
-            "total_findings": int(r[3] or 0),
+            "first_seen_ts": int(r[1] or 0),
+            "last_posted_ts": int(r[2] or 0),
+            "last_sbom_count": int(r[3] or 0),
+            "last_seen_ts": int(r[4] or 0),
+            "open_findings": int(r[5] or 0),
+            "total_findings": int(r[6] or 0),
+            "status": _fleet_status(int(r[2] or 0), now),
         }
         for r in rows
         if r[0]
     ]
-    out.sort(key=lambda e: e["last_seen_ts"], reverse=True)
+    out.sort(key=lambda e: e["last_posted_ts"], reverse=True)
     return out
 
 
@@ -2096,6 +2199,10 @@ async def receive_scan(payload: dict) -> dict:
         len(sboms),
         exposed_count,
     )
+    # BC-061: register the scout BEFORE any candidate processing so even
+    # an empty-SBOM scan (or a scan that crashes grype downstream) still
+    # shows the scout as active in /fleet.
+    record_scout_post(host, now=int(time.time()), sbom_count=len(sboms))
     # BC-042: audit every scan reception, even if 0 candidates. Closes the
     # "did scout even post?" blind spot — a silent scout and a scout-with-0
     # candidates were indistinguishable in the audit log pre-BC-042.

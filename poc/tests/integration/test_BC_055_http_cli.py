@@ -112,7 +112,22 @@ def test_audit_endpoint_returns_events(hub_env) -> None:
 
 
 def test_fleet_endpoint_returns_per_host(hub_env) -> None:
-    """CAP-T109: /fleet aggregates by host, sorted newest-first."""
+    """CAP-T109: /fleet aggregates by host, sorted newest-first.
+
+    BC-061: /fleet is now driven by the scouts registry. Insert both
+    scouts rows (as if a /scan POST had registered them) and the
+    corresponding findings. Sort is now by last_posted_ts desc; set
+    laptop's post later than server2's so the assertion still holds.
+    """
+    import sqlite3
+
+    con = sqlite3.connect(hub_env["db"])
+    con.execute(
+        "INSERT INTO scouts (host, first_seen_ts, last_posted_ts, last_sbom_count) "
+        "VALUES ('server2', 500, 1000, 1), ('laptop', 1500, 2000, 1)"
+    )
+    con.commit()
+    con.close()
     _insert(hub_env["hub"], "server2", "CVE-A", last_seen_ts=1000)
     _insert(hub_env["hub"], "laptop", "CVE-B", last_seen_ts=2000)
     rows = hub_env["client"].get("/fleet").json()

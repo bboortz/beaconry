@@ -1354,3 +1354,39 @@ Enforcement: `poc/scripts/verify_traceability.py` runs as part of `make check`. 
 - **supports:** CAP-B043
 - **verified by:**
   - `poc/tests/integration/test_BC_060_notify_failed.py`
+
+### CAP-B044: Operator can see every scout + whether it's delivering up-to-date data
+- **type:** business
+- **status:** active
+- **origin:** BC-061 — another agent flagged "hetzner-staging doesn't appear in FLEET"; root cause: /fleet was derived from the findings table, so scouts with zero findings (or whose findings fell below MIN_CVSS) were invisible. Operators need to see every scout + know whether it's actively delivering.
+- **description:** New `scouts` registry table tracks every host that has ever POSTed to `/scan`. Each `/fleet` row now shows `status` ∈ `{active, stale, dead}` computed from `now - last_posted_ts` against two configurable thresholds. `make status` renders a STATUS column with `● active` / `⚠ stale` / `✗ dead` glyphs. Zero-finding scouts (fresh deployment, below-threshold inventory) are visible. Scouts that stopped posting flip to `stale` then `dead` so decommissioned hosts don't silently linger.
+- **supports:** CAP-B023
+- **verified by:**
+  - `poc/tests/integration/test_BC_061_fleet_registry.py`
+
+### CAP-T121: scouts registry table + /scan upsert
+- **type:** technical
+- **status:** active
+- **origin:** BC-061
+- **description:** `init_db` creates `scouts (host PK, first_seen_ts, last_posted_ts, last_sbom_count)` and backfills from existing `findings` on first run (idempotent via `ON CONFLICT DO NOTHING`). `record_scout_post(host, now, sbom_count)` upserts on every `/scan` POST — called BEFORE any candidate processing so even an empty-SBOM scan or a downstream crash still registers the scout as active. `first_seen_ts` is only set on INSERT.
+- **supports:** CAP-B044
+- **verified by:**
+  - `poc/tests/integration/test_BC_061_fleet_registry.py`
+
+### CAP-T122: /fleet LEFT-JOIN with liveness status
+- **type:** technical
+- **status:** active
+- **origin:** BC-061
+- **description:** `GET /fleet` now LEFT JOINs the `scouts` registry with `findings` aggregates. Response gains `first_seen_ts`, `last_posted_ts`, `last_sbom_count`, and `status`. Status is computed by `_fleet_status(last_posted_ts, now)` against `BEACONRY_FLEET_ACTIVE_WINDOW_S` (default 600 s) and `BEACONRY_FLEET_DEAD_AFTER_S` (default 86400 s). Pre-BC-061 DBs without the scouts table get a graceful fallback to the old findings-derived shape until init_db runs.
+- **supports:** CAP-B044
+- **verified by:**
+  - `poc/tests/integration/test_BC_061_fleet_registry.py`
+
+### CAP-T123: make status FLEET STATUS column
+- **type:** technical
+- **status:** active
+- **origin:** BC-061
+- **description:** `format_fleet` detects the `status` field in hub response rows and adds a STATUS column with `● active` / `⚠ stale` / `✗ dead` glyphs. Column widths pad for the widest value. Pre-BC-061 responses (no `status`) render the old 4-column shape for back-compat.
+- **supports:** CAP-B044
+- **verified by:**
+  - `poc/tests/integration/test_BC_061_fleet_registry.py`

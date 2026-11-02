@@ -55,3 +55,4 @@ Lifecycle: `draft → ready → in-progress → shipped`. Status matches each st
 | BC-058 | Mutation + audit cleanup — set_status fail-fast, rich audit, notify_sent, friendlier Telegram error | shipped     | — (merged to dev)                   |
 | BC-059 | Telegram callback_data carries CVE id — error names the CVE | shipped     | — (merged to dev)                   |
 | BC-060 | notify_sent_failed audit symmetry — token-rotate gaps are now auditable | shipped     | — (merged to dev)                   |
+| BC-061 | Scout fleet registry — every scout visible in FLEET with liveness status | shipped     | — (merged to dev)                   |

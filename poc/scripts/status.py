@@ -79,20 +79,42 @@ def fetch_fleet(url: str, timeout: float = 2.0, token: str = "") -> list[dict]:
     return data if isinstance(data, list) else []
 
 
+_STATUS_GLYPH = {"active": "●", "stale": "⚠", "dead": "✗"}
+
+
+def _format_fleet_status(row: dict) -> str:
+    """BC-061: '● active' / '⚠ stale' / '✗ dead' for the STATUS column.
+    Missing status (pre-BC-061 hub response) renders as empty."""
+    status = row.get("status")
+    if not status:
+        return ""
+    return f"{_STATUS_GLYPH.get(status, '?')} {status}"
+
+
 def format_fleet(rows: list[dict]) -> str:
-    """BC-055: render FLEET section (empty = empty string, caller suppresses)."""
+    """BC-055/BC-061: render FLEET section (empty = empty string).
+
+    BC-061: adds a STATUS column when the hub response carries liveness
+    (``status`` field). Pre-BC-061 hub responses render the old 4-column
+    shape for back-compat.
+    """
     if not rows:
         return ""
+    has_status = any(r.get("status") for r in rows)
     header = ["HOST", "LAST SEEN", "OPEN", "TOTAL"]
-    body = [
-        [
+    if has_status:
+        header.append("STATUS")
+    body = []
+    for r in rows:
+        cells = [
             r.get("host", "?"),
             _format_age(int(r.get("last_seen_ts") or 0)),
             str(r.get("open_findings") or 0),
             str(r.get("total_findings") or 0),
         ]
-        for r in rows
-    ]
+        if has_status:
+            cells.append(_format_fleet_status(r))
+        body.append(cells)
     all_rows = [header, *body]
     widths = [max(len(row[i]) for row in all_rows) for i in range(len(header))]
     lines = ["", "FLEET:"]

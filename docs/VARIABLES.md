@@ -72,6 +72,8 @@ See also:
 | Variable | Default | Type | Where read | Reason | Origin |
 |---|---|---|---|---|---|
 | `BEACONRY_DIGEST_INTERVAL_S` | `86400` (24 h) | int (s) | `poc/hub/hub.py` | Per-host digest cooldown. Default 24 h fixes the 288-digests-per-day flood on inventories with cap overflow. Content-hash fallback still bypasses the throttle when the suppressed set actually changes (so operator snoozes land immediately). `0` disables throttling (pre-BC-036 "every scan" behavior). | BC-036 |
+| `BEACONRY_FLEET_ACTIVE_WINDOW_S` | `600` (10 min) | int (s) | `poc/hub/hub.py` | A scout counts as `active` in `/fleet` STATUS if it posted within this window. Default is 2× SCAN_INTERVAL (300 s). Operators who use a longer SCAN_INTERVAL should bump this proportionally so active scouts don't flap to `stale`. | BC-061 |
+| `BEACONRY_FLEET_DEAD_AFTER_S` | `86400` (24 h) | int (s) | `poc/hub/hub.py` | Scouts whose last POST is older than this count as `dead` in `/fleet` STATUS. Between `BEACONRY_FLEET_ACTIVE_WINDOW_S` and this threshold the scout is `stale`. 24 h default means a decommissioned scout turns red after a day. | BC-061 |
 
 ## Notification adapters
 
