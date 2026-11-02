@@ -2,6 +2,7 @@
 
 Covers:
     - CAP-T128: SemVer bump helper + pre-push enforcement
+    - CAP-T151: Hermetic bump-verify tests (BC-071 — resist env leak)
 """
 
 from __future__ import annotations
@@ -180,14 +181,23 @@ def test_verify_pass_when_version_bumped(tmp_path: Path) -> None:
     assert errors == []
 
 
-def test_verify_fails_when_version_unchanged(tmp_path: Path) -> None:
+def test_verify_fails_when_version_unchanged(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # BC-071: hermetic — a stray BEACONRY_SKIP_VERSION_BUMP in the parent
+    # process env would short-circuit vvb.check() to [] and false-pass this.
+    monkeypatch.delenv("BEACONRY_SKIP_VERSION_BUMP", raising=False)
     repo = _init_repo(tmp_path)
     _commit(repo, "feat: no bump")
     errors = vvb.check(repo)
     assert any("VERSION unchanged" in e for e in errors), errors
 
 
-def test_verify_fails_when_version_went_backwards(tmp_path: Path) -> None:
+def test_verify_fails_when_version_went_backwards(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    # BC-071: same hermeticity concern as above.
+    monkeypatch.delenv("BEACONRY_SKIP_VERSION_BUMP", raising=False)
     repo = _init_repo(tmp_path)
     (repo / "VERSION").write_text("0.0.1\n")
     (repo / "poc" / "VERSION").write_text("0.0.1\n")

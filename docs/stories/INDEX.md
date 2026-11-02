@@ -65,3 +65,4 @@ Lifecycle: `draft → ready → in-progress → shipped`. Status matches each st
 | BC-068 | Defensive cleanup — reconcile FD-leak guard + fix_version blank sanitize  | shipped     | — (merged to dev)                   |
 | BC-069 | Release toolchain — CI + make soak + auto-CHANGELOG                       | shipped     | — (merged to dev)                   |
 | BC-070 | Operator CLI install — `pip install -e . → beaconry …`                    | shipped     | — (merged to dev)                   |
+| BC-071 | Fix CI env leak — BEACONRY_SKIP_VERSION_BUMP leaking into pytest          | shipped     | — (merged to dev)                   |

@@ -1634,6 +1634,15 @@ Enforcement: `poc/scripts/verify_traceability.py` runs as part of `make check`. 
 - **verified by:**
   - `poc/tests/integration/test_BC_069_release_toolchain.py`
 
+### CAP-T151: Hermetic bump-verify tests + no CI env leak
+- **type:** technical
+- **status:** active
+- **origin:** BC-071 — first real GitHub Actions CI run on dev false-failed two bump-verify tests. Root cause: `.github/workflows/ci.yml` set `BEACONRY_SKIP_VERSION_BUMP=1` on the `make check` step; the env leaked into pytest subprocesses, making `verify_version_bumped.check()` short-circuit to `[]` where tests expected non-empty errors.
+- **description:** CI yaml drops the env (unnecessary — `make check` doesn't gate on `verify-version-bumped`, which is a pre-push-hook-only lint). Both tests now `monkeypatch.delenv("BEACONRY_SKIP_VERSION_BUMP", raising=False)` at entry — hermetic by default so a future stray parent env can't false-pass them.
+- **supports:** CAP-B023
+- **verified by:**
+  - `poc/tests/unit/test_bump_version.py`
+
 ### CAP-T150: Unified `beaconry` CLI dispatcher + pyproject entry point
 - **type:** technical
 - **status:** active

@@ -122,7 +122,11 @@ jobs:
       - name: make check (fast tier, same as pre-push)
         env:
           BEACONRY_SKIP_GRYPE_DB: "1"
-          BEACONRY_SKIP_VERSION_BUMP: "1"  # CI runs on branches; local gate owns that signal
+          # BC-071: do NOT set BEACONRY_SKIP_VERSION_BUMP here. `make check`
+          # doesn't gate on verify-version-bumped (that's a pre-push-only
+          # hook), and setting the env leaks into pytest subprocesses where
+          # test_verify_fails_when_version_unchanged + the backwards-bump
+          # test rely on an UNSET env to exercise the fail path.
         run: make check
 
       - name: Docs-only short-circuit — skip extended tier
