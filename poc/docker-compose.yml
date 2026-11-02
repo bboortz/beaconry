@@ -32,6 +32,8 @@ services:
       - BEACONRY_HEARTBEAT_LIVENESS_WINDOW_S=${BEACONRY_HEARTBEAT_LIVENESS_WINDOW_S:-}
       # BC-036: digest cadence. Default 24h; 0 = never throttle (every scan).
       - BEACONRY_DIGEST_INTERVAL_S=${BEACONRY_DIGEST_INTERVAL_S:-}
+      # BC-065: hash-change digest bypass. 0 → make DIGEST_INTERVAL_S a strict floor.
+      - BEACONRY_DIGEST_ON_CONTENT_CHANGE=${BEACONRY_DIGEST_ON_CONTENT_CHANGE:-}
       # BC-061: fleet liveness thresholds.
       - BEACONRY_FLEET_ACTIVE_WINDOW_S=${BEACONRY_FLEET_ACTIVE_WINDOW_S:-600}
       - BEACONRY_FLEET_DEAD_AFTER_S=${BEACONRY_FLEET_DEAD_AFTER_S:-86400}

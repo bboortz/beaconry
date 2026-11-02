@@ -121,7 +121,7 @@ Additive. On upgrade, operators get a quieter digest. If they *want* the old flo
 |---|---|---|---|
 | First digest in a window fires | unit | `test_digest_cadence.py::test_first_digest_in_window_fires` | ✓ |
 | Repeat within interval, same set → no digest | unit | `test_digest_cadence.py::test_repeat_within_interval_same_set_skipped` | ✓ |
-| Set changes within interval → digest fires | unit | `test_digest_cadence.py::test_set_change_bypasses_interval` | ✓ |
+| Set changes within interval → digest fires | unit | `test_digest_cadence.py::test_set_change_bypasses_interval_when_enabled` | ✓ |
 | Interval elapsed, same set → digest fires | unit | `test_digest_cadence.py::test_interval_elapsed_fires_even_unchanged` | ✓ |
 | INTERVAL_S=0 → no throttling | unit | `test_digest_cadence.py::test_interval_zero_never_throttles` | ✓ |
 | Empty suppressed → never fires (BC-022 regression guard) | unit | `test_digest_cadence.py::test_empty_set_never_fires` | ✓ |

@@ -128,6 +128,12 @@ HEARTBEAT_SWEEP_INTERVAL_S = _int_env("BEACONRY_HEARTBEAT_SWEEP_INTERVAL_S", 360
 # gone from inventory — no heartbeat (BC-031 reconcile will auto-close it).
 HEARTBEAT_LIVENESS_WINDOW_S = _int_env("BEACONRY_HEARTBEAT_LIVENESS_WINDOW_S", 7 * 86400)
 DIGEST_INTERVAL_S = _int_env("BEACONRY_DIGEST_INTERVAL_S", 86400)
+# BC-065: operator opt-out for the content-change bypass. BC-036 fires the
+# digest whenever the suppressed-set hash changes, which short-circuits the
+# interval throttle in noisy homelabs (new CVE rotates the capped tail →
+# digest every scan). Set to 0 to require the interval to actually elapse.
+# Default 1 preserves pre-BC-065 behaviour for existing deployments.
+DIGEST_ON_CONTENT_CHANGE = os.environ.get("BEACONRY_DIGEST_ON_CONTENT_CHANGE", "1") != "0"
 # BC-038: scenario harness toggle. When set, `/test/*` endpoints are registered
 # on the FastAPI app. These endpoints accept pre-matched candidates + an
 # injected `now` timestamp so scenarios can exercise the full ingest flow
@@ -2157,7 +2163,9 @@ def should_send_digest(host: str, suppressed: list[Finding], *, now: int) -> tup
       - empty suppressed → never send (BC-022 preserved)
       - DIGEST_INTERVAL_S == 0 → always send (pre-BC-036 opt-out)
       - no prior send for this host → send (first_fire)
-      - content hash differs from last send → send (content_changed)
+      - content hash differs from last send AND DIGEST_ON_CONTENT_CHANGE
+        → send (content_changed). BC-065 adds the gate so noisy homelabs
+        can keep the 24h throttle meaningful.
       - interval elapsed since last send → send (interval_elapsed)
       - otherwise → throttled
     """
@@ -2176,7 +2184,7 @@ def should_send_digest(host: str, suppressed: list[Finding], *, now: int) -> tup
     if row is None:
         return True, content_hash, "first_fire"
     last_sent_ts, last_hash = row
-    if last_hash != content_hash:
+    if DIGEST_ON_CONTENT_CHANGE and last_hash != content_hash:
         return True, content_hash, "content_changed"
     if now - last_sent_ts >= DIGEST_INTERVAL_S:
         return True, content_hash, "interval_elapsed"

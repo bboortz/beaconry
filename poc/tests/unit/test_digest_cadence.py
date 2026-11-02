@@ -115,14 +115,61 @@ def test_repeat_within_interval_same_set_skipped(digest_env: Path) -> None:
     assert reason == "throttled"
 
 
-def test_set_change_bypasses_interval(digest_env: Path) -> None:
-    """Content hash differs → fire even inside the interval."""
+def test_set_change_bypasses_interval_when_enabled(
+    digest_env: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """BC-036 behaviour: with DIGEST_ON_CONTENT_CHANGE=True (default),
+    a hash change fires the digest even inside the interval."""
+    monkeypatch.setattr(hub, "DIGEST_ON_CONTENT_CHANGE", True)
     s1 = [_finding("a"), _finding("b")]
     hub.record_digest_sent("h1", s1, now=1000)
     s2 = [_finding("a"), _finding("c")]  # swap b for c
     should, _hash, reason = hub.should_send_digest("h1", s2, now=1000 + 3600)
     assert should is True
     assert reason == "content_changed"
+
+
+def test_set_change_respects_interval_when_disabled(
+    digest_env: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """BC-065: DIGEST_ON_CONTENT_CHANGE=False → hash change does NOT
+    bypass the interval. Reason is 'throttled' (same as unchanged inside
+    the interval) so audit log stays coherent."""
+    monkeypatch.setattr(hub, "DIGEST_ON_CONTENT_CHANGE", False)
+    s1 = [_finding("a"), _finding("b")]
+    hub.record_digest_sent("h1", s1, now=1000)
+    s2 = [_finding("a"), _finding("c")]  # content changed
+    should, _hash, reason = hub.should_send_digest("h1", s2, now=1000 + 3600)
+    assert should is False
+    assert reason == "throttled"
+
+
+def test_interval_elapsed_fires_when_content_change_disabled(
+    digest_env: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """BC-065: the interval-elapsed path still fires when the content-
+    change bypass is turned off — the 24h floor is still enforced."""
+    monkeypatch.setattr(hub, "DIGEST_ON_CONTENT_CHANGE", False)
+    s1 = [_finding("a"), _finding("b")]
+    hub.record_digest_sent("h1", s1, now=1000)
+    s2 = [_finding("a"), _finding("c")]  # content changed too
+    # 25h later → interval has elapsed, must fire regardless of flag.
+    should, _hash, reason = hub.should_send_digest("h1", s2, now=1000 + 25 * 3600)
+    assert should is True
+    assert reason == "interval_elapsed"
+
+
+def test_first_fire_ignores_content_change_flag(
+    digest_env: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    """BC-065: a host that has never received a digest still fires on
+    the first eligible scan even with the flag off (there is no prior
+    hash to compare)."""
+    monkeypatch.setattr(hub, "DIGEST_ON_CONTENT_CHANGE", False)
+    s = [_finding("a")]
+    should, _hash, reason = hub.should_send_digest("h1", s, now=1000)
+    assert should is True
+    assert reason == "first_fire"
 
 
 def test_interval_elapsed_fires_even_unchanged(digest_env: Path) -> None:
