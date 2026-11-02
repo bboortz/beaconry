@@ -25,6 +25,7 @@ from fastapi.testclient import TestClient
 from poc.scripts.verify_version_sync import check_version_sync
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
+LIVE_VERSION = (REPO_ROOT / "VERSION").read_text().strip()
 
 
 # ── Shared fixtures ─────────────────────────────────────────────────────────
@@ -75,16 +76,17 @@ def hub_strict_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[
 # ── CAP-T124: VERSION file + loader ────────────────────────────────────────
 
 
-def test_version_file_reads_0_1_0() -> None:
-    assert (REPO_ROOT / "VERSION").read_text().strip() == "0.1.0"
-    assert (REPO_ROOT / "poc" / "VERSION").read_text().strip() == "0.1.0"
+def test_version_files_are_in_sync() -> None:
+    # BC-062/BC-063: /VERSION and /poc/VERSION must byte-equal.
+    assert (REPO_ROOT / "VERSION").read_text().strip() == LIVE_VERSION
+    assert (REPO_ROOT / "poc" / "VERSION").read_text().strip() == LIVE_VERSION
 
 
 def test_loader_matches_version_file() -> None:
     import poc.beaconry_health as bh
 
-    assert bh.read_version() == "0.1.0"
-    assert bh.SOFTWARE_VERSION == "0.1.0"
+    assert bh.read_version() == LIVE_VERSION
+    assert bh.SOFTWARE_VERSION == LIVE_VERSION
 
 
 def test_verify_version_sync_passes_live() -> None:
@@ -134,9 +136,9 @@ def test_hub_response_carries_api_header(hub_env) -> None:
 
 def test_healthz_carries_version_block(hub_env) -> None:
     body = hub_env["client"].get("/healthz").json()
-    assert body["version"]["software"] == "0.1.0"
+    assert body["version"]["software"] == LIVE_VERSION
     assert body["version"]["api"] == 1
-    assert body["version"]["schema"] == 2
+    assert body["version"]["schema"] == hub_env["hub"].EXPECTED_SCHEMA_VERSION
 
 
 def test_missing_expect_header_never_fails(hub_env) -> None:
@@ -178,7 +180,7 @@ def test_fresh_db_sets_pragma_to_expected(hub_env) -> None:
     con = sqlite3.connect(hub_env["db"])
     (value,) = con.execute("PRAGMA user_version").fetchone()
     con.close()
-    assert value == hub_env["hub"].EXPECTED_SCHEMA_VERSION == 2
+    assert value == hub_env["hub"].EXPECTED_SCHEMA_VERSION
 
 
 def test_legacy_db_migrates_to_expected(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
@@ -210,7 +212,7 @@ def test_legacy_db_migrates_to_expected(tmp_path: Path, monkeypatch: pytest.Monk
     con = sqlite3.connect(db_path)
     (value,) = con.execute("PRAGMA user_version").fetchone()
     con.close()
-    assert value == 2
+    assert value == hub.EXPECTED_SCHEMA_VERSION
     importlib.reload(hub)
 
 
@@ -235,7 +237,7 @@ def test_newer_db_raises_schema_too_new(tmp_path: Path, monkeypatch: pytest.Monk
     with pytest.raises(hub.SchemaTooNew) as excinfo:
         hub.init_db()
     assert "99" in str(excinfo.value)
-    assert "2" in str(excinfo.value)
+    assert str(hub.EXPECTED_SCHEMA_VERSION) in str(excinfo.value)
     importlib.reload(hub)
 
 

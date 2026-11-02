@@ -60,6 +60,12 @@ SCAN_INTERVAL = int(os.environ.get("SCAN_INTERVAL", "300"))
 HOST_NAME = os.environ.get("HOST_NAME", os.uname().nodename)
 PACMAN_DB = os.environ.get("PACMAN_DB", "/host/var/lib/pacman")
 HTTP_PORT = int(os.environ.get("SCOUT_HTTP_PORT", "8001"))
+# BC-063: short-interval keepalive to the hub so FLEET's HEALTH / VERSION
+# cells stay fresh between SCAN_INTERVAL ticks. Default 60s is the
+# "comfortable" value — one env var, no fiddling needed. Set to 0 to
+# disable (falls back to BC-061 behaviour where /scan is the only
+# heartbeat).
+SCOUT_HEARTBEAT_INTERVAL_S = int(os.environ.get("SCOUT_HEARTBEAT_INTERVAL_S", "60"))
 
 # BC-005 defaults — demo-safe allowlist, no excludes by default.
 DEFAULT_INCLUDE_GLOBS = "nginx*,redis*,postgres*"
@@ -416,6 +422,11 @@ def collect_and_post():  # pragma: no cover - orchestrator; integration-tested l
     payload = {
         "host": HOST_NAME,
         "timestamp": int(time.time()),
+        # BC-063: scout self-reports version + health so FLEET rows carry
+        # real diagnostic info instead of just "stale 1h ago".
+        "software_version": SOFTWARE_VERSION,
+        "api_version": CLIENT_API_VERSION,
+        "health": "ok" if _docker_socket_ok else "degraded",
         "sboms": sboms,
         "open_ports": open_ports,
         "container_exposure": container_exposure,
@@ -536,12 +547,64 @@ async def _scan_loop_forever() -> None:  # pragma: no cover - infinite async loo
         await asyncio.sleep(SCAN_INTERVAL)
 
 
+def heartbeat_once() -> bool:
+    """BC-063: POST /heartbeat with host + version + health.
+
+    Returns True on 2xx, False otherwise. No exceptions escape — a hub
+    outage or auth failure is logged + swallowed; the next tick will
+    try again. SBOM-free body (<200 bytes).
+    """
+    body = json.dumps(
+        {
+            "host": HOST_NAME,
+            "timestamp": int(time.time()),
+            "software_version": SOFTWARE_VERSION,
+            "api_version": CLIENT_API_VERSION,
+            "health": "ok" if _docker_socket_ok else "degraded",
+        }
+    )
+    headers = {
+        "Content-Type": "application/json",
+        "X-Beaconry-API-Expect": str(CLIENT_API_VERSION),
+    }
+    token = os.environ.get("HUB_TOKEN", "")
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+    try:
+        resp = requests.post(f"{HUB_URL}/heartbeat", data=body, headers=headers, timeout=10)
+        resp.raise_for_status()
+        return True
+    except requests.RequestException as e:
+        log.warning("heartbeat POST failed: %s", e)
+        return False
+
+
+async def _heartbeat_loop_forever() -> None:  # pragma: no cover - infinite async loop
+    """Fire a heartbeat once immediately on startup, then every
+    SCOUT_HEARTBEAT_INTERVAL_S. Interval=0 disables the loop (caller
+    does not spawn the task)."""
+    while True:
+        await asyncio.to_thread(heartbeat_once)
+        await asyncio.sleep(SCOUT_HEARTBEAT_INTERVAL_S)
+
+
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
-    log.info("Beaconry Scout %s — hub: %s, interval: %ds", SCOUT_VERSION, HUB_URL, SCAN_INTERVAL)
-    task = asyncio.create_task(_scan_loop_forever())
+    log.info(
+        "Beaconry Scout %s — hub: %s, interval: %ds, heartbeat: %ds",
+        SCOUT_VERSION,
+        HUB_URL,
+        SCAN_INTERVAL,
+        SCOUT_HEARTBEAT_INTERVAL_S,
+    )
+    tasks: list[asyncio.Task[None]] = [asyncio.create_task(_scan_loop_forever())]
+    if SCOUT_HEARTBEAT_INTERVAL_S > 0:
+        tasks.append(asyncio.create_task(_heartbeat_loop_forever()))
+    else:
+        log.info("Heartbeat disabled (SCOUT_HEARTBEAT_INTERVAL_S=0)")
     yield
-    task.cancel()
+    for t in tasks:
+        t.cancel()
 
 
 app = FastAPI(title="Beaconry Scout", version=SCOUT_VERSION, lifespan=lifespan)

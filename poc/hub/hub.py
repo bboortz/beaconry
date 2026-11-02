@@ -158,7 +158,7 @@ except ImportError:
 
 HUB_VERSION = SOFTWARE_VERSION  # back-compat alias
 API_VERSION = 1
-EXPECTED_SCHEMA_VERSION = 2
+EXPECTED_SCHEMA_VERSION = 3
 STRICT_API = os.environ.get("BEACONRY_STRICT_API") == "1"
 
 
@@ -196,25 +196,61 @@ def _fleet_status(last_posted_ts: int, now: int) -> str:
     return "dead"
 
 
-def record_scout_post(host: str, *, now: int, sbom_count: int) -> None:
-    """BC-061: upsert a scouts-registry row on every /scan POST.
+def record_scout_post(
+    host: str,
+    *,
+    now: int,
+    sbom_count: int,
+    software_version: str | None = None,
+    api_version: int | None = None,
+    health: str | None = None,
+    bump_scan_ts: bool = True,
+) -> None:
+    """BC-061/BC-063: upsert a scouts-registry row on every scout POST.
 
     First-time POST registers the scout. Repeat POSTs bump
     `last_posted_ts` + `last_sbom_count`. `first_seen_ts` is only set
-    on INSERT, never updated. Tolerant of pre-BC-061 DBs (no scouts
-    table yet) so test fixtures that skip init_db don't break.
+    on INSERT, never updated. BC-063: `software_version` /
+    `api_version` / `last_health` are updated on every POST so the
+    FLEET view reflects the current scout, not whatever it was when
+    it first registered. `bump_scan_ts=False` (heartbeat POSTs) keeps
+    `last_scan_ts` untouched so FLEET's LAST SCAN column reflects
+    actual scan activity — not the last keepalive. Tolerant of
+    pre-BC-061 DBs (no scouts table yet) so test fixtures that skip
+    init_db don't break.
     """
+    scan_ts = now if bump_scan_ts else None
     con = sqlite3.connect(DB_PATH)
     try:
         with contextlib.suppress(sqlite3.OperationalError):
-            con.execute(
-                "INSERT INTO scouts (host, first_seen_ts, last_posted_ts, last_sbom_count) "
-                "VALUES (?, ?, ?, ?) "
-                "ON CONFLICT(host) DO UPDATE SET "
-                "  last_posted_ts = excluded.last_posted_ts, "
-                "  last_sbom_count = excluded.last_sbom_count",
-                (host, now, now, sbom_count),
-            )
+            if bump_scan_ts:
+                con.execute(
+                    "INSERT INTO scouts (host, first_seen_ts, last_posted_ts, "
+                    "  last_sbom_count, software_version, api_version, last_health, "
+                    "  last_scan_ts) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?) "
+                    "ON CONFLICT(host) DO UPDATE SET "
+                    "  last_posted_ts = excluded.last_posted_ts, "
+                    "  last_sbom_count = excluded.last_sbom_count, "
+                    "  software_version = excluded.software_version, "
+                    "  api_version = excluded.api_version, "
+                    "  last_health = excluded.last_health, "
+                    "  last_scan_ts = excluded.last_scan_ts",
+                    (host, now, now, sbom_count, software_version, api_version, health, scan_ts),
+                )
+            else:
+                # Heartbeat path: leave last_scan_ts + last_sbom_count untouched.
+                con.execute(
+                    "INSERT INTO scouts (host, first_seen_ts, last_posted_ts, "
+                    "  last_sbom_count, software_version, api_version, last_health) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?) "
+                    "ON CONFLICT(host) DO UPDATE SET "
+                    "  last_posted_ts = excluded.last_posted_ts, "
+                    "  software_version = excluded.software_version, "
+                    "  api_version = excluded.api_version, "
+                    "  last_health = excluded.last_health",
+                    (host, now, now, 0, software_version, api_version, health),
+                )
             con.commit()
     finally:
         con.close()
@@ -238,14 +274,34 @@ def init_db() -> None:
     # BC-061: scouts registry — one row per host that has ever POSTed to
     # /scan. Enables /fleet to show zero-finding scouts and apply
     # liveness status (active / stale / dead).
+    # BC-063: three nullable columns for per-scout metadata — scout
+    # version, API contract version, and last-reported health. Fresh
+    # DBs create them inline; v2 DBs get them via ALTER TABLE below.
     con.execute("""
         CREATE TABLE IF NOT EXISTS scouts (
             host             TEXT PRIMARY KEY,
             first_seen_ts    INTEGER NOT NULL,
             last_posted_ts   INTEGER NOT NULL,
-            last_sbom_count  INTEGER NOT NULL DEFAULT 0
+            last_sbom_count  INTEGER NOT NULL DEFAULT 0,
+            software_version TEXT,
+            api_version      INTEGER,
+            last_health      TEXT,
+            last_scan_ts     INTEGER
         )
     """)
+    # BC-063 migration v2 → v3: PRAGMA table_info drives idempotency so a
+    # fresh DB (columns already present via CREATE TABLE above) and a
+    # repeat migration are both no-ops. `last_scan_ts` is distinct from
+    # `last_posted_ts`: heartbeat POSTs bump only the latter.
+    existing_cols = {row[1] for row in con.execute("PRAGMA table_info(scouts)").fetchall()}
+    for col, decl in (
+        ("software_version", "TEXT"),
+        ("api_version", "INTEGER"),
+        ("last_health", "TEXT"),
+        ("last_scan_ts", "INTEGER"),
+    ):
+        if col not in existing_cols:
+            con.execute(f"ALTER TABLE scouts ADD COLUMN {col} {decl}")
     con.execute("""
         CREATE TABLE IF NOT EXISTS findings (
             id           TEXT PRIMARY KEY,
@@ -1816,6 +1872,9 @@ async def http_fleet() -> list[dict]:
                 ).fetchall()
                 legacy = True
             else:
+                # BC-063: four extra per-scout columns surface in /fleet.
+                # Columns 7-10 are nullable (pre-BC-063 scouts); callers
+                # treat them as optional / render "-" / "?" when missing.
                 rows = con.execute("""
                     SELECT s.host,
                            s.first_seen_ts,
@@ -1823,10 +1882,16 @@ async def http_fleet() -> list[dict]:
                            s.last_sbom_count,
                            COALESCE(MAX(f.last_seen_ts), 0),
                            COALESCE(SUM(CASE WHEN f.status = 'open' THEN 1 ELSE 0 END), 0),
-                           COUNT(f.id)
+                           COUNT(f.id),
+                           s.software_version,
+                           s.api_version,
+                           s.last_health,
+                           s.last_scan_ts
                     FROM scouts s
                     LEFT JOIN findings f ON f.host = s.host
-                    GROUP BY s.host, s.first_seen_ts, s.last_posted_ts, s.last_sbom_count
+                    GROUP BY s.host, s.first_seen_ts, s.last_posted_ts,
+                             s.last_sbom_count, s.software_version,
+                             s.api_version, s.last_health, s.last_scan_ts
                 """).fetchall()
                 legacy = False
         finally:
@@ -1857,6 +1922,11 @@ async def http_fleet() -> list[dict]:
             "open_findings": int(r[5] or 0),
             "total_findings": int(r[6] or 0),
             "status": _fleet_status(int(r[2] or 0), now),
+            # BC-063: per-scout metadata. None for pre-BC-063 scouts.
+            "software_version": r[7],
+            "api_version": r[8],
+            "last_health": r[9],
+            "last_scan_ts": int(r[10]) if r[10] is not None else None,
         }
         for r in rows
         if r[0]
@@ -2276,7 +2346,16 @@ async def receive_scan(payload: dict) -> dict:
     # BC-061: register the scout BEFORE any candidate processing so even
     # an empty-SBOM scan (or a scan that crashes grype downstream) still
     # shows the scout as active in /fleet.
-    record_scout_post(host, now=int(time.time()), sbom_count=len(sboms))
+    # BC-063: capture the scout's self-reported metadata (missing on
+    # pre-BC-063 scouts → persisted as NULL).
+    record_scout_post(
+        host,
+        now=int(time.time()),
+        sbom_count=len(sboms),
+        software_version=payload.get("software_version"),
+        api_version=payload.get("api_version"),
+        health=payload.get("health"),
+    )
     # BC-042: audit every scan reception, even if 0 candidates. Closes the
     # "did scout even post?" blind spot — a silent scout and a scout-with-0
     # candidates were indistinguishable in the audit log pre-BC-042.
@@ -2295,6 +2374,35 @@ async def receive_scan(payload: dict) -> dict:
             log.error("Error processing SBOM entry: %s", e)
 
     return await _ingest_candidates(host, candidates, now_ts=int(time.time()))
+
+
+@api.post("/heartbeat", dependencies=[Depends(require_scout_token)])
+async def receive_heartbeat(payload: dict) -> dict:
+    """BC-063: lightweight scout keepalive — host + version + health.
+
+    No SBOMs. No candidate processing. Hub updates the scouts row's
+    `last_posted_ts` + version + health, but leaves `last_scan_ts` +
+    `last_sbom_count` untouched so FLEET's LAST SCAN column reflects
+    real scan activity (not every 60s keepalive). Scout bearer token
+    required — same auth surface as /scan.
+    """
+    host = payload.get("host", "unknown")
+    now = int(time.time())
+    record_scout_post(
+        host,
+        now=now,
+        sbom_count=0,  # ignored on heartbeat path
+        software_version=payload.get("software_version"),
+        api_version=payload.get("api_version"),
+        health=payload.get("health"),
+        bump_scan_ts=False,
+    )
+    _audit.append(
+        "heartbeat_received",
+        host=host,
+        health=payload.get("health") or "unknown",
+    )
+    return {"ok": True, "host": host, "ts": now}
 
 
 async def _ingest_candidates(

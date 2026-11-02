@@ -86,6 +86,7 @@ def fetch_fleet(url: str, timeout: float = 2.0, token: str = "") -> list[dict]:
 
 
 _STATUS_GLYPH = {"active": "●", "stale": "⚠", "dead": "✗"}
+_HEALTH_GLYPH = {"ok": "●", "healthy": "●", "degraded": "⚠", "unknown": "?"}
 
 
 def _format_fleet_status(row: dict) -> str:
@@ -97,27 +98,76 @@ def _format_fleet_status(row: dict) -> str:
     return f"{_STATUS_GLYPH.get(status, '?')} {status}"
 
 
-def format_fleet(rows: list[dict]) -> str:
-    """BC-055/BC-061: render FLEET section (empty = empty string).
+def _format_fleet_version(row: dict, hub_api: int | None) -> str:
+    """BC-063: ``'0.1.0 · api1'`` (+ trailing ``⚠`` on hub-API mismatch).
 
-    BC-061: adds a STATUS column when the hub response carries liveness
-    (``status`` field). Pre-BC-061 hub responses render the old 4-column
-    shape for back-compat.
+    Pre-BC-063 hub response (software_version=None) → ``'-'``.
+    """
+    sv = row.get("software_version")
+    av = row.get("api_version")
+    if not sv and av is None:
+        return "-"
+    parts: list[str] = []
+    if sv:
+        parts.append(str(sv))
+    if isinstance(av, int):
+        parts.append(f"api{av}")
+    cell = " · ".join(parts) if parts else "-"
+    if isinstance(av, int) and isinstance(hub_api, int) and av != hub_api:
+        cell += " ⚠"
+    return cell
+
+
+def _format_fleet_health(row: dict) -> str:
+    """BC-063: ``'● healthy'`` / ``'⚠ degraded'`` / ``'? unknown'``.
+
+    Pre-BC-063 scouts (last_health=None) render ``'? unknown'`` — the
+    scout exists but hasn't told us. Explicitly different from a scout
+    that reports ``'degraded'``.
+    """
+    h = row.get("last_health")
+    if not h:
+        return "? unknown"
+    label = "healthy" if h == "ok" else h
+    glyph = _HEALTH_GLYPH.get(h, "?")
+    return f"{glyph} {label}"
+
+
+def format_fleet(rows: list[dict], *, hub_api: int | None = None) -> str:
+    """BC-055/BC-061/BC-063: render FLEET section (empty = empty string).
+
+    - BC-061: STATUS column (``● active`` / ``⚠ stale`` / ``✗ dead``).
+    - BC-063: VERSION, HEALTH, and LAST SCAN columns per scout.
+
+    Pre-BC-061/pre-BC-063 hub responses degrade gracefully:
+    missing status → shape without STATUS; missing version/health →
+    ``-`` / ``? unknown`` cells.
     """
     if not rows:
         return ""
     has_status = any(r.get("status") for r in rows)
-    header = ["HOST", "LAST SEEN", "OPEN", "TOTAL"]
+    has_bc063 = any(
+        r.get("software_version") or r.get("last_health") or r.get("last_scan_ts") for r in rows
+    )
+    header = ["HOST", "LAST SEEN"]
+    if has_bc063:
+        header += ["LAST SCAN", "VERSION", "HEALTH"]
+    header += ["OPEN", "TOTAL"]
     if has_status:
         header.append("STATUS")
-    body = []
+    body: list[list[str]] = []
     for r in rows:
         cells = [
             r.get("host", "?"),
             _format_age(int(r.get("last_seen_ts") or 0)),
-            str(r.get("open_findings") or 0),
-            str(r.get("total_findings") or 0),
         ]
+        if has_bc063:
+            last_scan_ts = r.get("last_scan_ts")
+            cells.append(_format_age(int(last_scan_ts)) if last_scan_ts else "-")
+            cells.append(_format_fleet_version(r, hub_api))
+            cells.append(_format_fleet_health(r))
+        cells.append(str(r.get("open_findings") or 0))
+        cells.append(str(r.get("total_findings") or 0))
         if has_status:
             cells.append(_format_fleet_status(r))
         body.append(cells)
@@ -315,9 +365,11 @@ def main() -> int:
         print(mismatch)
 
     # BC-055: FLEET section below services table.
+    # BC-063: pass the hub's own api version so per-scout rows can show a
+    # trailing ⚠ when a scout's api_version drifts from the hub's.
     fleet_url = _CLI_CFG.hub_url.rstrip("/") + "/fleet"
     fleet_rows = fetch_fleet(fleet_url, token=HUB_AUTH_TOKEN)
-    fleet_text = format_fleet(fleet_rows)
+    fleet_text = format_fleet(fleet_rows, hub_api=hub.api_version)
     if fleet_text:
         print(fleet_text)
 

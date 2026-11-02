@@ -57,3 +57,4 @@ Lifecycle: `draft → ready → in-progress → shipped`. Status matches each st
 | BC-060 | notify_sent_failed audit symmetry — token-rotate gaps are now auditable | shipped     | — (merged to dev)                   |
 | BC-061 | Scout fleet registry — every scout visible in FLEET with liveness status | shipped     | — (merged to dev)                   |
 | BC-062 | Software + API + schema versioning (+ SemVer auto-bump + pre-push gate) | shipped     | — (merged to dev)                   |
+| BC-063 | Fleet rows show version/health/last-scan + scout heartbeat loop         | shipped     | — (merged to dev)                   |

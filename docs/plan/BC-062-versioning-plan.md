@@ -147,7 +147,7 @@ story.
 
 | Scenario / goal | Evidence type | Pointer | Status |
 |---|---|---|---|
-| VERSION file reads 0.1.0 at repo root + poc/ mirror | integration | `test_BC_062_versioning.py::test_version_file_reads_0_1_0` | ✓ |
+| /VERSION and /poc/VERSION byte-equal | integration | `test_BC_062_versioning.py::test_version_files_are_in_sync` | ✓ |
 | SOFTWARE_VERSION loader matches VERSION file | integration | `test_BC_062_versioning.py::test_loader_matches_version_file` | ✓ |
 | verify-version-sync passes on live repo | integration | `test_BC_062_versioning.py::test_verify_version_sync_passes_live` | ✓ |
 | verify-version-sync catches /VERSION ↔ poc/VERSION drift | integration | `test_BC_062_versioning.py::test_verify_version_sync_catches_drift` | ✓ |

@@ -1444,3 +1444,57 @@ Enforcement: `poc/scripts/verify_traceability.py` runs as part of `make check`. 
 - **supports:** CAP-B045
 - **verified by:**
   - `poc/tests/unit/test_bump_version.py`
+
+### CAP-B046: Operator can diagnose a stale/degraded scout from `make status` alone — no SSH, no `docker logs`
+- **type:** business
+- **status:** active
+- **origin:** BC-063 — homelab key user hit a stale `server2` for 1h and had no way to tell from `make status` whether the scout crashed, ran old code, or lost its Docker socket. Troubleshooting deployments needed per-scout version, health, and last-scan surfacing.
+- **description:** Every FLEET row now shows LAST SCAN, VERSION (`0.1.0 · api1`, trailing `⚠` on hub-API mismatch), and HEALTH (`● healthy` / `⚠ degraded` / `? unknown`). Scouts self-report via `/scan` payload (full) and a short-interval `/heartbeat` POST (comfortable default 60s) so the FLEET cells refresh within a minute even when SCAN_INTERVAL is long. Pre-BC-063 scouts render `-` / `? unknown` gracefully. Within 5 min of a scout boot the operator can see `software_version · apiN · ● healthy · 30s ago` and diagnose the stale case without SSHing to the host.
+- **supports:** CAP-B023, CAP-B044
+- **verified by:**
+  - `poc/tests/integration/test_BC_063_fleet_health.py`
+
+### CAP-T129: Scout POSTs software_version + api_version + health on /scan
+- **type:** technical
+- **status:** active
+- **origin:** BC-063
+- **description:** `poc/scout/scout.py::collect_and_post` payload gains top-level `software_version`, `api_version`, and `health` fields (same vocabulary scout's own `/healthz` summary uses — `ok` / `degraded`). Values come from `beaconry_health.SOFTWARE_VERSION` + `CLIENT_API_VERSION` + the live `_docker_socket_ok` flag.
+- **supports:** CAP-B046
+- **verified by:**
+  - `poc/tests/integration/test_BC_063_fleet_health.py`
+
+### CAP-T130: Scouts table schema v3 — per-scout metadata columns
+- **type:** technical
+- **status:** active
+- **origin:** BC-063
+- **description:** `scouts` table gains `software_version TEXT`, `api_version INTEGER`, `last_health TEXT`, `last_scan_ts INTEGER` (all nullable; pre-BC-063 scouts persist NULL). `EXPECTED_SCHEMA_VERSION` bumps to 3. `init_db` migrates v2 → v3 idempotently via `PRAGMA table_info(scouts)` + conditional `ALTER TABLE ADD COLUMN` for each missing column. Fresh DBs get the columns via the `CREATE TABLE IF NOT EXISTS` inline schema. `last_scan_ts` is intentionally distinct from `last_posted_ts`: heartbeat POSTs bump only the latter so the LAST SCAN column reflects real scan activity.
+- **supports:** CAP-B046
+- **verified by:**
+  - `poc/tests/integration/test_BC_063_fleet_health.py`
+
+### CAP-T131: /fleet surfaces per-scout version + health + last_scan
+- **type:** technical
+- **status:** active
+- **origin:** BC-063
+- **description:** `GET /fleet` response adds `software_version`, `api_version`, `last_health`, `last_scan_ts` per row (null for pre-BC-063 scouts). `record_scout_post` persists the fields on every POST; the heartbeat path (`bump_scan_ts=False`) leaves `last_scan_ts` and `last_sbom_count` untouched.
+- **supports:** CAP-B046
+- **verified by:**
+  - `poc/tests/integration/test_BC_063_fleet_health.py`
+
+### CAP-T132: `make status` FLEET renders VERSION + HEALTH + LAST SCAN columns + API-mismatch glyph
+- **type:** technical
+- **status:** active
+- **origin:** BC-063
+- **description:** `scripts/status.py::format_fleet` adds three columns between LAST SEEN and OPEN when any row carries BC-063 fields. VERSION cell shows `software · apiN` (+ trailing `⚠` on hub-API drift). HEALTH cell shows `● healthy` / `⚠ degraded` / `? unknown`. LAST SCAN uses `_format_age(last_scan_ts)` or `-` when the scout only ever heartbeat'd. Pre-BC-063 responses render the old shape (back-compat).
+- **supports:** CAP-B046
+- **verified by:**
+  - `poc/tests/integration/test_BC_063_fleet_health.py`
+
+### CAP-T134: Scout heartbeat (POST /heartbeat on short interval)
+- **type:** technical
+- **status:** active
+- **origin:** BC-063
+- **description:** Scout runs `_heartbeat_loop_forever` as a second asyncio task alongside the scan loop; every `SCOUT_HEARTBEAT_INTERVAL_S` seconds (default 60) it POSTs `{host, timestamp, software_version, api_version, health}` to the hub's new `/heartbeat` endpoint. First heartbeat fires immediately on startup (within seconds of boot). Hub's `receive_heartbeat` persists metadata via `record_scout_post(..., bump_scan_ts=False)` + emits `heartbeat_received` audit event. `SCOUT_HEARTBEAT_INTERVAL_S=0` disables the loop entirely (falls back to BC-061 behaviour).
+- **supports:** CAP-B046
+- **verified by:**
+  - `poc/tests/integration/test_BC_063_fleet_health.py`

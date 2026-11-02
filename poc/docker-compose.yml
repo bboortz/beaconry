@@ -81,6 +81,9 @@ services:
       - HUB_URL=http://hub:8000
       - HOST_NAME=${HOST_NAME:-server2}
       - SCAN_INTERVAL=${SCAN_INTERVAL:-300}
+      # BC-063: short-interval keepalive so FLEET's HEALTH/VERSION cells stay
+      # fresh. Set to 0 to disable.
+      - SCOUT_HEARTBEAT_INTERVAL_S=${SCOUT_HEARTBEAT_INTERVAL_S:-60}
       - SCOUT_INCLUDE=${SCOUT_INCLUDE:-nginx*,redis*,postgres*}
       - SCOUT_EXCLUDE=${SCOUT_EXCLUDE:-}
       - PACMAN_DB=/host/var/lib/pacman
