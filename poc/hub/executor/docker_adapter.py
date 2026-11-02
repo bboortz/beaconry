@@ -40,8 +40,17 @@ class DockerAdapter(ExecutorPlugin):
 
     async def execute(self, finding: Finding) -> ExecutionResult:
         base_name, pull_target = _resolve_pull_target(finding.source_ref)
-        rollback_cmd = f"docker tag {finding.source_ref} {base_name}:rollback"
-        pull_cmd = f"docker pull {pull_target}"
+        # BC-067: `source_ref` originates in the SBOM — a crafted image
+        # tag like `nginx; rm -rf /; #` would have been shell-injected
+        # under the previous `create_subprocess_shell` path. argv form
+        # of `create_subprocess_exec` passes each token as a positional
+        # kernel argument, so shell metacharacters are inert. The
+        # printable `command` field below is for display only — never
+        # fed to a shell.
+        rollback_argv = ["docker", "tag", finding.source_ref, f"{base_name}:rollback"]
+        pull_argv = ["docker", "pull", pull_target]
+        rollback_cmd = " ".join(rollback_argv)  # display-only
+        pull_cmd = " ".join(pull_argv)  # display-only
 
         if MOCK:
             print(f"    [mock] {rollback_cmd}")
@@ -53,8 +62,8 @@ class DockerAdapter(ExecutorPlugin):
             )
 
         # Tag current image as :rollback before pulling (safety net)
-        proc = await asyncio.create_subprocess_shell(
-            rollback_cmd,
+        proc = await asyncio.create_subprocess_exec(
+            *rollback_argv,
             stdout=asyncio.subprocess.DEVNULL,
             stderr=asyncio.subprocess.PIPE,
         )
@@ -64,8 +73,8 @@ class DockerAdapter(ExecutorPlugin):
 
         # Pull same-track tag
         log.info("Executing: %s", pull_cmd)
-        proc = await asyncio.create_subprocess_shell(
-            pull_cmd,
+        proc = await asyncio.create_subprocess_exec(
+            *pull_argv,
             stdout=asyncio.subprocess.PIPE,
             stderr=asyncio.subprocess.PIPE,
         )

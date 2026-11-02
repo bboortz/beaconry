@@ -169,6 +169,44 @@ tg_app: Application | None = None
 # by receive_scan so /healthz can report liveness-in-practice.
 _startup_complete: bool = False
 _last_scan_ts: int = 0
+# BC-067: per-host rolling SBOM-count baseline. In-memory only (resets on
+# hub restart; good enough — a partial scan right after restart is
+# survivable, the harmful case is "hub up for days, scout glitches
+# briefly"). Max-of-seen so a one-off big scan doesn't permanently
+# raise the threshold.
+_scout_sbom_baseline: dict[str, int] = {}
+# A scan whose sbom_count is < this fraction of the baseline is treated
+# as a partial inventory and skipped for reconcile. 0.5 = tolerate up to
+# half the normal count missing before suspecting a scout glitch.
+_PARTIAL_INVENTORY_THRESHOLD: float = 0.5
+
+
+def _is_partial_inventory(host: str, sbom_count: int | None) -> bool:
+    """BC-067: True iff the scan looks like a partial inventory and
+    reconcile should be skipped. Returns False when:
+      - caller didn't pass a count (scenario/test path — treat as full)
+      - no baseline yet for this host (first scan — treat as full)
+      - count is at least PARTIAL_INVENTORY_THRESHOLD × baseline
+    """
+    if sbom_count is None:
+        return False
+    baseline = _scout_sbom_baseline.get(host)
+    if baseline is None or baseline <= 0:
+        return False
+    return sbom_count < baseline * _PARTIAL_INVENTORY_THRESHOLD
+
+
+def _update_scout_sbom_baseline(host: str, sbom_count: int | None) -> None:
+    """BC-067: bump the rolling max for this host. Only moves up — a scout
+    that temporarily shrinks (one container removed) doesn't lower the
+    partial-inventory threshold for the next scan."""
+    if sbom_count is None or sbom_count <= 0:
+        return
+    current = _scout_sbom_baseline.get(host, 0)
+    if sbom_count > current:
+        _scout_sbom_baseline[host] = sbom_count
+
+
 # BC-062: software/API/schema versions. Software is read from the single
 # `VERSION` file at repo root (or /app/VERSION in the container). API +
 # schema are integers bumped on breaking changes.
@@ -761,7 +799,25 @@ async def process_sbom_entry(
         vuln = match.get("vulnerability", {})
         artifact = match.get("artifact", {})
         cvss = extract_cvss(vuln)
-        cve_id = vuln["id"]
+        # BC-067: `vuln["id"]` previously raised KeyError on malformed grype
+        # output (DB corruption, legacy advisory shape). The broad except at
+        # `_ingest_candidates` swallowed it and the entire scan lost that
+        # finding silently — the POC's one job (surface CVEs) was broken by
+        # a single bad row. Skip the match with an audit event + log so the
+        # drop is observable instead of invisible.
+        cve_id = vuln.get("id")
+        if not cve_id:
+            log.warning(
+                "BC-067: grype match missing vulnerability.id — skipping (artifact=%r)",
+                artifact.get("name"),
+            )
+            _audit.append(
+                "invalid_grype_match",
+                host=host,
+                artifact=artifact.get("name", ""),
+                reason="missing vulnerability.id",
+            )
+            continue
         # BC-028: check KEV against primary id + grype's `relatedVulnerabilities`
         # aliases. Non-CVE primary ids (GO-*, GHSA-*) often have a CVE alias
         # that is in the KEV catalog; checking only the primary misses them.
@@ -2479,15 +2535,21 @@ async def _heartbeat_loop_forever() -> (
     None
 ):  # pragma: no cover - infinite async loop; tested via sweep directly
     while True:
-        try:
-            await heartbeat_sweep()
-        except Exception as e:  # noqa: BLE001
-            log.warning("BC-035: heartbeat sweep failed: %s", e)
-        # BC-066: piggyback the manual-claim sweep on the same tick.
+        # BC-067: run manual-claim sweep BEFORE the general heartbeat sweep.
+        # manual_claim_sweep bumps both `last_claim_ts` AND `last_notified_ts`
+        # on fire; heartbeat_sweep's WHERE clause filters on `last_notified_ts
+        # < cutoff`. Running manual first means a finding overdue on both
+        # timers emits ONE reminder (manual) and the heartbeat sweep sees the
+        # fresh `last_notified_ts` and skips it — instead of double-firing
+        # ~10ms apart on the same tick.
         try:
             await manual_claim_sweep()
         except Exception as e:  # noqa: BLE001
             log.warning("BC-066: manual-claim sweep failed: %s", e)
+        try:
+            await heartbeat_sweep()
+        except Exception as e:  # noqa: BLE001
+            log.warning("BC-035: heartbeat sweep failed: %s", e)
         await asyncio.sleep(HEARTBEAT_SWEEP_INTERVAL_S)
 
 
@@ -2550,7 +2612,9 @@ async def receive_scan(payload: dict) -> dict:
         except Exception as e:  # noqa: BLE001
             log.error("Error processing SBOM entry: %s", e)
 
-    return await _ingest_candidates(host, candidates, now_ts=int(time.time()))
+    return await _ingest_candidates(
+        host, candidates, now_ts=int(time.time()), sbom_count=len(sboms)
+    )
 
 
 @api.post("/heartbeat", dependencies=[Depends(require_scout_token)])
@@ -2587,12 +2651,18 @@ async def _ingest_candidates(
     candidates: list[Finding],
     *,
     now_ts: int,
+    sbom_count: int | None = None,
 ) -> dict:
     """BC-038: extracted ingest flow — dedup+cap, save+notify, digest, reconcile.
 
     Shared between `receive_scan` (real path, invokes `process_sbom_entry` first)
     and `/test/scan` (test path, candidates are pre-matched). `now_ts` is
     injected so scenarios can simulate clock advancement without real sleeps.
+
+    BC-067: `sbom_count` is the number of SBOMs the scout POSTed on this
+    scan — used by the partial-inventory guard to decide whether reconcile
+    is safe. Scenario / test path doesn't pass it (always None); real
+    `receive_scan` does.
     """
     cap = int(os.environ.get("BEACONRY_MAX_FINDINGS_PER_RUN", "5"))
     to_notify, suppressed = dedup_and_cap(candidates, cap)
@@ -2640,7 +2710,29 @@ async def _ingest_candidates(
     scanned_ids = {c.id for c in candidates}
     # BC-034: bookkeeping — always, regardless of RECONCILE_ENABLED.
     bump_last_seen(host, scanned_ids, now_ts=now_ts)
-    regressed, auto_closed = reconcile_scan(host, scanned_ids)
+    # BC-067: partial-inventory guard. If the scout's SBOM count dropped
+    # dramatically vs. the rolling baseline (socket hiccup, syft crashed on
+    # one image), reconcile would mass-close everything missing from the
+    # shrunk set — then re-flag them all as regressions on the next scan.
+    # Skip reconcile when the signal looks like noise, but still save new
+    # findings (candidates path above is unaffected).
+    if _is_partial_inventory(host, sbom_count):
+        _audit.append(
+            "reconcile_skipped_partial_inventory",
+            host=host,
+            sbom_count=sbom_count or 0,
+            baseline=_scout_sbom_baseline.get(host, 0),
+        )
+        log.warning(
+            "BC-067: reconcile skipped for %s — sbom_count=%s vs baseline=%s (<50%%)",
+            host,
+            sbom_count,
+            _scout_sbom_baseline.get(host, 0),
+        )
+        regressed, auto_closed = [], []
+    else:
+        _update_scout_sbom_baseline(host, sbom_count)
+        regressed, auto_closed = reconcile_scan(host, scanned_ids)
     if regressed:
         log.warning("BC-031: %d regression(s) detected on %s", len(regressed), host)
     for f in regressed:
@@ -2678,7 +2770,12 @@ async def _ingest_candidates(
 if TEST_MODE:
     log.warning("BC-038: BEACONRY_TEST_MODE=1 — /test/* endpoints are LIVE on this hub")
 
-    @api.post("/test/wipe")
+    # BC-067: gate /test/* behind the CLI bearer so an operator who
+    # forgets to unset BEACONRY_TEST_MODE in production doesn't expose
+    # DB wipe, finding injection, and status forgery to anyone on the
+    # LAN. The scenario harness in `poc/scenarios/*` already sends the
+    # CLI bearer, so no test-stack behaviour change.
+    @api.post("/test/wipe", dependencies=[Depends(require_cli_token)])
     async def test_wipe() -> dict:
         """BC-038: reset DB + audit log so each scenario starts clean."""
         if DB_PATH.exists():
@@ -2689,7 +2786,7 @@ if TEST_MODE:
         init_db()
         return {"status": "wiped"}
 
-    @api.post("/test/scan")
+    @api.post("/test/scan", dependencies=[Depends(require_cli_token)])
     async def test_scan(payload: dict) -> dict:
         """BC-038: ingest pre-matched candidates, bypassing grype.
 
@@ -2735,14 +2832,14 @@ if TEST_MODE:
 
         return await _ingest_candidates(host, candidates, now_ts=at)
 
-    @api.post("/test/sweep")
+    @api.post("/test/sweep", dependencies=[Depends(require_cli_token)])
     async def test_sweep(payload: dict) -> dict:
         """BC-038: invoke heartbeat_sweep with an injected `now` timestamp."""
         at = payload.get("at") or int(time.time())
         sent = await heartbeat_sweep(now_ts=at)
         return {"sent": sent, "at": at}
 
-    @api.post("/test/set_status")
+    @api.post("/test/set_status", dependencies=[Depends(require_cli_token)])
     async def test_set_status(payload: dict) -> dict:
         """BC-038: set a finding's status without going through the Telegram
         callback path. Scenarios use this to simulate `operator snoozed` /

@@ -121,11 +121,15 @@ async def test_docker_adapter_sets_rollback_tag_before_pull(
         async def communicate(self) -> tuple[bytes, bytes]:
             return (b"", b"")
 
-    async def _fake_shell(cmd: str, **_kw: object) -> _FakeProc:
-        cmds.append(cmd)
+    # BC-067: subprocess uses argv-form (create_subprocess_exec) to kill the
+    # shell-injection vector. Record each invocation as a flattened string
+    # so the BC-014 assertions below (which check for the full command
+    # text) still work.
+    async def _fake_exec(*argv: str, **_kw: object) -> _FakeProc:
+        cmds.append(" ".join(argv))
         return _FakeProc()
 
-    monkeypatch.setattr(da_mod.asyncio, "create_subprocess_shell", _fake_shell)
+    monkeypatch.setattr(da_mod.asyncio, "create_subprocess_exec", _fake_exec)
 
     result = await DockerAdapter().execute(_finding("docker", "nginx:1.24"))
 
@@ -158,11 +162,11 @@ async def test_docker_adapter_execute_pulls_same_tag_for_postgres(
         async def communicate(self) -> tuple[bytes, bytes]:
             return (b"", b"")
 
-    async def _fake_shell(cmd: str, **_kw: object) -> _FakeProc:
-        cmds.append(cmd)
+    async def _fake_exec(*argv: str, **_kw: object) -> _FakeProc:
+        cmds.append(" ".join(argv))
         return _FakeProc()
 
-    monkeypatch.setattr(da_mod.asyncio, "create_subprocess_shell", _fake_shell)
+    monkeypatch.setattr(da_mod.asyncio, "create_subprocess_exec", _fake_exec)
 
     result = await DockerAdapter().execute(_finding("docker", "postgres:16-alpine"))
 

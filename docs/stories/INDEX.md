@@ -61,3 +61,4 @@ Lifecycle: `draft → ready → in-progress → shipped`. Status matches each st
 | BC-064 | FLEET: LAST SEEN → LAST HEARTBEAT (fixed source) + stale-heartbeat unknown | shipped     | — (merged to dev)                   |
 | BC-065 | Digest content-change bypass is now opt-out via env (strict 24h floor)    | shipped     | — (merged to dev)                   |
 | BC-066 | Manual executor as default + configurable adapter + 1h reminder sweep     | shipped     | — (merged to dev)                   |
+| BC-067 | Quality sweep — 5 severity-1 bugs from autonomous audit                   | shipped     | — (merged to dev)                   |

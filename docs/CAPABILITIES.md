@@ -1552,3 +1552,48 @@ Enforcement: `poc/scripts/verify_traceability.py` runs as part of `make check`. 
 - **supports:** CAP-B047
 - **verified by:**
   - `poc/tests/integration/test_BC_066_manual_executor.py`
+
+### CAP-T140: Executor argv-form subprocess (shell-injection-safe)
+- **type:** technical
+- **status:** active
+- **origin:** BC-067 quality sweep — security audit found `source_ref` from SBOM flowing into `create_subprocess_shell` f-string. A crafted image tag (`"nginx; rm -rf /; #"`) could execute arbitrary shell on `[Fix now]`.
+- **description:** `DockerAdapter.execute` uses `asyncio.create_subprocess_exec` with argv lists instead of `create_subprocess_shell` with f-string composition. Shell metacharacters in `source_ref` are now inert — passed as a single positional argv token to the kernel.
+- **supports:** CAP-B023
+- **verified by:**
+  - `poc/tests/integration/test_BC_067_quality_sweep.py`
+
+### CAP-T141: /test/* routes require CLI token when TEST_MODE is live
+- **type:** technical
+- **status:** active
+- **origin:** BC-067 quality sweep — security audit found four `/test/*` routes had no auth guard; left-on `BEACONRY_TEST_MODE=1` in production exposed DB wipe, finding injection, and status forgery to any LAN caller.
+- **description:** All four `/test/*` routes (`/wipe`, `/scan`, `/sweep`, `/set_status`) now declare `dependencies=[Depends(require_cli_token)]`. The scenario harness already sends the CLI bearer so no test-stack behaviour change; operators who forget to unset the flag are protected by their existing CLI auth.
+- **supports:** CAP-B023
+- **verified by:**
+  - `poc/tests/integration/test_BC_067_quality_sweep.py`
+
+### CAP-T142: Malformed grype match is audited, not silently dropped
+- **type:** technical
+- **status:** active
+- **origin:** BC-067 quality sweep — pipeline audit found `vuln["id"]` KeyError on a malformed grype match swallowed by the broad except at `_ingest_candidates`, silently losing the entire finding.
+- **description:** `process_sbom_entry` now reads `cve_id = vuln.get("id")` and short-circuits with a WARNING log + `invalid_grype_match` audit event when the id is missing. The POC's one job (surface CVEs) survives a single bad grype row.
+- **supports:** CAP-B023
+- **verified by:**
+  - `poc/tests/integration/test_BC_067_quality_sweep.py`
+
+### CAP-T143: Partial-inventory guard — reconcile skipped when scout glitches
+- **type:** technical
+- **status:** active
+- **origin:** BC-067 quality sweep — pipeline audit identified mass auto-close risk when scout POSTs a shrunk SBOM set after a docker-socket hiccup or syft crash on one image. Reconcile would close every missing finding, then the next scan would re-flag them all as regressions.
+- **description:** Hub tracks per-host rolling max SBOM count in-memory (`_scout_sbom_baseline`). If a scan arrives with `sbom_count < 0.5 × baseline`, `reconcile_scan` is skipped for that scan + `reconcile_skipped_partial_inventory` audit event is emitted. New findings still save normally; only the "missing from this scan ⇒ auto-close" logic is suppressed. Baseline is max-of-seen so one-off big scans don't permanently raise the threshold; one-off small scans don't lower it.
+- **supports:** CAP-B023
+- **verified by:**
+  - `poc/tests/integration/test_BC_067_quality_sweep.py`
+
+### CAP-T144: Sweep ordering prevents double-reminder on same tick
+- **type:** technical
+- **status:** active
+- **origin:** BC-067 quality sweep — concurrency audit found that a finding overdue on BOTH BC-035 heartbeat and BC-066 manual-claim timers fired twice per tick (~10ms apart).
+- **description:** `_heartbeat_loop_forever` now runs `manual_claim_sweep` BEFORE `heartbeat_sweep`. Manual sweep bumps `last_notified_ts` on fire; heartbeat sweep's WHERE clause filters on it, so the second sweep sees the fresh timestamp and skips the row. One reminder per tick, deterministic ordering.
+- **supports:** CAP-B023
+- **verified by:**
+  - `poc/tests/integration/test_BC_067_quality_sweep.py`

@@ -256,3 +256,46 @@ See per-decision review dates in `memory/`:
   Why parked: the dividend overlaps `BEACONRY_MOCK=1 make demo` (already stubs Telegram with no real token needed) and `make test-e2e` (already exercises real python-telegram-bot against telegram-mock end-to-end). The marginal slice BC-020 would add — real PTB library hitting the mock *through the `make demo` entrypoint* — has no second real-world use case not already covered. Compose plumbing (env propagation + `host.docker.internal` `extra_hosts` for Linux) adds complexity nobody will reach for.
   Original scope sketch (if revived): add `BEACONRY_TELEGRAM_BASE_URL` + `BEACONRY_SKIP_GRYPE_DB` to `docker-compose.yml` hub env, drop both from the test-only allowlist, add `extra_hosts: - "host.docker.internal:host-gateway"`, document the recipe in README.
   Links: BC-018 (origin), CAP-T056 (behavior proven elsewhere), `docs/plan/BC-018-close-gap-unit-coverage-plan.md § Scenario 7 live-verification — DEFERRED`.
+
+---
+
+## Quality sweep leftovers (BC-067 audit, 2026-11-02)
+
+Autonomous audit found 12 issues. Top 5 shipped in BC-067. These are
+the 7 deferred ones — real but either not-biting-at-POC-scale or
+by-design.
+
+- **16-char `make_id` hash truncation collision risk at scale**
+  trigger: BC-067 pipeline audit. SHA256 truncated to 16 hex chars (64 bits). Birthday collision expected at ~2³² ≈ 4B IDs. POC scale (3 hosts × 500 pkgs × daily × 1 year ≈ 500k) is comfortably below.
+  priority: later
+  Fix sketch: extend to 32 hex chars (128-bit) when `BEACONRY_MAX_FINDINGS_TOTAL` approaches 10M, OR rekey dedup to (host, cve_id, source_ref) tuple so collisions in `make_id` can't masquerade as dedup. Non-breaking: new IDs for new findings; old IDs keep working.
+
+- **Audit log `OSError` silently swallowed on disk full**
+  trigger: BC-067 concurrency audit. `audit.append()` catches `OSError`, log.warning, never raises — by-design "fire-and-forget".
+  priority: later
+  Not a bug per the current contract, but during a critical incident (disk full) the audit trail silently loses events. Fix candidate: emit a one-time degraded-mode warning that stays sticky in `/healthz` until an audit write succeeds again. Doesn't change the never-raise contract, but surfaces the degradation.
+
+- **TOCTOU race: reconcile_scan vs. concurrent save_finding**
+  trigger: BC-067 concurrency audit. reconcile reads findings, iterates, UPDATEs — no transaction isolation across the read-modify-write cycle. A concurrent `save_finding` for the same CVE between SELECT and UPDATE can revert a just-closed finding.
+  priority: later
+  Fix sketch: wrap reconcile in `BEGIN EXCLUSIVE` or lock the host's scouts row via `SELECT ... FOR UPDATE`. In POC (one hub process, one scout per host), the race window is theoretical.
+
+- **Fix-version "" rendered as blank cell**
+  trigger: BC-067 pipeline audit. grype can return `fix.versions: [""]` (data artifact). `fixed_version=""` propagates into notification + findings DB.
+  priority: later
+  Fix sketch: in `_build_findings_from_matches` and `process_sbom_entry`, sanitize: `fixed_version = (fix_versions[0].strip() or "not available") if fix_versions else "not available"`. Small UX cleanup — doesn't rise to severe.
+
+- **Missing `con.close()` on sqlite OperationalError during reconcile UPDATE phase**
+  trigger: BC-067 concurrency audit. Connection leaks if an UPDATE inside the loop raises after the opening SELECT succeeded.
+  priority: later
+  Fix sketch: wrap full function in `try/finally con.close()`. Likelihood of trigger is low in POC (no concurrent writers), impact is cumulative FD leak.
+
+- **SBOM payload size unbounded on POST /scan**
+  trigger: BC-067 security audit. FastAPI default accepts ~100MB. A compromised scout (or /test/scan attacker) can DoS the hub with a 1M-artifact SBOM.
+  priority: soon (promote if POC goes multi-tenant)
+  Fix sketch: add `payload_size_limit` middleware or explicit `len(json.dumps(payload)) > N` check in `receive_scan`. 50MB is a comfortable floor for real SBOMs.
+
+- **BC-062 X-Beaconry-API header leaks on CORS preflight responses**
+  trigger: BC-067 security audit (bonus observation). Any middleware response (including OPTIONS/404) gets the header. Not exploitable, but makes the hub fingerprintable from unauth'd probes.
+  priority: later
+  Fix sketch: only attach to successful matched-route responses, not generic error responses.
