@@ -1634,6 +1634,15 @@ Enforcement: `poc/scripts/verify_traceability.py` runs as part of `make check`. 
 - **verified by:**
   - `poc/tests/integration/test_BC_069_release_toolchain.py`
 
+### CAP-T150: Unified `beaconry` CLI dispatcher + pyproject entry point
+- **type:** technical
+- **status:** active
+- **origin:** BC-070 — operator asked how to install the CLI locally; shipped version made `make <target>` the only path.
+- **description:** `poc/scripts/cli.py` is a thin argparse router over the existing per-command scripts (`status`, `findings`, `audit`, `scan`, `set-status`, `soak`, plus `version`). `pyproject.toml` declares `[project.scripts] beaconry = "poc.scripts.cli:main"` + `setuptools.build_meta` backend, so `pip install -e .` registers `beaconry` on `$PATH`. Delegate scripts keep their own argparse; dispatcher rewrites `sys.argv[0]` to `"beaconry <sub>"` for pretty help output and restores it on exit. `beaconry` with no args shows help (friendlier than argparse's default). Config stays in `~/.config/beaconry/cli.yml` (BC-055).
+- **supports:** CAP-B023
+- **verified by:**
+  - `poc/tests/integration/test_BC_070_cli_install.py`
+
 ### CAP-T149: Automated CHANGELOG.md generation + pre-push gate
 - **type:** technical
 - **status:** active

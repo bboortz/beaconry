@@ -135,9 +135,54 @@ with `LAST SEEN` and open/total finding counts.
 
 ## Operator CLI setup
 
-For operators running CLIs against a remote hub (`make findings`,
-`make audit`, `make status`, `make scan`, `make set-status`), create
-`~/.config/beaconry/cli.yml`:
+Two ways to run the operator CLIs — both talk to the same hub:
+
+### Option A — `beaconry` installed on $PATH (recommended)
+
+Clone the repo once and install editable:
+
+```bash
+git clone https://github.com/bboortz/beaconry.git
+cd beaconry
+python3 -m venv .venv && source .venv/bin/activate
+pip install -e .
+beaconry version                       # confirms install
+```
+
+Now `beaconry` is callable from anywhere (as long as the venv is
+active):
+
+```bash
+beaconry status                        # health table + FLEET
+beaconry findings --status open        # finding list
+beaconry audit LAST=20                 # audit log tail
+beaconry scan                          # trigger an immediate scan
+beaconry set-status FINDING=<id> STATUS=snoozed
+beaconry soak                          # last-hour audit health check
+```
+
+Each subcommand has its own `--help`:
+
+```bash
+beaconry findings --help
+```
+
+### Option B — `make` from the repo (works today, no install step)
+
+Same functionality via Makefile targets. Must `cd beaconry/` first.
+
+```bash
+make status
+make findings STATUS=open
+make audit LAST=20
+make scan
+make set-status FINDING=<id> STATUS=snoozed
+make soak
+```
+
+### Config file (both options)
+
+Create `~/.config/beaconry/cli.yml`:
 
 ```yaml
 hub_url: http://100.1.2.3:8000     # Tailscale IP of the hub
@@ -154,19 +199,6 @@ chmod 600 ~/.config/beaconry/cli.yml
 The CLIs auto-route: non-localhost `hub_url` → HTTP; localhost +
 local compose stack running → `docker exec` (unchanged); else local
 file. Override per invocation with env vars (`HUB_URL`, `HUB_TOKEN`).
-
-Mutate a finding from the workstation:
-
-```bash
-make set-status FINDING=<finding_id> STATUS=snoozed
-# STATUS=snoozed | accepted | fixed | open
-```
-
-Trigger an immediate scan on all scouts the hub knows about:
-
-```bash
-make scan
-```
 
 Both go through the hub's bearer-gated HTTP surface — no SSH anywhere.
 

@@ -1,8 +1,31 @@
 [project]
 name = "beaconry"
-version = "0.1.0"
+# BC-062: VERSION file is the single source of truth; this literal is only
+# a build-time placeholder (setuptools-dynamic would rebuild on every bump,
+# which is more friction than value). verify-version-sync lint catches drift.
+version = "0.3.4"
 description = "CVE scanning + auto-remediation for self-hosted operators"
 requires-python = ">=3.12"
+dependencies = [
+    # BC-070: operator CLI (`beaconry status` / `beaconry findings` / …) uses:
+    "pyyaml>=6.0",     # CliConfig reads ~/.config/beaconry/cli.yml
+    "requests>=2.31",  # scout + CLI HTTP paths
+]
+
+# BC-070: register the operator CLI entry point. `pip install -e .` makes
+# `beaconry` available on $PATH; dispatches to the per-command scripts
+# in poc/scripts/.
+[project.scripts]
+beaconry = "poc.scripts.cli:main"
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["poc*"]
+exclude = ["poc.tests*", "poc.scenarios*", "poc.telegram_mock*"]
 
 [tool.ruff]
 line-length = 100
