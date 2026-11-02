@@ -162,7 +162,11 @@ def _build_findings_from_matches(
         cvss = hub.extract_cvss(vuln)
         if cvss < min_cvss:
             continue
-        fix_versions = vuln.get("fix", {}).get("versions") or ["n/a"]
+        # BC-068: filter blank entries (`[""]` from legacy grype advisories)
+        # so operators don't see "Fixed version: (blank)" in the demo.
+        fix_versions = [
+            v.strip() for v in (vuln.get("fix", {}).get("versions") or []) if v and v.strip()
+        ] or ["n/a"]
         finding = hub.Finding(
             id=hub.make_id(host, vuln["id"], image, artifact.get("name", "")),
             host=host,

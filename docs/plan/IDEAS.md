@@ -280,15 +280,9 @@ by-design.
   priority: later
   Fix sketch: wrap reconcile in `BEGIN EXCLUSIVE` or lock the host's scouts row via `SELECT ... FOR UPDATE`. In POC (one hub process, one scout per host), the race window is theoretical.
 
-- **Fix-version "" rendered as blank cell**
-  trigger: BC-067 pipeline audit. grype can return `fix.versions: [""]` (data artifact). `fixed_version=""` propagates into notification + findings DB.
-  priority: later
-  Fix sketch: in `_build_findings_from_matches` and `process_sbom_entry`, sanitize: `fixed_version = (fix_versions[0].strip() or "not available") if fix_versions else "not available"`. Small UX cleanup — doesn't rise to severe.
+- ~~**Fix-version "" rendered as blank cell**~~ **Shipped in BC-068 (2026-11-02).** `process_sbom_entry` + `_build_findings_from_matches` now filter blank entries from `fix.versions`. See `docs/plan/BC-068-defensive-cleanup-plan.md`.
 
-- **Missing `con.close()` on sqlite OperationalError during reconcile UPDATE phase**
-  trigger: BC-067 concurrency audit. Connection leaks if an UPDATE inside the loop raises after the opening SELECT succeeded.
-  priority: later
-  Fix sketch: wrap full function in `try/finally con.close()`. Likelihood of trigger is low in POC (no concurrent writers), impact is cumulative FD leak.
+- ~~**Missing `con.close()` on sqlite OperationalError during reconcile UPDATE phase**~~ **Shipped in BC-068 (2026-11-02).** `reconcile_scan` wrapped in `try/finally con.close()`. See `docs/plan/BC-068-defensive-cleanup-plan.md`.
 
 - **SBOM payload size unbounded on POST /scan**
   trigger: BC-067 security audit. FastAPI default accepts ~100MB. A compromised scout (or /test/scan attacker) can DoS the hub with a 1M-artifact SBOM.

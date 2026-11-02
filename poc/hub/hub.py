@@ -647,71 +647,77 @@ def reconcile_scan(host: str, scanned_ids: set[str]) -> tuple[list[Finding], lis
     if not RECONCILE_ENABLED:
         return [], []
     con = sqlite3.connect(DB_PATH)
+    # BC-068: wrap the full body in try/finally so a sqlite OperationalError
+    # raised DURING the UPDATE loop (not just the opening SELECT) still
+    # closes the connection. Without this, intermittent DB locks during
+    # a long reconcile leak one FD per failure; over thousands of scans
+    # that exhausts the process FD limit.
     try:
-        rows = con.execute(
-            "SELECT id, host, cve_id, package, version, fixed_version, severity, cvss, "
-            "source_type, source_ref, description, tier, kev, status, last_fixed_ts "
-            "FROM findings WHERE host=? AND status IN "
-            "('open', 'fixed', 'fixed_verified', 'regressed')",
-            (host,),
-        ).fetchall()
-    except sqlite3.OperationalError:
-        # Cold boot / init_db hasn't run yet — nothing to reconcile.
+        try:
+            rows = con.execute(
+                "SELECT id, host, cve_id, package, version, fixed_version, severity, cvss, "
+                "source_type, source_ref, description, tier, kev, status, last_fixed_ts "
+                "FROM findings WHERE host=? AND status IN "
+                "('open', 'fixed', 'fixed_verified', 'regressed')",
+                (host,),
+            ).fetchall()
+        except sqlite3.OperationalError:
+            # Cold boot / init_db hasn't run yet — nothing to reconcile.
+            return [], []
+
+        regressed: list[Finding] = []
+        auto_closed: list[Finding] = []
+        now = int(time.time())
+
+        for row in rows:
+            fid = row[0]
+            status = row[13]
+            last_fixed_ts = row[14] or 0
+            in_scan = fid in scanned_ids
+            finding = Finding(
+                id=row[0],
+                host=row[1],
+                cve_id=row[2],
+                package=row[3],
+                version=row[4],
+                fixed_version=row[5],
+                severity=row[6],
+                cvss=row[7],
+                source_type=row[8],
+                source_ref=row[9],
+                description=row[10] or "",
+                tier=row[11],
+                kev=bool(row[12]),
+            )
+
+            if status in ("open", "regressed") and not in_scan:
+                con.execute(
+                    "UPDATE findings SET status='fixed_verified', last_fixed_ts=? WHERE id=?",
+                    (now, fid),
+                )
+                auto_closed.append(finding)
+                _audit.append(
+                    "auto_closed",
+                    finding_id=fid,
+                    prev_status=status,
+                    cve_id=finding.cve_id,
+                )
+            elif status in ("fixed", "fixed_verified") and in_scan:
+                con.execute("UPDATE findings SET status='regressed' WHERE id=?", (fid,))
+                regressed.append(finding)
+                _audit.append(
+                    "regressed",
+                    finding_id=fid,
+                    prev_status=status,
+                    cve_id=finding.cve_id,
+                    last_fixed_ts=last_fixed_ts,
+                    regressed_ts=now,
+                )
+
+        con.commit()
+        return regressed, auto_closed
+    finally:
         con.close()
-        return [], []
-
-    regressed: list[Finding] = []
-    auto_closed: list[Finding] = []
-    now = int(time.time())
-
-    for row in rows:
-        fid = row[0]
-        status = row[13]
-        last_fixed_ts = row[14] or 0
-        in_scan = fid in scanned_ids
-        finding = Finding(
-            id=row[0],
-            host=row[1],
-            cve_id=row[2],
-            package=row[3],
-            version=row[4],
-            fixed_version=row[5],
-            severity=row[6],
-            cvss=row[7],
-            source_type=row[8],
-            source_ref=row[9],
-            description=row[10] or "",
-            tier=row[11],
-            kev=bool(row[12]),
-        )
-
-        if status in ("open", "regressed") and not in_scan:
-            con.execute(
-                "UPDATE findings SET status='fixed_verified', last_fixed_ts=? WHERE id=?",
-                (now, fid),
-            )
-            auto_closed.append(finding)
-            _audit.append(
-                "auto_closed",
-                finding_id=fid,
-                prev_status=status,
-                cve_id=finding.cve_id,
-            )
-        elif status in ("fixed", "fixed_verified") and in_scan:
-            con.execute("UPDATE findings SET status='regressed' WHERE id=?", (fid,))
-            regressed.append(finding)
-            _audit.append(
-                "regressed",
-                finding_id=fid,
-                prev_status=status,
-                cve_id=finding.cve_id,
-                last_fixed_ts=last_fixed_ts,
-                regressed_ts=now,
-            )
-
-    con.commit()
-    con.close()
-    return regressed, auto_closed
 
 
 def get_status(finding_id: str) -> str | None:
@@ -841,7 +847,13 @@ async def process_sbom_entry(
 
         source_type = source_meta.get("type", "unknown")
         source_ref = source_meta.get("image") or artifact.get("name", "")
-        fix_versions = vuln.get("fix", {}).get("versions") or []
+        # BC-068: grype occasionally returns `fix.versions: [""]` or
+        # `[None]` (data artifact from legacy advisories). Filter blanks
+        # so the renderer doesn't surface "Fixed version: (blank)" and
+        # confuse operators ("is there a fix or not?").
+        fix_versions = [
+            v.strip() for v in (vuln.get("fix", {}).get("versions") or []) if v and v.strip()
+        ]
         # BC-030: honour the operator toggle. When disabled, we throw away scout's
         # exposure data and classify as pre-BC-030 — Tier 1 unreachable, all findings
         # fall through to the CVSS tier below.

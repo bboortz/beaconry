@@ -1597,3 +1597,21 @@ Enforcement: `poc/scripts/verify_traceability.py` runs as part of `make check`. 
 - **supports:** CAP-B023
 - **verified by:**
   - `poc/tests/integration/test_BC_067_quality_sweep.py`
+
+### CAP-T145: reconcile_scan close-on-exception guard
+- **type:** technical
+- **status:** active
+- **origin:** BC-068 defensive cleanup — low-cost leftover from the BC-067 audit backlog.
+- **description:** `reconcile_scan` body wrapped in `try/finally con.close()`. Pre-BC-068, only the opening SELECT caught `OperationalError`; an UPDATE inside the row loop raising a lock error would propagate without closing the connection, leaking one FD per failure. Over thousands of scans with any concurrent writer, this exhausted the process FD limit. Cold-boot behaviour preserved (`OperationalError` on SELECT still returns `[], []` cleanly).
+- **supports:** CAP-B023
+- **verified by:**
+  - `poc/tests/integration/test_BC_068_defensive_cleanup.py`
+
+### CAP-T146: fix_version blank-string sanitize
+- **type:** technical
+- **status:** active
+- **origin:** BC-068 defensive cleanup — grype occasionally emits `fix.versions: [""]` or `[None]` for legacy advisories; pre-BC-068 these propagated into `Finding.fixed_version=""` and operators saw "Fixed version: (blank)" in notifications.
+- **description:** `process_sbom_entry` + the parallel `_build_findings_from_matches` in `demo.py` filter blank entries from `fix.versions` before indexing. Legitimate "no fix" case cleanly falls through to `"not available"`. First non-blank entry wins when the list is mixed (`["", "1.2.4"]` → `"1.2.4"`).
+- **supports:** CAP-B023
+- **verified by:**
+  - `poc/tests/integration/test_BC_068_defensive_cleanup.py`
