@@ -971,15 +971,38 @@ def format_heartbeat(finding: Finding, open_since_ts: int) -> str:
 # ── BC-035: keyboard builders exposed to the TelegramAdapter ─────────────────
 
 
+_CB_MAX_BYTES = 64  # Telegram limits callback_data to 64 bytes.
+
+
+def _cb_data(action: str, finding: Finding, *extra: str) -> str:
+    """BC-059: build callback_data under Telegram's 64-byte cap.
+
+    Shape: ``{action}:{finding.id}[:{extra}]*[:{cve_id}]``. The CVE id
+    goes LAST so an on-the-wire splitter can `parts[-1]` it; existing
+    positional parsers (hours at index 2 for snooze) still work.
+
+    If appending the CVE would blow the cap, drop it defensively — the
+    BC-058 error can still fall back to the 8-char id prefix.
+    """
+    base = ":".join([action, finding.id, *extra])
+    cve = finding.cve_id or ""
+    if not cve:
+        return base
+    with_cve = base + ":" + cve
+    return with_cve if len(with_cve.encode()) <= _CB_MAX_BYTES else base
+
+
 def _kb_finding(finding: Finding) -> "InlineKeyboardMarkup":
     """First-fire + heartbeat buttons — Fix / Snooze / Accept risk."""
     return InlineKeyboardMarkup(
         [
             [
-                InlineKeyboardButton("🔧 Fix now", callback_data=f"fix:{finding.id}"),
-                InlineKeyboardButton("⏰ Snooze 4h", callback_data=f"snooze:{finding.id}:4"),
+                InlineKeyboardButton("🔧 Fix now", callback_data=_cb_data("fix", finding)),
+                InlineKeyboardButton(
+                    "⏰ Snooze 4h", callback_data=_cb_data("snooze", finding, "4")
+                ),
             ],
-            [InlineKeyboardButton("✅ Accept risk", callback_data=f"ack:{finding.id}")],
+            [InlineKeyboardButton("✅ Accept risk", callback_data=_cb_data("ack", finding))],
         ]
     )
 
@@ -989,8 +1012,8 @@ def _kb_regression(finding: Finding) -> "InlineKeyboardMarkup":
     return InlineKeyboardMarkup(
         [
             [
-                InlineKeyboardButton("🔧 Re-fix", callback_data=f"fix:{finding.id}"),
-                InlineKeyboardButton("✅ Accept risk", callback_data=f"ack:{finding.id}"),
+                InlineKeyboardButton("🔧 Re-fix", callback_data=_cb_data("fix", finding)),
+                InlineKeyboardButton("✅ Accept risk", callback_data=_cb_data("ack", finding)),
             ]
         ]
     )
@@ -1052,7 +1075,12 @@ async def notify_heartbeat(finding: Finding, open_since_ts: int) -> None:
     _emit_notify_sent(finding, "heartbeat")
 
 
-CALLBACK_RE = re.compile(r"^(fix|snooze|ack|verify):[a-f0-9]{16}(?::\d+)?$")
+# BC-059: optional trailing CVE segment (back-compat with pre-BC-059 messages
+# still in operators' chat history). Segment matches CVE-shaped primary ids
+# — CVE-YYYY-NNNN, GO-YYYY-NNNNNN, AVG-NNNN, etc. — not arbitrary garbage.
+CALLBACK_RE = re.compile(
+    r"^(fix|snooze|ack|verify):[a-f0-9]{16}(?::\d+)?(?::[A-Z][A-Z0-9-]{2,30})?$"
+)
 
 
 def _esc(s: str) -> str:
@@ -1133,7 +1161,7 @@ async def _handle_fix(query, finding: Finding, finding_id: str, parts: list[str]
             [
                 InlineKeyboardButton(
                     "🔍 Verify service health",
-                    callback_data=f"verify:{finding_id}",
+                    callback_data=_cb_data("verify", finding),
                 )
             ]
         ]
@@ -1233,16 +1261,20 @@ async def on_button_click(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 
     finding = load_finding(finding_id)
     if not finding:
-        # BC-058: diagnosable error — include the finding_id prefix + a
-        # hint that this is almost always a stale notification pointing
-        # at an id the current DB doesn't carry (older ingest with
-        # different source_ref/host inputs, pre-reset volume, etc.).
+        # BC-058 + BC-059: diagnosable error. Include the CVE from
+        # callback_data when present (post-BC-059 messages); fall back
+        # to the id prefix for pre-BC-059 messages still in the chat.
         short_id = finding_id[:8]
         verb = action.capitalize()
+        cve_in_cb = parts[-1] if len(parts) >= 3 and parts[-1][:1].isalpha() else None
+        if cve_in_cb:
+            subject = f"<code>{_esc(cve_in_cb)}</code> (id <code>{short_id}…</code>)"
+        else:
+            subject = f"finding <code>{short_id}…</code>"
         await query.edit_message_text(
-            f"⚠️ {verb} failed — finding <code>{short_id}…</code> is not in the "
-            f"current DB.\n<i>Likely a stale notification from before a scan "
-            f"reset. Safe to ignore.</i>",
+            f"⚠️ {verb} failed — {subject} is not in the current DB.\n"
+            f"<i>Likely a stale notification from before a scan reset. "
+            f"Safe to ignore.</i>",
             parse_mode="HTML",
         )
         return

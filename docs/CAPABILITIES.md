@@ -1309,3 +1309,30 @@ Enforcement: `poc/scripts/verify_traceability.py` runs as part of `make check`. 
 - **supports:** CAP-B041
 - **verified by:**
   - `poc/tests/integration/test_BC_058_cleanup.py`
+
+### CAP-B042: Operator sees the CVE in the Telegram "Finding not found" error
+- **type:** business
+- **status:** active
+- **origin:** BC-059 — finishes BC-058's diagnosable-error story. Operators think in CVE ids, not sha256 prefixes.
+- **description:** When a Telegram button tap lands on a `finding_id` not in the current DB, the hub's error message names the CVE from the callback_data instead of just the hex-id prefix. Pre-BC-059 messages still in the chat history (no CVE in their callback_data) fall back to the id-prefix wording via BC-058's existing branch. Operator can tell at a glance whether a stale notification is from an issue they already handled elsewhere.
+- **supports:** CAP-B023
+- **verified by:**
+  - `poc/tests/integration/test_BC_059_callback_data_cve.py`
+
+### CAP-T118: callback_data reshape with CVE suffix + 64-byte guard
+- **type:** technical
+- **status:** active
+- **origin:** BC-059
+- **description:** `_cb_data(action, finding, *extra)` builds callback_data as `{action}:{finding.id}[:{extra}]*[:{cve_id}]`. CVE lives at the LAST segment so an on-the-wire parser can `parts[-1]` it; existing positional parsers (snooze hours at index 2) keep working. Defensive 64-byte guard drops the CVE if it would blow Telegram's `callback_data` cap. All five button sites (Fix / Snooze / Accept in `_kb_finding`, Fix + Accept in `_kb_regression`, Verify in the fix flow) go through the helper.
+- **supports:** CAP-B042
+- **verified by:**
+  - `poc/tests/integration/test_BC_059_callback_data_cve.py`
+
+### CAP-T119: Backward-compatible CALLBACK_RE
+- **type:** technical
+- **status:** active
+- **origin:** BC-059
+- **description:** `CALLBACK_RE` now matches both pre-BC-059 3-part and post-BC-059 4-part callback_data. The trailing CVE segment is `(?::[A-Z][A-Z0-9-]{2,30})?` — permissive enough for every observed beaconry primary id (CVE / GO / AVG / RUSTSEC-flavored), strict enough to reject arbitrary lowercase or over-length garbage. Messages in operators' chat history from before BC-059 still route to the handler cleanly.
+- **supports:** CAP-B042
+- **verified by:**
+  - `poc/tests/integration/test_BC_059_callback_data_cve.py`
