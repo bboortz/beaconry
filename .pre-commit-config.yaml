@@ -21,13 +21,13 @@ repos:
     hooks:
       - id: pytest-pre-push
         name: pytest (pre-push)
-        entry: pytest
+        entry: .venv/bin/pytest
         language: system
         pass_filenames: false
         stages: [pre-push]
       - id: verify-traceability-pre-push
         name: verify-traceability (pre-push)
-        entry: python -m poc.scripts.verify_traceability
+        entry: .venv/bin/python -m poc.scripts.verify_traceability
         language: system
         pass_filenames: false
         stages: [pre-push]
@@ -35,7 +35,7 @@ repos:
       # BEACONRY_SKIP_VERSION_BUMP=1 only in emergencies.
       - id: verify-version-bumped
         name: verify VERSION bumped (pre-push)
-        entry: python -m poc.scripts.verify_version_bumped
+        entry: .venv/bin/python -m poc.scripts.verify_version_bumped
         language: system
         pass_filenames: false
         stages: [pre-push]
@@ -43,7 +43,7 @@ repos:
       # VERSION. Bypass with BEACONRY_SKIP_CHANGELOG=1 only in emergencies.
       - id: verify-changelog
         name: verify CHANGELOG entry (pre-push)
-        entry: python -m poc.scripts.verify_changelog
+        entry: .venv/bin/python -m poc.scripts.verify_changelog
         language: system
         pass_filenames: false
         stages: [pre-push]
