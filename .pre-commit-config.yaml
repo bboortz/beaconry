@@ -31,3 +31,11 @@ repos:
         language: system
         pass_filenames: false
         stages: [pre-push]
+      # BC-062: refuse pushes that don't bump VERSION. Bypass with
+      # BEACONRY_SKIP_VERSION_BUMP=1 only in emergencies.
+      - id: verify-version-bumped
+        name: verify VERSION bumped (pre-push)
+        entry: python -m poc.scripts.verify_version_bumped
+        language: system
+        pass_filenames: false
+        stages: [pre-push]

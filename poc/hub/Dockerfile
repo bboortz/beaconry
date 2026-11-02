@@ -26,5 +26,7 @@ COPY hub/executor/ executor/
 COPY hub/notifiers/ notifiers/
 # BC-012: shared health-check package — every container COPYs this.
 COPY beaconry_health/ ./beaconry_health/
+# BC-062: single source of truth for software version.
+COPY VERSION ./VERSION
 
 CMD ["python3", "-u", "hub.py"]

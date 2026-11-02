@@ -36,10 +36,14 @@ from fastapi import FastAPI
 
 try:
     # Container path: beaconry_health COPY'd next to scout.py on /app
-    from beaconry_health import build_router
+    from beaconry_health import SOFTWARE_VERSION, build_router
 except ImportError:
     # Host test path: imported as poc.scout.scout
-    from poc.beaconry_health import build_router
+    from poc.beaconry_health import SOFTWARE_VERSION, build_router
+
+# BC-062: the HTTP contract version this scout speaks. Bumped on any
+# breaking change to the hub's /scan payload or response shape.
+CLIENT_API_VERSION = 1
 
 logging.basicConfig(
     level=logging.INFO,
@@ -66,12 +70,17 @@ _started: bool = False
 _last_scan_ts: int = 0
 _images_seen: int = 0
 _bytes_posted: int = 0
-SCOUT_VERSION = "0.1.0"
+SCOUT_VERSION = SOFTWARE_VERSION  # BC-062: single source of truth = VERSION file
 
 # BC-037: on-demand scan trigger. Single-threaded event loop → a bool is a
 # sufficient mutex. Loop + manual trigger share this guard so a concurrent
 # trigger short-circuits with 409 instead of double-scanning the inventory.
 _scan_in_progress: bool = False
+
+# SBOM cache: tag → (image_id, sbom). Avoids re-running syft when the image
+# digest hasn't changed. Keyed by tag; eviction is implicit (stale tags simply
+# never appear in matching and are never read again).
+_sbom_cache: dict[str, tuple[str, dict]] = {}
 
 
 def parse_globs(env: str) -> list[str]:
@@ -198,9 +207,13 @@ def scan_docker_images() -> list[
     include_globs = parse_globs(os.environ.get("SCOUT_INCLUDE", DEFAULT_INCLUDE_GLOBS))
     exclude_globs = parse_globs(os.environ.get("SCOUT_EXCLUDE", ""))
 
+    tag_to_id: dict[str, str] = {}
     all_tags: list[str] = []
     for image in client.images.list():
-        all_tags.extend(t for t in image.tags if "<none>" not in t)
+        for t in image.tags:
+            if "<none>" not in t:
+                all_tags.append(t)
+                tag_to_id[t] = image.id or ""
     matching = filter_image_tags(all_tags, include_globs=include_globs, exclude_globs=exclude_globs)
     skipped = sorted(set(all_tags) - set(matching))
     log.info(
@@ -220,16 +233,26 @@ def scan_docker_images() -> list[
         )
 
     results = []
+    cache_hits = 0
     for tag in matching:
+        image_id = tag_to_id.get(tag, "")
+        cached_id, cached_sbom = _sbom_cache.get(tag, ("", None))
+        if image_id and image_id == cached_id and cached_sbom is not None:
+            cache_hits += 1
+            results.append({"source_meta": {"type": "docker", "image": tag}, "sbom": cached_sbom})
+            continue
         log.info("Scanning image: %s", tag)
         sbom = syft_scan(tag)
         if sbom:
+            _sbom_cache[tag] = (image_id, sbom)
             results.append(
                 {
                     "source_meta": {"type": "docker", "image": tag},
                     "sbom": sbom,
                 }
             )
+    if cache_hits:
+        log.info("Cache: %d/%d image(s) skipped (digest unchanged)", cache_hits, len(matching))
     return results
 
 
@@ -403,7 +426,13 @@ def collect_and_post():  # pragma: no cover - orchestrator; integration-tested l
         _bytes_posted = bytes_posted
         # BC-055: attach Bearer when HUB_TOKEN is set; empty = no header
         # (back-compat for single-host operators who don't need auth).
-        headers = {"Content-Type": "application/json"}
+        headers = {
+            "Content-Type": "application/json",
+            # BC-062: tell the hub which API we expect. Soft by default
+            # (warns) — hard-fails only when the hub runs with
+            # BEACONRY_STRICT_API=1.
+            "X-Beaconry-API-Expect": str(CLIENT_API_VERSION),
+        }
         token = os.environ.get("HUB_TOKEN", "")
         if token:
             headers["Authorization"] = f"Bearer {token}"
@@ -434,7 +463,12 @@ def _scout_healthz_summary() -> dict:
     degraded = not _docker_socket_ok
     return {
         "status": "degraded" if degraded else "ok",
-        "version": SCOUT_VERSION,
+        # BC-062: version block mirrors hub's shape. Scout has no DB so
+        # no schema key — only software + api.
+        "version": {
+            "software": SOFTWARE_VERSION,
+            "api": CLIENT_API_VERSION,
+        },
         "checks": checks,
     }
 

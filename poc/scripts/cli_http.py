@@ -20,6 +20,11 @@ from typing import Any, Literal
 
 from poc.scripts.cli_config import CliConfig
 
+# BC-062: CLI's advertised API-contract version. Bumped on any breaking
+# hub-API change; the hub replies with X-Beaconry-API so callers can
+# render a mismatch warning (see `scripts/status.py`).
+CLIENT_API_VERSION = 1
+
 Source = Literal["http", "local-compose", "local-file"]
 
 _LOCALHOST_HOSTS = frozenset({"localhost", "127.0.0.1", "::1"})
@@ -62,6 +67,10 @@ def _build_request(
         req.add_header("Authorization", f"Bearer {token}")
     if body is not None:
         req.add_header("Content-Type", "application/json")
+    # BC-062: advertise the API version this CLI expects. The hub
+    # responds with X-Beaconry-API; callers reading the response can
+    # compare and warn on drift (status.py).
+    req.add_header("X-Beaconry-API-Expect", str(CLIENT_API_VERSION))
     return req
 
 
@@ -104,6 +113,7 @@ def friendly_http_error(url: str, exc: Exception) -> str:
 
 
 __all__ = [
+    "CLIENT_API_VERSION",
     "CliConfig",
     "Source",
     "choose_source",

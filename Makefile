@@ -1,4 +1,4 @@
-.PHONY: help lint format type test check check-full demo smoke clean install-hooks verify-traceability verify-dockerfile-health-copy verify-dockerfile-sources verify-memory-drift verify-compose-env-propagation verify-docs-drift verify-evidence-pointers verify-per-file-coverage verify-variables verify-install-doc findings status audit test-e2e live-rebuild live-status scan set-status test-scenarios test-cli
+.PHONY: help lint format type test check check-full demo smoke clean install-hooks verify-traceability verify-dockerfile-health-copy verify-dockerfile-sources verify-memory-drift verify-compose-env-propagation verify-docs-drift verify-evidence-pointers verify-per-file-coverage verify-variables verify-install-doc verify-version-sync verify-version-bumped bump-patch bump-minor bump-major bump-auto findings status audit test-e2e live-rebuild live-status scan set-status test-scenarios test-cli
 
 PYTHON ?= python3
 PYTEST_ARGS ?=
@@ -22,7 +22,15 @@ help:
 	@echo "  make verify-per-file-coverage   every file ≥ 65% coverage (or allowlisted with reason)"
 	@echo "  make verify-variables           VARIABLES.md ↔ code ↔ .env.example ↔ docker-compose.yml drift (BC-039 + BC-040)"
 	@echo "  make verify-install-doc         docs/INSTALL.md env vars + .PHONY entries + file paths exist (BC-056)"
+	@echo "  make verify-version-sync        /VERSION ↔ /poc/VERSION + hardcoded-literal drift (BC-062)"
+	@echo "  make verify-version-bumped      pre-push: VERSION must bump relative to origin/dev (BC-062)"
 	@echo "  make smoke                      bash poc/demo.sh --smoke (non-interactive mock, CI)"
+	@echo ""
+	@echo "Version management (BC-062):"
+	@echo "  make bump-patch                 X.Y.Z -> X.Y.(Z+1)"
+	@echo "  make bump-minor                 X.Y.Z -> X.(Y+1).0"
+	@echo "  make bump-major                 X.Y.Z -> (X+1).0.0"
+	@echo "  make bump-auto                  infer kind from `git log origin/dev..HEAD` (feat → minor, ! → major, else patch)"
 	@echo ""
 	@echo "Tiers:"
 	@echo "  make check         FAST TIER — all gates above (~7s)"
@@ -118,7 +126,28 @@ verify-variables:
 verify-install-doc:
 	$(PYTHON) -m poc.scripts.verify_install_doc
 
-check: lint type test verify-per-file-coverage verify-traceability verify-dockerfile-health-copy verify-dockerfile-sources verify-memory-drift verify-compose-env-propagation verify-docs-drift verify-evidence-pointers verify-variables verify-install-doc smoke
+# BC-062: VERSION-file + hardcoded-literal drift lint. /VERSION must byte-equal
+# poc/VERSION (compose build-context mirror), and hub/scout/cli must not carry a
+# stale `*_VERSION = "x.y.z"` literal that drifts from VERSION.
+verify-version-sync:
+	$(PYTHON) -m poc.scripts.verify_version_sync
+
+# BC-062: pre-push enforcement — refuse to push unless VERSION bumped.
+verify-version-bumped:
+	$(PYTHON) -m poc.scripts.verify_version_bumped
+
+# BC-062: SemVer bump helpers. `bump-auto` infers from conventional-commit
+# messages since origin/dev. Writes both VERSION + poc/VERSION.
+bump-patch:
+	$(PYTHON) -m poc.scripts.bump_version --patch
+bump-minor:
+	$(PYTHON) -m poc.scripts.bump_version --minor
+bump-major:
+	$(PYTHON) -m poc.scripts.bump_version --major
+bump-auto:
+	$(PYTHON) -m poc.scripts.bump_version --auto
+
+check: lint type test verify-per-file-coverage verify-traceability verify-dockerfile-health-copy verify-dockerfile-sources verify-memory-drift verify-compose-env-propagation verify-docs-drift verify-evidence-pointers verify-variables verify-install-doc verify-version-sync smoke
 	@echo ""
 	@echo "✓ Fast tier (make check) passed"
 

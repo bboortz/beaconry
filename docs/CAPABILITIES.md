@@ -1390,3 +1390,57 @@ Enforcement: `poc/scripts/verify_traceability.py` runs as part of `make check`. 
 - **supports:** CAP-B044
 - **verified by:**
   - `poc/tests/integration/test_BC_061_fleet_registry.py`
+
+### CAP-B045: Operator can always see what's running + knows when a deployed component is out of sync
+- **type:** business
+- **status:** active
+- **origin:** BC-062 — rolling-upgrade coordination between laptop + hetzner-staging needs explicit versioning. BC-061 added the first persistent schema change; downgrading hub binary against a newer DB is a silent-corruption hazard that needs an explicit guard.
+- **description:** Three independent version axes are now visible across the stack. Software version (release in VERSION file) is read by hub, scout, and operator CLIs — surfaces in `/healthz` and `make status`. API version (integer, incremented on breaking HTTP changes) is advertised by hub via `X-Beaconry-API` response header and expected by clients via `X-Beaconry-API-Expect`; mismatch warns by default, hard-fails with 412 under `BEACONRY_STRICT_API=1`. Schema version (`PRAGMA user_version`) is checked by `init_db`: older → migrate up, equal → done, newer → refuse to boot. `make status` renders a VERSION column; CLI-vs-hub API mismatch emits a trailing warning line.
+- **supports:** CAP-B023
+- **verified by:**
+  - `poc/tests/integration/test_BC_062_versioning.py`
+
+### CAP-T124: VERSION file + verify-version-sync lint
+- **type:** technical
+- **status:** active
+- **origin:** BC-062
+- **description:** Single `VERSION` file at repo root (`0.1.0`) + mirrored `poc/VERSION` for the compose build context. `poc/beaconry_health/version.py::read_version()` reads `/app/VERSION` (container) or `<repo>/VERSION` (host tests); exposes `SOFTWARE_VERSION` module constant used by hub, scout, and CLI. `make verify-version-sync` fails if the two VERSION files drift or if any of the three component files carries a stale `*_VERSION = "x.y.z"` literal.
+- **supports:** CAP-B045
+- **verified by:**
+  - `poc/tests/integration/test_BC_062_versioning.py`
+
+### CAP-T125: Hub API version header + /healthz + strict-mode gate
+- **type:** technical
+- **status:** active
+- **origin:** BC-062
+- **description:** Hub `API_VERSION = 1` constant. FastAPI middleware adds `X-Beaconry-API: 1` to every response. Clients advertise `X-Beaconry-API-Expect` on requests; a mismatch logs a WARNING. If `BEACONRY_STRICT_API=1`, mismatch short-circuits with `412 Precondition Failed` (soft default supports rolling upgrades). `/healthz` body gains `version.{software,api,schema}` block (scout omits `schema`).
+- **supports:** CAP-B045
+- **verified by:**
+  - `poc/tests/integration/test_BC_062_versioning.py`
+
+### CAP-T126: SQLite PRAGMA user_version + migration gate
+- **type:** technical
+- **status:** active
+- **origin:** BC-062
+- **description:** `EXPECTED_SCHEMA_VERSION = 2` constant in hub. `init_db` reads `PRAGMA user_version`: 0 (fresh/legacy) or < EXPECTED → runs forward migrations idempotently and stamps PRAGMA on success. `> EXPECTED` → raises `SchemaTooNew` and refuses to boot (prevents silent data corruption from running old code against newer-shaped DB).
+- **supports:** CAP-B045
+- **verified by:**
+  - `poc/tests/integration/test_BC_062_versioning.py`
+
+### CAP-T127: make status VERSION column + mismatch warning
+- **type:** technical
+- **status:** active
+- **origin:** BC-062
+- **description:** `scripts/status.py` renders a VERSION column (`0.1.0 · api1 · sch2`) between HEALTH and LAST SCAN. If the CLI's `CLIENT_API_VERSION` differs from any reachable service's advertised `api`, a trailing warning line (`⚠ api mismatch: cli expects apiN, <service> serves apiM — upgrade CLI`) prints below the table. Legacy `"version": "0.1.0"` string responses degrade gracefully to the software-only cell.
+- **supports:** CAP-B045
+- **verified by:**
+  - `poc/tests/integration/test_BC_062_versioning.py`
+
+### CAP-T128: SemVer bump helper + pre-push enforcement
+- **type:** technical
+- **status:** active
+- **origin:** BC-062 follow-up — operator asked for an automated bump mechanism + verification that runs on every git push.
+- **description:** `poc/scripts/bump_version.py` + Makefile targets `bump-patch` / `bump-minor` / `bump-major` / `bump-auto` write both `/VERSION` and `/poc/VERSION` atomically. `bump-auto` infers the kind from `git log origin/dev..HEAD`: `BREAKING CHANGE` footer or `!` after the type → major; any `feat` → minor; else patch. `poc/scripts/verify_version_bumped.py` + the `verify-version-bumped` pre-push hook (installed via `.pre-commit-config.yaml`) refuses to push if VERSION didn't move relative to the branch's merge-base with `origin/dev` — also catches a backwards bump. On `dev` / `main` the check is a no-op (merge targets, not sources). Emergency bypass: `BEACONRY_SKIP_VERSION_BUMP=1 git push`.
+- **supports:** CAP-B045
+- **verified by:**
+  - `poc/tests/unit/test_bump_version.py`

@@ -218,6 +218,7 @@ ENV_EXAMPLE_DEV_ONLY_ALLOWLIST: dict[str, str] = {
     "BEACONRY_TEST_MODE": "DO NOT SET IN PROD — exposes destructive /test/* routes",
     "BEACONRY_SCENARIO_HUB_URL": "scenario harness; only set by poc/scenarios/run.sh",
     "BEACONRY_SCENARIO_DATA_DIR": "scenario harness; only set by poc/scenarios/run.sh",
+    "BEACONRY_SKIP_VERSION_BUMP": "BC-062 pre-push bypass — dev-only emergency escape; never in operator env",
     # BC-055: CLI config path override; default is $XDG_CONFIG_HOME/beaconry/cli.yml.
     # Server-side .env.example is for operators configuring the hub + scout
     # host, not the laptop CLI, so this stays out of the starter template.

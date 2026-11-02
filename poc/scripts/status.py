@@ -24,6 +24,7 @@ import urllib.request
 from dataclasses import dataclass
 
 from poc.scripts.cli_config import load_cli_config
+from poc.scripts.cli_http import CLIENT_API_VERSION
 
 # BC-055: CLI config (hub_url + hub_token) drives the healthz target.
 # `BEACONRY_HUB_HEALTHZ_URL` remains a fully-qualified escape hatch for
@@ -50,6 +51,11 @@ class ServiceStatus:
     health: str
     last_scan: str
     details: str
+    # BC-062: software · api · schema (schema only on hub). Empty = unknown.
+    version: str = ""
+    # BC-062: raw api int if parseable, else None (used to detect mismatch
+    # against CLIENT_API_VERSION for the trailing warning line).
+    api_version: int | None = None
 
 
 def fetch_healthz(url: str, timeout: float = 2.0, token: str = "") -> dict:
@@ -171,6 +177,33 @@ def _scout_details(body: dict) -> str:
     return "degraded: " + ", ".join(failed) if failed else "degraded"
 
 
+def _format_version_cell(body: dict) -> tuple[str, int | None]:
+    """BC-062: ``'0.1.0 · api1 · sch2'`` for the VERSION column.
+
+    Accepts both the new (dict) and legacy (string) shapes of
+    ``body["version"]``. Returns ``(cell_text, api_int_or_None)``.
+    """
+    v = body.get("version")
+    if isinstance(v, str):
+        # Legacy /healthz response — no api/schema split.
+        return (v, None)
+    if not isinstance(v, dict):
+        return ("", None)
+    parts: list[str] = []
+    software = v.get("software")
+    if isinstance(software, str) and software:
+        parts.append(software)
+    api_raw = v.get("api")
+    api_int: int | None = None
+    if isinstance(api_raw, int):
+        api_int = api_raw
+        parts.append(f"api{api_raw}")
+    schema = v.get("schema")
+    if isinstance(schema, int):
+        parts.append(f"sch{schema}")
+    return (" · ".join(parts), api_int)
+
+
 def _down_detail(stack_down_hint: bool) -> str:
     if stack_down_hint:
         return "compose stack not up — try `cd poc && docker compose up -d`"
@@ -190,12 +223,15 @@ def gather_hub_status(url: str = HUB_HEALTHZ_URL, token: str = HUB_AUTH_TOKEN) -
         )
     status = body.get("status", "unknown")
     checks = body.get("checks", {})
+    version_cell, api_int = _format_version_cell(body)
     return ServiceStatus(
         name="beaconry-hub",
         state=STATE_RUNNING,
         health=HEALTH_HEALTHY if status == "ok" else HEALTH_DEGRADED,
         last_scan=_format_age(int(checks.get("last_scan_ts", 0))),
         details=_hub_details(body),
+        version=version_cell,
+        api_version=api_int,
     )
 
 
@@ -212,18 +248,22 @@ def gather_scout_status(url: str = SCOUT_HEALTHZ_URL) -> ServiceStatus:
         )
     status = body.get("status", "unknown")
     checks = body.get("checks", {})
+    version_cell, api_int = _format_version_cell(body)
     return ServiceStatus(
         name="beaconry-scout",
         state=STATE_RUNNING,
         health=HEALTH_HEALTHY if status == "ok" else HEALTH_DEGRADED,
         last_scan=_format_age(int(checks.get("last_scan_ts", 0))),
         details=_scout_details(body),
+        version=version_cell,
+        api_version=api_int,
     )
 
 
 def _format_table(statuses: list[ServiceStatus]) -> str:
-    headers = ["NAME", "STATE", "HEALTH", "LAST SCAN", "DETAILS"]
-    rows = [[s.name, s.state, s.health, s.last_scan, s.details] for s in statuses]
+    # BC-062: VERSION column inserted between HEALTH and LAST SCAN.
+    headers = ["NAME", "STATE", "HEALTH", "VERSION", "LAST SCAN", "DETAILS"]
+    rows = [[s.name, s.state, s.health, s.version, s.last_scan, s.details] for s in statuses]
     all_rows = [headers, *rows]
     widths = [max(len(row[i]) for row in all_rows) for i in range(len(headers))]
     lines = []
@@ -234,6 +274,20 @@ def _format_table(statuses: list[ServiceStatus]) -> str:
             )
         )
     return "\n".join(lines)
+
+
+def _api_mismatch_line(statuses: list[ServiceStatus]) -> str:
+    """BC-062: trailing warning line if any reachable service's api
+    differs from CLIENT_API_VERSION. Returns '' when clean."""
+    for s in statuses:
+        if s.state != STATE_RUNNING or s.api_version is None:
+            continue
+        if s.api_version != CLIENT_API_VERSION:
+            return (
+                f"⚠ api mismatch: cli expects api{CLIENT_API_VERSION}, "
+                f"{s.name} serves api{s.api_version} — upgrade CLI"
+            )
+    return ""
 
 
 def main() -> int:
@@ -253,6 +307,12 @@ def main() -> int:
         statuses = [hub, scout]
 
     print(_format_table(statuses))
+
+    # BC-062: API-mismatch warning line (empty when all services agree
+    # with the CLI, or when nothing reachable reports a version).
+    mismatch = _api_mismatch_line(statuses)
+    if mismatch:
+        print(mismatch)
 
     # BC-055: FLEET section below services table.
     fleet_url = _CLI_CFG.hub_url.rstrip("/") + "/fleet"

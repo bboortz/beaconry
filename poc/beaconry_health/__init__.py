@@ -13,6 +13,7 @@ restart-loops.
 from .checks import check_binary, check_db, check_dir_populated
 from .sentinels import SentinelWriter
 from .trap import HealthzSummaryProvider, LivezProvider, ReadyzProvider
+from .version import SOFTWARE_VERSION, read_version
 
 # `build_router` requires FastAPI. Services that don't serve HTTP (e.g. scout,
 # which uses the file-sentinel path) don't ship FastAPI in their requirements.txt.
@@ -26,6 +27,7 @@ except ImportError:
     _HAS_ENDPOINTS = False
 
 __all__ = [
+    "SOFTWARE_VERSION",
     "HealthzSummaryProvider",
     "LivezProvider",
     "ReadyzProvider",
@@ -33,6 +35,7 @@ __all__ = [
     "check_binary",
     "check_db",
     "check_dir_populated",
+    "read_version",
 ]
 if _HAS_ENDPOINTS:
     __all__.append("build_router")

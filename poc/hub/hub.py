@@ -148,7 +148,26 @@ tg_app: Application | None = None
 # by receive_scan so /healthz can report liveness-in-practice.
 _startup_complete: bool = False
 _last_scan_ts: int = 0
-HUB_VERSION = "0.1.0"
+# BC-062: software/API/schema versions. Software is read from the single
+# `VERSION` file at repo root (or /app/VERSION in the container). API +
+# schema are integers bumped on breaking changes.
+try:
+    from beaconry_health import SOFTWARE_VERSION
+except ImportError:
+    from poc.beaconry_health import SOFTWARE_VERSION
+
+HUB_VERSION = SOFTWARE_VERSION  # back-compat alias
+API_VERSION = 1
+EXPECTED_SCHEMA_VERSION = 2
+STRICT_API = os.environ.get("BEACONRY_STRICT_API") == "1"
+
+
+class SchemaTooNew(RuntimeError):
+    """BC-062: raised by init_db when PRAGMA user_version exceeds
+    EXPECTED_SCHEMA_VERSION. The hub refuses to boot — running old code
+    against newer data is a silent-corruption hazard.
+    """
+
 
 # BC-011: policy-driven probe resolver. Parsed once at startup (fail-fast on
 # malformed input) and read by on_button_click's `verify` action.
@@ -203,6 +222,19 @@ def record_scout_post(host: str, *, now: int, sbom_count: int) -> None:
 
 def init_db() -> None:
     con = sqlite3.connect(DB_PATH)
+    # BC-062: schema-version bookkeeping. SQLite's built-in PRAGMA
+    # user_version is zero for fresh DBs and pre-BC-062 DBs; we migrate
+    # both forward. Refuse to boot if the DB is at a higher version
+    # than this code supports — running old code against newer data is
+    # a silent-corruption hazard.
+    current_schema = con.execute("PRAGMA user_version").fetchone()[0]
+    if current_schema > EXPECTED_SCHEMA_VERSION:
+        con.close()
+        raise SchemaTooNew(
+            f"beaconry DB is at schema version {current_schema} but this hub "
+            f"supports up to {EXPECTED_SCHEMA_VERSION}. Upgrade the hub binary "
+            f"or restore an older DB."
+        )
     # BC-061: scouts registry — one row per host that has ever POSTed to
     # /scan. Enables /fleet to show zero-finding scouts and apply
     # liveness status (active / stale / dead).
@@ -308,6 +340,8 @@ def init_db() -> None:
             GROUP BY host
             ON CONFLICT(host) DO NOTHING
         """)
+    # BC-062: stamp the DB with the schema version we just migrated to.
+    con.execute(f"PRAGMA user_version = {EXPECTED_SCHEMA_VERSION}")
     con.commit()
     con.close()
 
@@ -1509,7 +1543,40 @@ async def lifespan(
     await tg_app.shutdown()
 
 
-api = FastAPI(title="Beaconry Hub", version="0.1.0", lifespan=lifespan)
+api = FastAPI(title="Beaconry Hub", version=SOFTWARE_VERSION, lifespan=lifespan)
+
+
+# BC-062: API version middleware.
+# - Adds `X-Beaconry-API` to every response so clients can tell what
+#   contract the hub serves.
+# - Inspects `X-Beaconry-API-Expect` on requests. Missing → no-op
+#   (unversioned client / curl). Present + different from API_VERSION:
+#   log WARNING. If BEACONRY_STRICT_API=1 → short-circuit 412.
+@api.middleware("http")
+async def _api_version_middleware(request: _FastAPIRequest, call_next):  # type: ignore[no-untyped-def]
+    expected = request.headers.get("X-Beaconry-API-Expect", "")
+    if expected and expected != str(API_VERSION):
+        log.warning(
+            "BC-062: client api-version mismatch — client expects %r, hub serves %r",
+            expected,
+            API_VERSION,
+        )
+        if STRICT_API:
+            from fastapi.responses import JSONResponse
+
+            resp = JSONResponse(
+                status_code=412,
+                content={
+                    "detail": "api version mismatch",
+                    "client_expects": expected,
+                    "hub_serves": API_VERSION,
+                },
+            )
+            resp.headers["X-Beaconry-API"] = str(API_VERSION)
+            return resp
+    response = await call_next(request)
+    response.headers["X-Beaconry-API"] = str(API_VERSION)
+    return response
 
 
 # ── BC-055: Bearer auth + HTTP management surface ─────────────────────────
@@ -1919,7 +1986,14 @@ def _hub_healthz_summary() -> dict:
     degraded = any(v not in ("ok", "polling", "mock") for v in bool_checks)
     return {
         "status": "degraded" if degraded else "ok",
-        "version": HUB_VERSION,
+        # BC-062: three independent version axes. Software is the shipped
+        # release (VERSION file). API is the HTTP contract integer.
+        # Schema is the SQLite PRAGMA user_version this binary expects.
+        "version": {
+            "software": SOFTWARE_VERSION,
+            "api": API_VERSION,
+            "schema": EXPECTED_SCHEMA_VERSION,
+        },
         "checks": checks,
     }
 

@@ -35,6 +35,9 @@ services:
       # BC-061: fleet liveness thresholds.
       - BEACONRY_FLEET_ACTIVE_WINDOW_S=${BEACONRY_FLEET_ACTIVE_WINDOW_S:-600}
       - BEACONRY_FLEET_DEAD_AFTER_S=${BEACONRY_FLEET_DEAD_AFTER_S:-86400}
+      # BC-062: strict API-version gate. Soft default (empty/0) warns on
+      # X-Beaconry-API-Expect mismatch; 1 → 412 Precondition Failed.
+      - BEACONRY_STRICT_API=${BEACONRY_STRICT_API:-}
       # BC-035: per-adapter enable toggles. Future adapters each get their own.
       - BEACONRY_NOTIFIER_TELEGRAM_ENABLED=${BEACONRY_NOTIFIER_TELEGRAM_ENABLED:-1}
       # BEACONRY_MOCK is dev-mode; opt-in via explicit env

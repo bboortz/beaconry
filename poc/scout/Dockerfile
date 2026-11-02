@@ -12,6 +12,8 @@ RUN pip install --no-cache-dir -r requirements.txt
 COPY scout/scout.py ./
 # BC-012: shared health-check package — every container COPYs this.
 COPY beaconry_health/ ./beaconry_health/
+# BC-062: single source of truth for software version.
+COPY VERSION ./VERSION
 
 EXPOSE 8001
 CMD ["python3", "-u", "scout.py"]
