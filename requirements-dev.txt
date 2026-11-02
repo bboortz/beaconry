@@ -20,4 +20,4 @@ pre-commit==4.0.1
 httpx==0.28.1
 
 # BC-002: auto-load poc/.env for `make demo`
-python-dotenv==1.0.1
+python-dotenv==1.2.2
