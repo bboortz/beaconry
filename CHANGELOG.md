@@ -4,6 +4,26 @@ All notable changes to beaconry are recorded here. The format is based
 on [Keep a Changelog](https://keepachangelog.com/), and this project
 follows [Semantic Versioning](https://semver.org/).
 
+## [v0.8.1] — 2026-11-03
+
+### Added
+- **make,scripts:** BC-080 `make cleanup` target — tears down beaconry
+  test compose projects (`beaconry-test`, `beaconry-scenarios`) and
+  removes images beaconry's own tests pulled or built
+  (`beaconry-hub:ci-test`, `beaconry-hub:scenarios`,
+  `beaconry-test-telegram-mock:*`, `nginx:1.24`, `redis:6.2.0`, …).
+  Hard-coded safety list keeps `beaconry-hub:latest`,
+  `beaconry-scout:latest`, and all base images alive.
+- **make:** `make test-e2e`, `make test-scenarios`, `make check-full`
+  auto-invoke `make cleanup` on exit (success or failure). No more
+  false-positive Telegram alerts from leaked test images.
+
+### Fixed
+- **docs:** CLAUDE.md's 33-line "container cleanup after testing"
+  prose block is replaced with a one-liner pointer to `make cleanup`.
+  Instructions-as-safety was easy to forget; tooling-as-safety is the
+  gate.
+
 ## [v0.8.0] — 2026-11-03
 
 ### ⚠ Developer-visible: pre-push now runs `make check-full` (BC-079)

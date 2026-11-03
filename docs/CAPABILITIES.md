@@ -1655,6 +1655,24 @@ Enforcement: `poc/scripts/verify_traceability.py` runs as part of `make check`. 
 
 (BC-078 superseded the BC-077 build-arg path; non-root uid 65532 is now baked into the distroless base and verified by the CAP-T161 tests above.)
 
+### CAP-T164: `make cleanup` — tear down test stacks + remove leaked images
+- **type:** technical
+- **status:** active
+- **origin:** BC-080 — beaconry's own test harnesses tear down containers + volumes but leave images on the host. Scout rescans them on the next cycle and the operator gets Telegram alerts for `redis:6.2.0`, `nginx:1.24`, `beaconry-hub:ci-test` etc. — none of which are deployed services. Every false positive erodes trust in real alerts.
+- **description:** `make cleanup` → `python -m poc.scripts.cleanup`. Tears down compose projects `beaconry-test` and `beaconry-scenarios`, then enumerates host images and removes any that match the test-only or test-fixture allowlists (`beaconry-hub:ci-test`, `beaconry-hub:scenarios`, `beaconry-test-telegram-mock:*`, `nginx:1.24`, `nginx:alpine`, `redis:6.2.0`, `postgres:latest`, …). Belt-and-braces safety list hard-codes `beaconry-hub:latest`, `beaconry-scout:latest`, and `python:*` / `gcr.io/distroless/*` prefixes as never-remove. Idempotent — second run finds no targets and exits 0. Handles missing Docker binary / dead daemon gracefully (returns 0).
+- **supports:** CAP-B023
+- **verified by:**
+  - `poc/tests/integration/test_BC_080_cleanup.py`
+
+### CAP-T165: Test recipes auto-invoke cleanup on exit
+- **type:** technical
+- **status:** active
+- **origin:** BC-080 — the test harness runs clean up when it remembers to. Making it a trap means container regressions never leak false-positive findings into the operator's live hub even when a developer Ctrl+Cs out of a run.
+- **description:** `Makefile:test-e2e`, `test-scenarios`, and `check-full` end with `$(MAKE) --no-print-directory cleanup`. test-e2e + test-scenarios use the `exit $$EXIT` shell-wrap pattern so a failing pytest still propagates its non-zero code *after* cleanup fires. check-full invokes cleanup as its final step before the "✓ Full tier passed" echo.
+- **supports:** CAP-B023
+- **verified by:**
+  - `poc/tests/integration/test_BC_080_cleanup.py`
+
 ### CAP-T162: Pre-push runs `make check-full` for container verification
 - **type:** technical
 - **status:** active

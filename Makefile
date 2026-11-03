@@ -1,4 +1,4 @@
-.PHONY: help lint format type test check check-full demo smoke clean install-hooks verify-traceability verify-dockerfile-health-copy verify-dockerfile-sources verify-memory-drift verify-compose-env-propagation verify-docs-drift verify-evidence-pointers verify-per-file-coverage verify-variables verify-install-doc verify-version-sync verify-version-bumped verify-changelog verify-feature-complete bump-patch bump-minor bump-major bump-auto changelog findings status audit soak metrics test-e2e live-rebuild live-status scan set-status test-scenarios test-cli
+.PHONY: help lint format type test check check-full demo smoke clean cleanup install-hooks verify-traceability verify-dockerfile-health-copy verify-dockerfile-sources verify-memory-drift verify-compose-env-propagation verify-docs-drift verify-evidence-pointers verify-per-file-coverage verify-variables verify-install-doc verify-version-sync verify-version-bumped verify-changelog verify-feature-complete bump-patch bump-minor bump-major bump-auto changelog findings status audit soak metrics test-e2e live-rebuild live-status scan set-status test-scenarios test-cli
 
 PYTHON ?= python3
 PYTEST_ARGS ?=
@@ -79,6 +79,7 @@ help:
 	@echo "Housekeeping:"
 	@echo "  make install-hooks              pre-commit install + pre-push"
 	@echo "  make clean                      remove caches"
+	@echo "  make cleanup                    tear down beaconry test stacks + remove leaked test images (BC-080)"
 
 lint:
 	ruff check .
@@ -203,6 +204,9 @@ check-full: check
 	@echo "==> Full tier: running CLI-smoke harness (BC-044; against live stack; BEACONRY_SKIP_CLI_SMOKE=1 to opt out)"
 	$(MAKE) test-cli
 	@echo ""
+	@echo "==> Full tier: cleanup (BC-080 — remove leaked test images)"
+	$(MAKE) cleanup
+	@echo ""
 	@echo "✓ Full tier (make check-full) passed"
 
 findings:
@@ -229,7 +233,9 @@ set-status:
 # enabled, grype skipped), runs 10 behavior scenarios covering the shipped
 # BCs, tears down. See `poc/scenarios/run.sh`.
 test-scenarios:
-	bash poc/scenarios/run.sh
+	bash poc/scenarios/run.sh; EXIT=$$?; \
+	 $(MAKE) --no-print-directory cleanup; \
+	 exit $$EXIT
 
 # BC-044: live-smoke operator CLI harness. Non-destructive scenarios against
 # the running stack — catches the class of bug (Dockerfile COPY omissions,
@@ -268,7 +274,15 @@ test-e2e:
 	$(PYTHON) -m pytest -m e2e poc/tests/e2e/ -v --no-cov; EXIT=$$?; \
 	 echo "==> tearing down test stack"; \
 	 cd poc && docker compose -p beaconry-test -f docker-compose.test.yml down -v; \
+	 cd .. && $(MAKE) --no-print-directory cleanup; \
 	 exit $$EXIT
+
+# BC-080: tear down beaconry test stacks + remove images beaconry's own tests
+# pulled or built. Idempotent. See poc/scripts/cleanup.py for the full
+# removable/preserved allowlist. Safety: never touches beaconry-hub:latest,
+# beaconry-scout:latest, or base images.
+cleanup:
+	@$(PYTHON) -m poc.scripts.cleanup
 
 status:
 	@$(PYTHON) -m poc.scripts.status

@@ -86,6 +86,12 @@ Design-Driven, Test-Guarded Development. Per feature:
 
 Exceptions (no story required): `fix/*` (with repro), `refactor/*` (no behavior change), `chore/*` (tooling/deps).
 
+## Container cleanup after testing
+
+BC-080: `make test-e2e`, `make test-scenarios`, and `make check-full` auto-invoke `make cleanup` on exit. After any ad-hoc `docker compose up` run manually, finish with `make cleanup` to remove leaked test images (otherwise scout rescans them → false-positive Telegram alerts for `redis:6.2.0`, `nginx:1.24`, `beaconry-hub:ci-test`, etc.). Allowlist of removable vs. preserved images lives in `poc/scripts/cleanup.py`.
+
+Never run `docker image prune -a` — it also removes images from stopped operator containers (ham-remote, trading-bot, …) that are not supposed to be running.
+
 ## Git workflow
 
 - All work branches off `dev`. Branches: `feat/BC-NNN-<slug>`, `fix/<slug>`, `docs/<slug>`, `refactor/<slug>`, `chore/<slug>`
