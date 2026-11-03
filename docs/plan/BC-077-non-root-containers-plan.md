@@ -72,21 +72,22 @@ docker run --rm --user root -v beaconry-data:/data python:3.12-slim \
 
 ## Shipping evidence
 
+> **Superseded by BC-078 (2026-11-03)**: BC-077 shipped non-root as
+> `useradd beaconry` (uid 1000) + `ARG DOCKER_GID` + in-image
+> `groupadd`. BC-078 replaced that approach wholesale with the
+> distroless base (uid 65532 baked in; `group_add` on compose
+> runtime instead of in-image groupadd). The original BC-077 test
+> file `test_BC_077_non_root.py` was removed because its assertions
+> contradicted BC-078's structure. Non-root behavior is now verified
+> by `test_BC_078_distroless.py` — see rows below. Historical plan
+> text (above) is preserved as a decision record.
+
 | Scenario / goal | Evidence | Pointer | Status |
 |---|---|---|---|
-| Hub Dockerfile declares non-root USER | unit | `test_BC_077_non_root.py::test_hub_dockerfile_has_user_directive` | ✓ |
-| Scout Dockerfile declares non-root USER | unit | `test_BC_077_non_root.py::test_scout_dockerfile_has_user_directive` | ✓ |
-| Hub Dockerfile creates beaconry user with explicit uid | unit | `test_BC_077_non_root.py::test_hub_dockerfile_creates_beaconry_user` | ✓ |
-| Scout Dockerfile creates beaconry user with explicit uid | unit | `test_BC_077_non_root.py::test_scout_dockerfile_creates_beaconry_user` | ✓ |
-| Both Dockerfiles pass DOCKER_GID build-arg | integration | `test_BC_077_non_root.py::test_dockerfiles_accept_docker_gid_arg` | ✓ |
-| groupadd uses `${DOCKER_GID}` so operators can override | integration | `test_BC_077_non_root.py::test_dockerfiles_groupadd_uses_docker_gid` | ✓ |
-| /app + /data chowned to beaconry in image | integration | `test_BC_077_non_root.py::test_dockerfiles_chown_app_and_data` | ✓ |
-| docker-compose propagates DOCKER_GID (hub) | integration | `test_BC_077_non_root.py::test_compose_passes_docker_gid_build_arg_for_hub` | ✓ |
-| docker-compose propagates DOCKER_GID (scout) | integration | `test_BC_077_non_root.py::test_compose_passes_docker_gid_build_arg_for_scout` | ✓ |
-| DOCKER_GID default 999 matches Debian/Ubuntu | integration | `test_BC_077_non_root.py::test_compose_docker_gid_default_is_999` | ✓ |
-| CHANGELOG documents the one-time chown step | integration | `test_BC_077_non_root.py::test_changelog_documents_the_upgrade_step` | ✓ |
-| USER directive is last directive before CMD | unit | `test_BC_077_non_root.py::test_user_directive_before_cmd` | ✓ |
-| DOCKER_GID row in VARIABLES.md | lint | `make verify-variables` | ✓ |
+| Non-root hub runtime (uid 65532, baked into distroless) | integration | `test_BC_078_distroless.py::test_hub_dockerfile_uses_distroless_runtime` | ✓ |
+| Non-root scout runtime (uid 65532, baked into distroless) | integration | `test_BC_078_distroless.py::test_scout_dockerfile_uses_distroless_runtime` | ✓ |
+| docker-socket gid override at runtime (compose group_add replaces BC-077 build-arg) | integration | `test_BC_078_distroless.py::test_compose_uses_group_add` | ✓ |
+| CHANGELOG documents volume chown for upgrading operators | integration | `test_BC_078_distroless.py::test_changelog_documents_65532_chown` | ✓ |
 | CAPs registered | verify-traceability | `docs/CAPABILITIES.md` | ✓ |
 | `make check` + `make check-full` green | multi-gate | logs | ✓ |
 

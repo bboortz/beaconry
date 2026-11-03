@@ -4,6 +4,34 @@ All notable changes to beaconry are recorded here. The format is based
 on [Keep a Changelog](https://keepachangelog.com/), and this project
 follows [Semantic Versioning](https://semver.org/).
 
+## [v0.7.0] — 2026-11-03
+
+### ⚠ Upgrade step for existing operators (BC-078)
+
+The runtime image is now Google distroless (`gcr.io/distroless/python3-debian12:nonroot`,
+uid 65532). This cuts the attack surface — no shell, no apt, no coreutils —
+but changes the non-root uid from BC-077's 1000 → 65532. Operators who
+already upgraded past BC-077 need a **second** one-time chown of the data
+volume:
+
+```bash
+docker run --rm --user root -v beaconry-data:/data python:3.12-slim \
+    chown -R 65532:65532 /data
+```
+
+Fresh v0.7.0 installs skip this. The `DOCKER_GID` knob moves from a
+build-arg to a compose `group_add` entry (runtime, not build-time) —
+change `.env` and `docker compose up -d` without rebuilding.
+
+### ⚠ Breaking
+- **docker:** BC-078 distroless runtime — no `/bin/sh`, no `docker exec … /bin/sh`. Debug via `docker logs`, `make audit`, `make findings`, `make status`.
+- **docker:** uid 1000 → uid 65532 in-container; see upgrade step above.
+- **docker:** compose `DOCKER_GID` is now a runtime `group_add` (not a build-arg); operators who had `DOCKER_GID=…` in `.env` for BC-077 keep working with no change.
+- **python:** `requires-python >= 3.11` (was `>= 3.12`); runtime Python is 3.11 inside the distroless image. Local dev + CI stay on 3.12.
+
+### Added
+- **docker:** BC-078 — distroless multi-stage build for hub + scout.
+
 ## [v0.6.1] — 2026-11-03
 
 ### ⚠ Upgrade step for existing operators (BC-077)

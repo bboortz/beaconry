@@ -1,15 +1,22 @@
-FROM python:3.12-slim
+# BC-078: multi-stage build. Builder keeps apt + curl to install syft,
+# grype, docker CLI, pip deps; runtime is distroless (no shell, no apt,
+# no coreutils). Operator can no longer `docker exec /bin/sh`.
+
+# ── Stage 1: builder ────────────────────────────────────────────────────────
+# python 3.11 — matches the distroless runtime's bundled interpreter so
+# pip-installed wheels are compatible.
+FROM python:3.11-slim-bookworm AS builder
 
 RUN apt-get update && apt-get install -y curl && rm -rf /var/lib/apt/lists/*
 
-# Install syft (for post-fix re-verification) and grype (for CVE matching)
+# syft (post-fix re-verification) + grype (CVE matching).
 RUN curl -sSfL https://raw.githubusercontent.com/anchore/syft/main/install.sh \
     | sh -s -- -b /usr/local/bin
 RUN curl -sSfL https://raw.githubusercontent.com/anchore/grype/main/install.sh \
     | sh -s -- -b /usr/local/bin
 
-# BC-009: install docker CLI so DockerAdapter.execute can run `docker tag` + `docker pull`
-# against the host daemon via the mounted socket. Static binary; pinned for reproducibility.
+# BC-009: docker CLI so DockerAdapter.execute can run `docker tag`/`docker pull`
+# against the host daemon via the mounted socket. Static binary; pinned.
 ARG DOCKER_CLI_VERSION=27.5.1
 RUN curl -fsSL "https://download.docker.com/linux/static/stable/x86_64/docker-${DOCKER_CLI_VERSION}.tgz" \
     | tar -xz -C /tmp && \
@@ -19,28 +26,40 @@ RUN curl -fsSL "https://download.docker.com/linux/static/stable/x86_64/docker-${
 
 WORKDIR /app
 COPY hub/requirements.txt .
-RUN pip install --no-cache-dir -r requirements.txt
+RUN pip install --no-cache-dir --prefix=/install -r requirements.txt
+
 COPY hub/hub.py hub/waterfall.py hub/urgency.py hub/kev.py hub/audit.py ./
 COPY hub/executor/ executor/
-# BC-035: notification adapter package — Telegram, future email/Reddit/etc.
 COPY hub/notifiers/ notifiers/
-# BC-012: shared health-check package — every container COPYs this.
 COPY beaconry_health/ ./beaconry_health/
-# BC-062: single source of truth for software version.
 COPY VERSION ./VERSION
 
-# BC-077: non-root hardening. Create beaconry user (uid 1000) + add to a
-# docker group matching the host's socket gid. DOCKER_GID default 999
-# matches Debian/Ubuntu; override via `DOCKER_GID=995 docker compose build`
-# on Fedora, 989 on Arch, etc. (check with `getent group docker` on host).
-# /data gets chowned so fresh named volumes inherit beaconry ownership —
-# existing volumes from pre-BC-077 need a one-time chown (see CHANGELOG).
-ARG DOCKER_GID=999
-RUN groupadd -g ${DOCKER_GID} docker 2>/dev/null || groupmod -g ${DOCKER_GID} docker 2>/dev/null || true \
-    && useradd -m -u 1000 -g users -G docker beaconry \
-    && mkdir -p /data \
-    && chown -R beaconry:users /app /data
+# Pre-create /data with the nonroot (65532) owner so the runtime COPY
+# below produces a correctly-owned mountpoint for fresh volumes.
+RUN mkdir -p /stage/data && chown -R 65532:65532 /stage/data
 
-USER beaconry
+# ── Stage 2: runtime (distroless) ───────────────────────────────────────────
+# gcr.io/distroless/python3-debian12:nonroot — python 3.11, no shell, no apt;
+# baked-in USER nonroot (uid 65532, gid 65532). Docker-socket access comes
+# from compose `group_add` (BC-078), not an in-image groupadd.
+FROM gcr.io/distroless/python3-debian12:nonroot AS runtime
 
-CMD ["python3", "-u", "hub.py"]
+# Python deps installed by the builder (pure-python + wheels built for
+# 3.11, which matches runtime 3.11).
+COPY --from=builder /install/lib/python3.11/site-packages /usr/lib/python3.11/dist-packages
+
+# Native binaries → /usr/bin (default PATH entry in distroless).
+COPY --from=builder /usr/local/bin/syft /usr/bin/syft
+COPY --from=builder /usr/local/bin/grype /usr/bin/grype
+COPY --from=builder /usr/local/bin/docker /usr/bin/docker
+
+WORKDIR /app
+COPY --from=builder --chown=nonroot:nonroot /app /app
+# Fresh named volumes inherit this dir's ownership (65532:65532).
+# Operators upgrading from BC-077 (uid 1000) run the one-time chown in CHANGELOG.
+COPY --from=builder --chown=nonroot:nonroot /stage/data /data
+
+# USER nonroot + ENTRYPOINT /usr/bin/python3 are baked into the base image.
+ENV PYTHONUNBUFFERED=1 PATH=/usr/bin:/bin
+
+CMD ["hub.py"]

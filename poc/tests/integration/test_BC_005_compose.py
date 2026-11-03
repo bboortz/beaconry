@@ -151,8 +151,18 @@ def test_hub_image_bundles_docker_cli() -> None:
         timeout=600,
     )
     assert build.returncode == 0, f"hub image build failed: {build.stderr.decode()[:400]}"
+    # BC-078: distroless base pins ENTRYPOINT to /usr/bin/python3, so run
+    # the docker CLI via --entrypoint override.
     run = subprocess.run(
-        ["docker", "run", "--rm", "beaconry-hub:ci-test", "docker", "--version"],
+        [
+            "docker",
+            "run",
+            "--rm",
+            "--entrypoint",
+            "/usr/bin/docker",
+            "beaconry-hub:ci-test",
+            "--version",
+        ],
         capture_output=True,
         check=False,
         timeout=30,

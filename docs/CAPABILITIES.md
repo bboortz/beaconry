@@ -1648,10 +1648,21 @@ Enforcement: `poc/scripts/verify_traceability.py` runs as part of `make check`. 
 - **type:** technical
 - **status:** active
 - **origin:** BC-077 — operator asked to reduce beaconry's own attack surface. Running hub + scout as root in-container plus a mounted Docker socket means a container-side RCE escalates to root on the host; dropping to a non-root user caps the blast radius at "unprivileged in container + the socket's own permission check".
-- **description:** Both Dockerfiles create a non-root `beaconry` user (uid 1000, group `users` gid 100) and add it to a `docker` group whose gid matches the host's `/var/run/docker.sock` gid via the `DOCKER_GID` build-arg (default 999 for Debian/Ubuntu; operator overrides for Fedora/Arch/Alpine via `.env`). `/app` + `/data` get `chown -R beaconry:users` so Docker's "new named volume inherits image dir ownership" rule gives fresh deploys the right permissions out of the box. Hub + scout both end with `USER beaconry`. Upgrade step for pre-BC-077 operators: one-time chown of the existing `beaconry-data` volume (documented in CHANGELOG). Prerequisite for BC-078 (distroless).
+- **description:** Both Dockerfiles create a non-root `beaconry` user (uid 1000, group `users` gid 100) and add it to a `docker` group whose gid matches the host's `/var/run/docker.sock` gid via the `DOCKER_GID` build-arg (default 999 for Debian/Ubuntu; operator overrides for Fedora/Arch/Alpine via `.env`). `/app` + `/data` get `chown -R beaconry:users` so Docker's "new named volume inherits image dir ownership" rule gives fresh deploys the right permissions out of the box. Hub + scout both end with `USER beaconry`. Upgrade step for pre-BC-077 operators: one-time chown of the existing `beaconry-data` volume (documented in CHANGELOG). Superseded by BC-078 (distroless runtime bakes `USER nonroot` / uid 65532 into the base; `DOCKER_GID` moves from build-arg to compose `group_add`).
 - **supports:** CAP-B023
 - **verified by:**
-  - `poc/tests/integration/test_BC_077_non_root.py`
+  - `poc/tests/integration/test_BC_078_distroless.py`
+
+(BC-078 superseded the BC-077 build-arg path; non-root uid 65532 is now baked into the distroless base and verified by the CAP-T161 tests above.)
+
+### CAP-T161: Distroless runtime image for hub + scout
+- **type:** technical
+- **status:** active
+- **origin:** BC-078 — follow-up to BC-077 (non-root). Operator wanted "reducing the own attack factor" taken further: strip the shell, apt, curl, coreutils so a container-side RCE has far less to work with. Beaconry can't afford to introduce new issues of its own, so distroless is the right next step.
+- **description:** Both Dockerfiles are multi-stage. The builder stage keeps `python:3.11-slim-bookworm` + `apt-get install curl` to install syft, grype, docker CLI, and pip deps into `/install`. The runtime stage is `gcr.io/distroless/python3-debian12:nonroot` — Google-maintained, Python 3.11, no shell, no apt, baked-in `USER nonroot` (uid 65532, gid 65532). `COPY --from=builder` moves site-packages into `/usr/lib/python3.11/dist-packages`, native binaries into `/usr/bin/`, and the app code into `/app` with `--chown=nonroot:nonroot`. Compose takes over Docker-socket group access via `group_add: ["${DOCKER_GID:-999}"]` on both services (runtime-time, not build-time) — operators change gid in `.env` without rebuilding. `pyproject.toml` drops `requires-python` to `>=3.11` so wheels built in the 3.11 builder match the 3.11 runtime; local dev + CI stay on 3.12.
+- **supports:** CAP-B023
+- **verified by:**
+  - `poc/tests/integration/test_BC_078_distroless.py`
 
 ### CAP-T158: beaconry metrics remote mode — HTTP fetch from hub /audit
 - **type:** technical
