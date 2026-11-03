@@ -4,6 +4,17 @@ All notable changes to beaconry are recorded here. The format is based
 on [Keep a Changelog](https://keepachangelog.com/), and this project
 follows [Semantic Versioning](https://semver.org/).
 
+## [v0.8.2] — 2026-11-03
+
+### Fixed
+- **docker:** bump pinned `DOCKER_CLI_VERSION` 27.5.1 → 29.9.2 in
+  `poc/hub/Dockerfile`. The 27.5.1 static binary was built with
+  Go 1.22.11; grype matched it against GO-2026-6604 (Windows
+  path-traversal in `os.Root.Mkdir`) and beaconry fired a
+  self-alert on its own hub image. Not reachable from a Linux
+  container, but false positives on your own tooling erode trust.
+  29.9.2 ships Go 1.26.10 (fixed version).
+
 ## [v0.8.1] — 2026-11-03
 
 ### Added

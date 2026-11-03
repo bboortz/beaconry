@@ -17,7 +17,11 @@ RUN curl -sSfL https://raw.githubusercontent.com/anchore/grype/main/install.sh \
 
 # BC-009: docker CLI so DockerAdapter.execute can run `docker tag`/`docker pull`
 # against the host daemon via the mounted socket. Static binary; pinned.
-ARG DOCKER_CLI_VERSION=27.5.1
+# 2026-11-03: bumped 27.5.1 → 29.9.2 to pick up Go stdlib ≥1.26.9. The 27.5.1
+# release was built with go1.22.11, which GO-2026-6604 (Windows path-traversal
+# in os.Root.Mkdir) flags as vulnerable. Not reachable from a Linux container,
+# but beaconry's own alerts kept firing on itself — fix at the source.
+ARG DOCKER_CLI_VERSION=29.9.2
 RUN curl -fsSL "https://download.docker.com/linux/static/stable/x86_64/docker-${DOCKER_CLI_VERSION}.tgz" \
     | tar -xz -C /tmp && \
     mv /tmp/docker/docker /usr/local/bin/docker && \

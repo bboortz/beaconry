@@ -74,4 +74,5 @@ Lifecycle: `draft → ready → in-progress → shipped`. Status matches each st
 | BC-077 | Non-root hub + scout containers                                          | shipped     | — (merged to dev)                   |
 | BC-078 | Distroless runtime image for hub + scout                                 | shipped     | — (merged to dev)                   |
 | BC-079 | Pre-push runs full container verification                                | shipped     | — (merged to dev)                   |
-| BC-080 | `make cleanup` — teardown + image removal after tests                    | shipped     | feat/BC-080-test-cleanup-tooling    |
+| BC-080 | `make cleanup` — teardown + image removal after tests                    | shipped     | — (merged to dev)                   |
+| BC-081 | fix — bump docker CLI to Go stdlib ≥1.26.9 (GO-2026-6604)                | shipped     | fix/BC-081-docker-cli-go-stdlib     |
