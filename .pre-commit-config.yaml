@@ -2,7 +2,9 @@
 # Install both hook types with:  make install-hooks
 #
 # On commit  (staged files, fast): ruff + ruff format + pyright
-# On push    (full repo):          pytest
+# On push    (full repo):          make check-full (BC-079 — container verification)
+#                                  + verify-version-bumped + verify-changelog
+#                                  + verify-feature-complete
 
 repos:
   - repo: https://github.com/astral-sh/ruff-pre-commit
@@ -19,15 +21,14 @@ repos:
 
   - repo: local
     hooks:
-      - id: pytest-pre-push
-        name: pytest (pre-push)
-        entry: .venv/bin/pytest
-        language: system
-        pass_filenames: false
-        stages: [pre-push]
-      - id: verify-traceability-pre-push
-        name: verify-traceability (pre-push)
-        entry: .venv/bin/python -m poc.scripts.verify_traceability
+      # BC-079: full container verification on pre-push. Includes pytest
+      # (fast tier) + compose + real_tools + test-e2e + test-scenarios.
+      # CLI-smoke is skipped because it requires a live operator stack the
+      # developer may not have running. Takes ~2:30 locally; bypass with
+      # --no-verify only in emergencies.
+      - id: make-check-full-pre-push
+        name: make check-full (pre-push)
+        entry: bash -c 'source .venv/bin/activate && BEACONRY_SKIP_CLI_SMOKE=1 make check-full'
         language: system
         pass_filenames: false
         stages: [pre-push]

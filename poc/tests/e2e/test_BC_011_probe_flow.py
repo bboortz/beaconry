@@ -15,6 +15,7 @@ it's talking to real Telegram.
 Covers:
     - CAP-T055: telegram-mock service — mini Telegram Bot API shim + driver
     - CAP-T056: Hub configurable Telegram API base URL via BEACONRY_TELEGRAM_BASE_URL
+    - CAP-T163: Test-mode routes are unreachable in prod (runtime probe) — BC-079
 """
 
 from __future__ import annotations
@@ -247,13 +248,30 @@ def test_all_six_statuses_round_trip() -> None:
 
 
 def test_hub_container_has_no_test_mode_code() -> None:
-    """BC-018 contract: hub.py in the shipped image contains no __test__ paths."""
-    out = _exec_hub(
-        "import pathlib; "
-        "p = pathlib.Path('/app/hub.py').read_text(); "
-        "print('HAS_TEST' if '__test__' in p or 'BEACONRY_TEST_MODE' in p else 'CLEAN')"
+    """BC-018 contract, rewritten in BC-079: `/test/*` routes must be
+    unreachable when BEACONRY_TEST_MODE is unset.
+
+    Pre-BC-079 this scanned hub.py source for the string `BEACONRY_TEST_MODE`.
+    BC-038 legitimately re-added the string as a feature flag for the
+    scenario harness — the source scan went stale and silently red. The
+    real contract is "test routes are unreachable in prod", which is a
+    runtime property; probe it directly.
+    """
+    import urllib.error
+    import urllib.request
+
+    # docker-compose.test.yml does not set BEACONRY_TEST_MODE, so the
+    # /test/* branch in hub.py must not have been registered.
+    req = urllib.request.Request("http://localhost:9000/test/__driver__/snoozes", method="GET")
+    try:
+        resp = urllib.request.urlopen(req, timeout=5)
+        code = resp.status
+    except urllib.error.HTTPError as e:
+        code = e.code
+    assert code == 404, (
+        f"/test/__driver__/snoozes returned {code}, expected 404. Test-mode "
+        f"routes appear to be live in the shipped image — BC-018 contract broken."
     )
-    assert "CLEAN" in out, "hub.py must not contain /__test__/* or BEACONRY_TEST_MODE"
 
 
 def test_isolation_from_normal_stack() -> None:

@@ -4,6 +4,38 @@ All notable changes to beaconry are recorded here. The format is based
 on [Keep a Changelog](https://keepachangelog.com/), and this project
 follows [Semantic Versioning](https://semver.org/).
 
+## [v0.8.0] — 2026-11-03
+
+### ⚠ Developer-visible: pre-push now runs `make check-full` (BC-079)
+
+Pre-push verification used to be `pytest` + lints. It now runs
+`make check-full` — same gates as CI, including the compose +
+real_tools tiers, test-e2e, and test-scenarios. Push time goes
+from ~45 s to ~2:30. `BEACONRY_SKIP_CLI_SMOKE=1` is set in the
+hook so the live-stack CLI smoke step skips cleanly on developer
+machines without a running stack.
+
+Why: BC-078 ship-verification caught two pre-existing silent
+failures — a stale source-scan test (`BEACONRY_TEST_MODE` string)
+and a Makefile `-$(PYTHON)` prefix swallowing test-e2e exit codes.
+Combined, those meant a shipped-and-staged story could silently
+regress the container boot path. The right fix is a gate that
+boots the container pre-push.
+
+### Fixed
+- **tests:** `test_hub_container_has_no_test_mode_code` was a stale
+  source-string scan (red since BC-038 added `BEACONRY_TEST_MODE`
+  back legitimately); rewritten as a runtime probe of
+  `GET /test/__driver__/*` → expects 404.
+- **make:** `Makefile:test-e2e` had `-$(PYTHON) -m pytest` where the
+  `-` made Make ignore the pytest exit code; `exit $$EXIT` already
+  propagates. The `-` is gone.
+
+### Changed
+- **ci:** pre-push hook invokes `make check-full` instead of
+  standalone `pytest` + `verify-traceability` (the latter is now
+  called by `make check` transitively).
+
 ## [v0.7.0] — 2026-11-03
 
 ### ⚠ Upgrade step for existing operators (BC-078)

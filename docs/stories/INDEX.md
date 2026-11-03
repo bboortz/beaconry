@@ -72,4 +72,5 @@ Lifecycle: `draft → ready → in-progress → shipped`. Status matches each st
 | BC-075 | Metrics + threshold-based soak signals + privacy-first scout opt-in       | shipped     | — (merged to dev)                   |
 | BC-076 | `beaconry metrics --remote` reads from hub /audit over HTTP               | shipped     | — (merged to dev)                   |
 | BC-077 | Non-root hub + scout containers                                          | shipped     | — (merged to dev)                   |
-| BC-078 | Distroless runtime image for hub + scout                                 | shipped     | feat/BC-078-distroless-images       |
+| BC-078 | Distroless runtime image for hub + scout                                 | shipped     | — (merged to dev)                   |
+| BC-079 | Pre-push runs full container verification                                | shipped     | feat/BC-079-pre-push-container-verification |

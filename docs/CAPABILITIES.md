@@ -1655,6 +1655,24 @@ Enforcement: `poc/scripts/verify_traceability.py` runs as part of `make check`. 
 
 (BC-078 superseded the BC-077 build-arg path; non-root uid 65532 is now baked into the distroless base and verified by the CAP-T161 tests above.)
 
+### CAP-T162: Pre-push runs `make check-full` for container verification
+- **type:** technical
+- **status:** active
+- **origin:** BC-079 — BC-078 ship-verification caught two pre-existing silent-failure holes (a stale source-scan test + `Makefile:test-e2e` swallowing exit codes via a leading `-$(PYTHON)`). Combined, a shipped-and-staged story could regress the container boot path with no gate flagging it. The right fix is a pre-push gate that actually boots the containers.
+- **description:** `.pre-commit-config.yaml` replaces the previous standalone `pytest-pre-push` + `verify-traceability-pre-push` hooks with a single `make-check-full-pre-push` entry: `bash -c 'BEACONRY_SKIP_CLI_SMOKE=1 make check-full'`. `make check-full` includes `make check` (lint, type, pytest + coverage, verify-traceability + all other verify-* lints, smoke) plus the compose + real_tools pytest tiers, test-e2e, and test-scenarios. CLI-smoke is skipped because it requires a live operator stack the developer may not have running. Takes ~2:30 locally. `verify-version-bumped`, `verify-changelog`, `verify-feature-complete` stay as separate hooks (not in make check-full because they compare against origin/dev). `Makefile:test-e2e` dropped the leading `-$(PYTHON)` — `exit $$EXIT` at the end already propagates; the `-` was redundant and defeated the propagation.
+- **supports:** CAP-B023
+- **verified by:**
+  - `poc/tests/integration/test_BC_079_pre_push_container_verification.py`
+
+### CAP-T163: Test-mode routes are unreachable in prod (runtime probe)
+- **type:** technical
+- **status:** active
+- **origin:** BC-079 — the pre-BC-079 `test_hub_container_has_no_test_mode_code` scanned `hub.py` source for the string `BEACONRY_TEST_MODE`. BC-038 legitimately re-added that string as a feature flag for the scenario harness, so the source scan went stale and silently red. The real BC-018 contract is "test routes are unreachable in prod", which is a runtime property.
+- **description:** `poc/tests/e2e/test_BC_011_probe_flow.py::test_hub_container_has_no_test_mode_code` now probes `GET http://localhost:9000/test/__driver__/snoozes` → expects 404 because `docker-compose.test.yml` does not set `BEACONRY_TEST_MODE=1`, which means the gated `if TEST_MODE:` block in hub.py never registers the `/test/*` routes. A regression that leaks the test routes into prod flips this to 200/401/403 and the gate fires.
+- **supports:** CAP-B023
+- **verified by:**
+  - `poc/tests/e2e/test_BC_011_probe_flow.py`
+
 ### CAP-T161: Distroless runtime image for hub + scout
 - **type:** technical
 - **status:** active

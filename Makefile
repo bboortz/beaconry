@@ -265,7 +265,7 @@ test-e2e:
 	@echo "==> waiting for hub-test to be ready…"
 	@until curl -sS http://localhost:9000/livez >/dev/null 2>&1; do sleep 1; done
 	@echo "==> running e2e tests"
-	-$(PYTHON) -m pytest -m e2e poc/tests/e2e/ -v --no-cov; EXIT=$$?; \
+	$(PYTHON) -m pytest -m e2e poc/tests/e2e/ -v --no-cov; EXIT=$$?; \
 	 echo "==> tearing down test stack"; \
 	 cd poc && docker compose -p beaconry-test -f docker-compose.test.yml down -v; \
 	 exit $$EXIT
