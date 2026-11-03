@@ -1,4 +1,4 @@
-.PHONY: help lint format type test check check-full demo smoke clean cleanup install-hooks verify-traceability verify-dockerfile-health-copy verify-dockerfile-sources verify-memory-drift verify-compose-env-propagation verify-docs-drift verify-evidence-pointers verify-per-file-coverage verify-variables verify-install-doc verify-version-sync verify-version-bumped verify-changelog verify-feature-complete bump-patch bump-minor bump-major bump-auto changelog findings status audit soak metrics test-e2e live-rebuild live-status scan set-status test-scenarios test-cli
+.PHONY: help lint format type test check check-full demo smoke clean cleanup install-hooks verify-traceability verify-dockerfile-health-copy verify-dockerfile-sources verify-pinned-versions verify-memory-drift verify-compose-env-propagation verify-docs-drift verify-evidence-pointers verify-per-file-coverage verify-variables verify-install-doc verify-version-sync verify-version-bumped verify-changelog verify-feature-complete bump-patch bump-minor bump-major bump-auto changelog findings status audit soak metrics test-e2e live-rebuild live-status scan set-status test-scenarios test-cli dogfood-scan test-cold-start
 
 PYTHON ?= python3
 PYTEST_ARGS ?=
@@ -61,6 +61,12 @@ help:
 	@echo "                                  spins up isolated hub w/ BEACONRY_TEST_MODE=1 and runs 10 scenarios"
 	@echo "  make test-cli                   live-smoke operator CLIs against the running stack (BC-044)"
 	@echo "                                  requires live-rebuild first; set BEACONRY_SKIP_CLI_SMOKE=1 to opt out"
+	@echo "  make test-cold-start            fresh beaconry stack w/ real grype DB download (BC-082)"
+	@echo "                                  the "will homelab install work?" probe"
+	@echo "  make dogfood-scan               grype rescan beaconry's own images; fails on High+ fixable (BC-082)"
+	@echo "                                  BEACONRY_SKIP_DOGFOOD=1 to opt out (dev-only emergency)"
+	@echo "  make verify-pinned-versions     Dockerfile pinned-version floor lint (BC-082)"
+	@echo "                                  DOCKER_CLI_VERSION ≥ 29.9.2 (BC-081), builder base python:3.11+, distroless runtime"
 	@echo ""
 	@echo "Demo:"
 	@echo "  make demo                       docker compose up (real pipeline, host inventory)"
@@ -118,6 +124,12 @@ verify-per-file-coverage:
 
 verify-dockerfile-sources:
 	$(PYTHON) -m poc.scripts.verify_dockerfile_sources
+
+# BC-082: Dockerfile pinned-version floor lint. DOCKER_CLI_VERSION ≥ 29.9.2
+# (BC-081 floor), builder base python:3.11+-slim-{bookworm,trixie},
+# runtime stage distroless/python3-debian12:nonroot exactly.
+verify-pinned-versions:
+	$(PYTHON) -m poc.scripts.verify_pinned_versions
 
 # BC-039 + BC-040: four-way env variable drift lint.
 # Fails if a variable: (a) read in code without a VARIABLES.md row, (b) in
@@ -186,7 +198,7 @@ soak:
 metrics:
 	$(PYTHON) -m poc.scripts.metrics $(ARGS)
 
-check: lint type test verify-per-file-coverage verify-traceability verify-dockerfile-health-copy verify-dockerfile-sources verify-memory-drift verify-compose-env-propagation verify-docs-drift verify-evidence-pointers verify-variables verify-install-doc verify-version-sync verify-changelog verify-feature-complete smoke
+check: lint type test verify-per-file-coverage verify-traceability verify-dockerfile-health-copy verify-dockerfile-sources verify-pinned-versions verify-memory-drift verify-compose-env-propagation verify-docs-drift verify-evidence-pointers verify-variables verify-install-doc verify-version-sync verify-changelog verify-feature-complete smoke
 	@echo ""
 	@echo "✓ Fast tier (make check) passed"
 
@@ -203,6 +215,12 @@ check-full: check
 	@echo ""
 	@echo "==> Full tier: running CLI-smoke harness (BC-044; against live stack; BEACONRY_SKIP_CLI_SMOKE=1 to opt out)"
 	$(MAKE) test-cli
+	@echo ""
+	@echo "==> Full tier: cold-start smoke (BC-082; boots fresh beaconry stack w/ real grype DB)"
+	$(MAKE) test-cold-start
+	@echo ""
+	@echo "==> Full tier: dogfood-grype scan (BC-082; BEACONRY_SKIP_DOGFOOD=1 to opt out)"
+	$(MAKE) dogfood-scan
 	@echo ""
 	@echo "==> Full tier: cleanup (BC-080 — remove leaked test images)"
 	$(MAKE) cleanup
@@ -283,6 +301,27 @@ test-e2e:
 # beaconry-scout:latest, or base images.
 cleanup:
 	@$(PYTHON) -m poc.scripts.cleanup
+
+# BC-082: dogfood grype rescan of beaconry's own images. Fails if any
+# High/Critical finding has a published fix. Opt out via
+# BEACONRY_SKIP_DOGFOOD=1 (dev-only emergency).
+dogfood-scan:
+	@$(PYTHON) -m poc.scripts.dogfood_scan
+
+# BC-082: cold-start smoke. Brings up poc/docker-compose.cold-start.yml with
+# throwaway volumes + real grype DB download, asserts all 8 health endpoints
+# (hub + scout × livez/readyz/startupz/healthz) go green within 180s. Tears
+# down + cleanup on exit (success or failure). The honest "will `make
+# live-rebuild` on a fresh homelab host succeed?" probe.
+test-cold-start:
+	@echo "==> BC-082: starting isolated cold-start compose stack (project: beaconry-cold-start)"
+	cd poc && docker compose -p beaconry-cold-start -f docker-compose.cold-start.yml up -d --build
+	@echo "==> running cold-start test"
+	$(PYTHON) -m pytest -m cold_start poc/tests/integration/test_BC_082_cold_start.py -v --no-cov; EXIT=$$?; \
+	 echo "==> tearing down cold-start stack"; \
+	 cd poc && docker compose -p beaconry-cold-start -f docker-compose.cold-start.yml down -v; \
+	 cd .. && $(MAKE) --no-print-directory cleanup; \
+	 exit $$EXIT
 
 status:
 	@$(PYTHON) -m poc.scripts.status

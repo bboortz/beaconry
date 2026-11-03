@@ -75,4 +75,5 @@ Lifecycle: `draft → ready → in-progress → shipped`. Status matches each st
 | BC-078 | Distroless runtime image for hub + scout                                 | shipped     | — (merged to dev)                   |
 | BC-079 | Pre-push runs full container verification                                | shipped     | — (merged to dev)                   |
 | BC-080 | `make cleanup` — teardown + image removal after tests                    | shipped     | — (merged to dev)                   |
-| BC-081 | fix — bump docker CLI to Go stdlib ≥1.26.9 (GO-2026-6604)                | shipped     | fix/BC-081-docker-cli-go-stdlib     |
+| BC-081 | fix — bump docker CLI to Go stdlib ≥1.26.9 (GO-2026-6604)                | shipped     | — (merged to dev)                   |
+| BC-082 | Homelab-deployment coverage — cold-start + dogfood-grype + pinned-floor  | shipped     | feat/BC-082-homelab-deployment-coverage |

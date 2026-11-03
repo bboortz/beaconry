@@ -1,0 +1,86 @@
+---
+# BC-082 — cold-start smoke stack. Minimal, isolated beaconry hub + scout
+# that proves `make live-rebuild` on a fresh homelab host will succeed.
+#
+# Differences from poc/docker-compose.yml:
+#  - project name `beaconry-cold-start` (set via `-p` on the command line)
+#  - ports 9100 (hub) / 9101 (scout) so this coexists with the operator's
+#    live stack on 8000/8001
+#  - throwaway anonymous volumes (`docker compose down -v` wipes them)
+#  - empty Telegram creds (no outbound traffic during the test)
+#  - MIN_CVSS=99 so no findings trigger notifications (we gate boot, not
+#    alert quality)
+#  - no BEACONRY_SKIP_GRYPE_DB — the whole point is to exercise the real
+#    grype DB download path on first boot
+
+name: beaconry-cold-start
+
+services:
+  hub:
+    build:
+      context: ./
+      dockerfile: hub/Dockerfile
+    image: beaconry-hub:latest
+    container_name: beaconry-cold-start-hub
+    group_add:
+      - "${DOCKER_GID:-999}"
+    environment:
+      - TELEGRAM_BOT_TOKEN=
+      - TELEGRAM_CHAT_ID=
+      - GRYPE_DB_CACHE_DIR=/data/grype-db
+      - MIN_CVSS=99
+      - BEACONRY_FIX_ENABLED=0
+      - BEACONRY_EXECUTOR=manual
+      - BEACONRY_RECONCILE_ENABLED=0
+      - BEACONRY_INTERNET_FACING_DETECTION_ENABLED=0
+      - BEACONRY_HEARTBEAT_ENABLED=0
+      - BEACONRY_NOTIFIER_TELEGRAM_ENABLED=0
+      - HUB_PUBLISH_ADDR=127.0.0.1
+    volumes:
+      - cold-start-data:/data
+      - /var/run/docker.sock:/var/run/docker.sock
+    ports:
+      - "127.0.0.1:9100:8000"
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request,sys;sys.exit(0 if urllib.request.urlopen('http://localhost:8000/readyz').status==200 else 1)"]
+      interval: 10s
+      start_interval: 2s
+      timeout: 10s
+      start_period: 150s
+      retries: 3
+
+  scout:
+    build:
+      context: ./
+      dockerfile: scout/Dockerfile
+    image: beaconry-scout:latest
+    container_name: beaconry-cold-start-scout
+    group_add:
+      - "${DOCKER_GID:-999}"
+    environment:
+      - HUB_URL=http://hub:8000
+      - HOST_NAME=cold-start-host
+      - SCAN_INTERVAL=60
+      - SCOUT_HEARTBEAT_INTERVAL_S=30
+      - SCOUT_METRICS_ENABLED=0
+      - SCOUT_INCLUDE=nginx*,redis*,postgres*
+      - SCOUT_EXCLUDE=beaconry-*,probe-target-*,telegram-mock*
+      - PACMAN_DB=/host/var/lib/pacman
+    volumes:
+      - /var/run/docker.sock:/var/run/docker.sock:ro
+      - cold-start-data:/data
+    ports:
+      - "127.0.0.1:9101:8001"
+    depends_on:
+      hub:
+        condition: service_healthy
+    healthcheck:
+      test: ["CMD", "python3", "-c", "import urllib.request,sys;sys.exit(0 if urllib.request.urlopen('http://localhost:8001/readyz').status==200 else 1)"]
+      interval: 10s
+      start_interval: 2s
+      timeout: 5s
+      start_period: 60s
+      retries: 3
+
+volumes:
+  cold-start-data:

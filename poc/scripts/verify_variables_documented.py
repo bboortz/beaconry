@@ -221,6 +221,7 @@ ENV_EXAMPLE_DEV_ONLY_ALLOWLIST: dict[str, str] = {
     "BEACONRY_SKIP_VERSION_BUMP": "BC-062 pre-push bypass — dev-only emergency escape; never in operator env",
     "BEACONRY_SKIP_CHANGELOG": "BC-069 CHANGELOG regen + pre-push gate bypass — dev-only emergency",
     "BEACONRY_SKIP_FEATURE_COMPLETE": "BC-074 feature-completeness lint bypass — dev-only emergency",
+    "BEACONRY_SKIP_DOGFOOD": "BC-082 dogfood-grype gate bypass — dev-only emergency",
     # BC-069: SOAK_WINDOW_S is operator-tunable per invocation (`SOAK_WINDOW_S=1800 make soak`),
     # not persistent config. Documented in VARIABLES.md but kept out of .env.example.
     "SOAK_WINDOW_S": "BC-069 per-invocation CLI knob for `make soak` window",

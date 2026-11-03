@@ -1655,6 +1655,34 @@ Enforcement: `poc/scripts/verify_traceability.py` runs as part of `make check`. 
 
 (BC-078 superseded the BC-077 build-arg path; non-root uid 65532 is now baked into the distroless base and verified by the CAP-T161 tests above.)
 
+### CAP-T166: Pinned-version floor lint for Dockerfiles
+- **type:** technical
+- **status:** active
+- **origin:** BC-082 — BC-081's "beaconry alerted on itself" (GO-2026-6604) came from `DOCKER_CLI_VERSION=27.5.1` silently decaying as new CVEs landed against docker CLI's embedded Go stdlib. A one-liner Dockerfile revert could reintroduce it. Need a fast-tier gate that catches the regression at `make check`.
+- **description:** `poc/scripts/verify_pinned_versions.py` parses both `poc/hub/Dockerfile` and `poc/scout/Dockerfile`, asserts `DOCKER_CLI_VERSION ≥ 29.9.2` (BC-081 floor — ships Go stdlib 1.26.10), builder base matches `python:3.1[1-9]-slim-{bookworm,trixie}` (BC-078 ABI contract — must match the distroless runtime's Python), and the runtime stage is exactly `gcr.io/distroless/python3-debian12:nonroot` (BC-078 no-shell contract). Error messages name the originating BC so devs reverting a pin can trace what rule they're walking back. Wired into `make check` after `verify-dockerfile-sources`.
+- **supports:** CAP-B023
+- **verified by:**
+  - `poc/tests/integration/test_BC_082_homelab_deployment.py`
+
+### CAP-T167: Dogfood grype gate — rescan beaconry's own images
+- **type:** technical
+- **status:** active
+- **origin:** BC-082 — BC-081 was discovered by beaconry's own live stack firing a Tier-1 Telegram alert against `beaconry-hub:latest`. Reachability was zero (Windows-only Go vuln on a Linux container) but the self-alert eroded operator trust in all alerts. Pinned-dep decay is silent; need a gate that fires at pre-push time, not on an operator's phone.
+- **description:** `poc/scripts/dogfood_scan.py` + `make dogfood-scan` + `make check-full` wire. Reuses the grype binary already baked into `beaconry-hub:latest` — `docker run --entrypoint /usr/bin/grype beaconry-hub:latest <target> -o json` — so no host grype install is required. Parses the JSON; fails on any finding where `vulnerability.severity ∈ {High, Critical}` AND `vulnerability.fix.state == "fixed"` AND `vulnerability.fix.versions` is non-empty. Won't-fix / unknown / not-affected pass. Opt-out via `BEACONRY_SKIP_DOGFOOD=1` (dev-only emergency, documented in VARIABLES.md). Runs ~20s against both hub + scout images.
+- **supports:** CAP-B023
+- **verified by:**
+  - `poc/tests/integration/test_BC_082_homelab_deployment.py`
+
+### CAP-T168: Cold-start smoke test — fresh homelab install probe
+- **type:** technical
+- **status:** active
+- **origin:** BC-082 — all our container tests run with `BEACONRY_SKIP_GRYPE_DB=1` (test-e2e, test-scenarios). That means we had zero coverage of the real "operator runs `make live-rebuild` on a fresh host, grype DB downloads for the first time, both services need to come healthy within some human-tolerable window" path. BC-078 could have shipped broken under this path and we wouldn't have caught it.
+- **description:** `poc/docker-compose.cold-start.yml` is a minimal stripped-down beaconry stack: project `beaconry-cold-start`, ports 9100/9101 (coexists with live stack on 8000/8001), throwaway anonymous volume (`cold-start-data`), empty Telegram tokens (no outbound traffic), `MIN_CVSS=99` (findings never trigger alerts — this test gates boot, not alert quality), no `BEACONRY_SKIP_GRYPE_DB`. `make test-cold-start` brings it up, runs `poc/tests/integration/test_BC_082_cold_start.py` (@pytest.mark.compose), waits 180 s for both services to reach `/readyz = 200`, asserts all 8 health endpoints green + hub `/healthz` shows `grype_db: ok, grype_binary: ok, db: ok` + scout `/healthz` shows `docker_socket: ok`. Teardown + `make cleanup` (BC-080) fire on exit via the `exit $$EXIT` shell-wrap pattern. Added to `make check-full` between `test-cli` and `cleanup`.
+- **supports:** CAP-B023
+- **verified by:**
+  - `poc/tests/integration/test_BC_082_cold_start.py`
+  - `poc/tests/integration/test_BC_082_homelab_deployment.py`
+
 ### CAP-T164: `make cleanup` — tear down test stacks + remove leaked images
 - **type:** technical
 - **status:** active

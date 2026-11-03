@@ -3,7 +3,7 @@ name = "beaconry"
 # BC-062: VERSION file is the single source of truth; this literal is only
 # a build-time placeholder (setuptools-dynamic would rebuild on every bump,
 # which is more friction than value). verify-version-sync lint catches drift.
-version = "0.8.2"
+version = "0.9.0"
 description = "CVE scanning + auto-remediation for self-hosted operators"
 # BC-078: distroless runtime image ships Python 3.11 (debian-12 default).
 # Local dev + CI can still use 3.12; the floor just permits the runtime.
@@ -110,6 +110,7 @@ markers = [
     "real_tools: opt-in; requires syft + grype on $PATH and nginx:1.24 pulled",
     "compose: opt-in; requires docker + docker compose available",
     "e2e: opt-in; requires BC-017 test compose stack up (`make test-e2e` orchestrates)",
+    "cold_start: opt-in; requires BC-082 cold-start compose stack up (`make test-cold-start` orchestrates)",
 ]
 addopts = [
     "-ra",
@@ -118,7 +119,7 @@ addopts = [
     "--cov-report=term-missing",
     "--cov-report=json:coverage.json",
     "--cov-config=pyproject.toml",
-    "-m", "not real_tools and not compose and not e2e",
+    "-m", "not real_tools and not compose and not e2e and not cold_start",
 ]
 filterwarnings = [
     "ignore::DeprecationWarning:pytest_asyncio.*",

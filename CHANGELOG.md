@@ -4,6 +4,54 @@ All notable changes to beaconry are recorded here. The format is based
 on [Keep a Changelog](https://keepachangelog.com/), and this project
 follows [Semantic Versioning](https://semver.org/).
 
+## [v0.9.0] — 2026-11-03
+
+### Added — BC-082 homelab-deployment coverage
+
+Three new gates close the "will fresh homelab deploy succeed?" gap
+that BC-078/BC-079/BC-081 ship-verification kept finding:
+
+- **`make verify-pinned-versions`** (fast tier) — Dockerfile floor
+  lint. `DOCKER_CLI_VERSION ≥ 29.9.2` (BC-081 floor), builder
+  base `python:3.11+-slim-{bookworm,trixie}`, runtime
+  `gcr.io/distroless/python3-debian12:nonroot` exactly. A silent
+  Dockerfile revert can't bring back the BC-081 vuln pin.
+- **`make dogfood-scan`** (full tier) — grype rescan of
+  `beaconry-hub:latest` + `beaconry-scout:latest`, fails on any
+  High/Critical with `fix-available: true`. Catches the next
+  "beaconry alerts on itself" case at pre-push time, not on an
+  operator's Telegram.
+- **`make test-cold-start`** (full tier) — brand-new compose
+  project (`beaconry-cold-start`, ports 9100/9101) with throwaway
+  volumes and **real** grype DB download. Asserts all 8 health
+  endpoints (hub + scout × livez/readyz/startupz/healthz) go
+  green within 180 s. The honest "fresh homelab install" probe.
+
+### Changed — baseline bumps the dogfood gate forced
+
+- **docker:** builder base `python:3.11-slim-bookworm` →
+  `python:3.13-slim-trixie`. Runtime
+  `gcr.io/distroless/python3-debian12:nonroot` →
+  `gcr.io/distroless/python3-debian13:nonroot` (ships Python
+  3.13.5). This fixes ~10 High/Critical fixable CVEs in base
+  system libs (libc6, libssl3, libexpat1, perl-base) that
+  dogfood-grype flagged on its first run against the
+  pre-BC-082 image. Operators upgrading from v0.8.x will
+  rebuild with debian13 on next `make live-rebuild` — same
+  distroless contract (uid 65532, no shell), just a newer OS
+  underneath.
+- **python:** hub + scout `fastapi 0.115 → 0.162`;
+  `starlette` pinned explicitly to `1.3.1` because fastapi
+  0.162 allows `>=0.46` which could resolve older. Fixes 3
+  High CVEs (GHSA-82w8-qh3p-5jfq, GHSA-wqp7-x3pw-xc5r,
+  GHSA-7f5h-v6xp-fcq8).
+- `make check-full` adds ~2:00 (cold-start) + ~20 s (dogfood).
+  New pre-push time ~5 min. `BEACONRY_SKIP_DOGFOOD=1` is the
+  dev-only emergency escape.
+- `docs/plan/CI-FAILURES.md` gets a BC-081 entry so dogfood-grype's
+  origin stays traceable, plus a BC-082 entry documenting the
+  first-run baseline findings as the "learn" moment.
+
 ## [v0.8.2] — 2026-11-03
 
 ### Fixed

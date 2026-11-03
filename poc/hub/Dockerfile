@@ -5,7 +5,7 @@
 # ── Stage 1: builder ────────────────────────────────────────────────────────
 # python 3.11 — matches the distroless runtime's bundled interpreter so
 # pip-installed wheels are compatible.
-FROM python:3.11-slim-bookworm AS builder
+FROM python:3.13-slim-trixie AS builder
 
 RUN apt-get update && apt-get install -y curl && rm -rf /var/lib/apt/lists/*
 
@@ -46,11 +46,11 @@ RUN mkdir -p /stage/data && chown -R 65532:65532 /stage/data
 # gcr.io/distroless/python3-debian12:nonroot — python 3.11, no shell, no apt;
 # baked-in USER nonroot (uid 65532, gid 65532). Docker-socket access comes
 # from compose `group_add` (BC-078), not an in-image groupadd.
-FROM gcr.io/distroless/python3-debian12:nonroot AS runtime
+FROM gcr.io/distroless/python3-debian13:nonroot AS runtime
 
 # Python deps installed by the builder (pure-python + wheels built for
 # 3.11, which matches runtime 3.11).
-COPY --from=builder /install/lib/python3.11/site-packages /usr/lib/python3.11/dist-packages
+COPY --from=builder /install/lib/python3.13/site-packages /usr/lib/python3.13/dist-packages
 
 # Native binaries → /usr/bin (default PATH entry in distroless).
 COPY --from=builder /usr/local/bin/syft /usr/bin/syft

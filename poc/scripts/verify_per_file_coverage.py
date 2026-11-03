@@ -40,6 +40,13 @@ ALLOWLIST: dict[str, tuple[float, str]] = {
         70.0,
         "orchestrator main() is live-tested via `make check`.",
     ),
+    "poc/scripts/dogfood_scan.py": (
+        40.0,
+        "docker-shell-out wrapper + CLI glue — exercised live via "
+        "`make dogfood-scan` in `make check-full`. parse_findings() is "
+        "unit-tested (6 cases); _resolve_docker_gid() shells out to "
+        "`getent group docker` which is live-tested.",
+    ),
     "poc/scenarios/__main__.py": (
         0.0,
         "CLI entry glue (argparse + pass/fail reporter); exercised end-to-end "

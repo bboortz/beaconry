@@ -68,3 +68,60 @@ Format:
   `pip install --dry-run` on the full requirements files
   together. Transitive-constraint traps are invisible to
   Dependabot's per-package view.
+
+---
+
+## 2026-11-03 — beaconry alerted on itself (GO-2026-6604)
+
+- **Trigger**: Telegram, hetzner-staging — Tier-1 alert against
+  `beaconry-hub:latest`: `GO-2026-6604 · stdlib go1.22.11 → fixed
+  in 1.26.9`.
+- **Root cause**: `poc/hub/Dockerfile` had `ARG DOCKER_CLI_VERSION=27.5.1`
+  pinned since BC-009. Docker 27.5.1 shipped with Go stdlib 1.22.11
+  embedded; grype (correctly) matched it against GO-2026-6604 (a
+  Windows-only path traversal in `os.Root.Mkdir`). Reachability on
+  Linux + distroless: zero. But beaconry's own hub alerting the
+  operator about its own tooling erodes trust in every real alert.
+  Pinned-dep decay is silent: a pin that was clean at merge-time
+  becomes vulnerable the day a new CVE lands against the embedded
+  stdlib.
+- **Fix**: BC-081 — bump `DOCKER_CLI_VERSION 27.5.1 → 29.9.2`
+  (ships Go 1.26.10). Verified post-rebuild: grype no longer
+  flags any Go stdlib finding against the hub image.
+- **Regression test**: BC-082 CAP-T166 (`verify-pinned-versions`
+  floor lint — asserts `DOCKER_CLI_VERSION ≥ 29.9.2`) + CAP-T167
+  (`make dogfood-scan` — grype rescan of beaconry's own images,
+  fails on High+ fixable).
+- **Lesson**: pinned third-party binary deps need a dogfood
+  grype gate; version pins drift silently as new CVEs land
+  against old builds. Any "pin for reproducibility" has an
+  implicit decay rate; the gate has to run after rebuild, not
+  only at pin-time.
+
+---
+
+## 2026-11-03 — dogfood-grype first-run baseline: 10+ findings
+
+- **Trigger**: BC-082's `make dogfood-scan` run against the
+  shipped `beaconry-hub:latest` + `beaconry-scout:latest` images.
+- **Root cause**: baseline `python:3.11-slim-bookworm` + distroless
+  `python3-debian12:nonroot` shipped debian12 system libs that
+  had accumulated High/Critical CVEs since those tags were
+  pinned (BC-078). Specifically: `libssl3 3.0.19 → 3.0.22` (one
+  Critical), `libc6 2.36-9+deb12u13 → u14` (3 High), `libexpat1
+  2.5.0-1+deb12u2 → u5` (3 High), `perl-base`. Plus Python-side
+  `starlette 0.38.6-0.41.3 → 1.1+` (3 High CVEs).
+- **Fix**: BC-082 (same commit as the gate itself) — bumped
+  builder to `python:3.13-slim-trixie`, runtime to
+  `gcr.io/distroless/python3-debian13:nonroot`, and
+  `fastapi 0.115 → 0.162` with an explicit `starlette==1.3.1`
+  pin. All findings cleared.
+- **Regression test**: the gate itself (CAP-T167) — now green
+  against the current baseline, will fire again when any pinned
+  dep decays.
+- **Lesson**: the "all our pins are reviewed and clean" story
+  decays silently at the OS-package level too, not only
+  third-party binaries like docker CLI. A dogfood gate against
+  shipped images is the only way to measure that decay. First
+  run of a new gate is the honest baseline reading — any gate
+  worth adding will find something, and that's the signal.

@@ -3,7 +3,7 @@
 # writes — only read access to the Docker socket (compose mount is :ro).
 
 # ── Stage 1: builder ────────────────────────────────────────────────────────
-FROM python:3.11-slim-bookworm AS builder
+FROM python:3.13-slim-trixie AS builder
 
 RUN apt-get update && apt-get install -y curl && rm -rf /var/lib/apt/lists/*
 
@@ -20,9 +20,9 @@ COPY beaconry_health/ ./beaconry_health/
 COPY VERSION ./VERSION
 
 # ── Stage 2: runtime (distroless) ───────────────────────────────────────────
-FROM gcr.io/distroless/python3-debian12:nonroot AS runtime
+FROM gcr.io/distroless/python3-debian13:nonroot AS runtime
 
-COPY --from=builder /install/lib/python3.11/site-packages /usr/lib/python3.11/dist-packages
+COPY --from=builder /install/lib/python3.13/site-packages /usr/lib/python3.13/dist-packages
 COPY --from=builder /usr/local/bin/syft /usr/bin/syft
 
 WORKDIR /app

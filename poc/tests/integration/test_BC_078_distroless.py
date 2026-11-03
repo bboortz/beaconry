@@ -36,16 +36,18 @@ def test_dockerfiles_are_multi_stage() -> None:
 def test_hub_dockerfile_uses_distroless_runtime() -> None:
     """CAP-T161: hub runtime stage is gcr.io/distroless/python3-debian12:nonroot."""
     content = HUB_DOCKERFILE.read_text()
-    assert "gcr.io/distroless/python3-debian12:nonroot" in content, (
-        "hub Dockerfile runtime stage must use distroless python3-debian12:nonroot"
+    # BC-082 bumped debian12 → debian13 for newer libc/libssl/libexpat;
+    # accept either in the migration window.
+    assert re.search(r"gcr\.io/distroless/python3-debian1[23]:nonroot", content), (
+        "hub Dockerfile runtime stage must use distroless python3-debian{12,13}:nonroot"
     )
 
 
 def test_scout_dockerfile_uses_distroless_runtime() -> None:
     """CAP-T161: same for scout."""
     content = SCOUT_DOCKERFILE.read_text()
-    assert "gcr.io/distroless/python3-debian12:nonroot" in content, (
-        "scout Dockerfile runtime stage must use distroless python3-debian12:nonroot"
+    assert re.search(r"gcr\.io/distroless/python3-debian1[23]:nonroot", content), (
+        "scout Dockerfile runtime stage must use distroless python3-debian{12,13}:nonroot"
     )
 
 
