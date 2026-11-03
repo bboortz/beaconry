@@ -87,8 +87,8 @@ _SUBCOMMANDS: dict[str, tuple[str, str, str]] = {
     ),
     "metrics": (
         "poc.scripts.metrics",
-        "beaconry usability + feature-usage metrics from audit.log (BC-075)",
-        "Usage: beaconry metrics [usability|features|all] [--since 7d] [--json]\n"
+        "beaconry usability + feature-usage metrics (local file or hub /audit) (BC-075/BC-076)",
+        "Usage: beaconry metrics [usability|features|all] [--since 7d] [--json] [--remote|--local]\n"
         "\n"
         "Two lenses on the same data:\n"
         "  usability  — key user: 'is this tool worth it?' (action rate,\n"
@@ -97,9 +97,13 @@ _SUBCOMMANDS: dict[str, tuple[str, str, str]] = {
         "               fires, heartbeat health, manual-fix uptake)\n"
         "  all        — both (default)\n"
         "\n"
+        "Source selection (default: auto via ~/.config/beaconry/cli.yml):\n"
+        "  --remote  — force HTTP fetch from the configured hub's /audit endpoint\n"
+        "  --local   — force reading $DATA_DIR/audit.log\n"
+        "\n"
         "    beaconry metrics usability --since 7d\n"
         "    beaconry metrics features --json\n"
-        "    beaconry metrics all --since 24h",
+        "    beaconry metrics all --since 24h --remote",
     ),
 }
 

@@ -3,7 +3,7 @@ name = "beaconry"
 # BC-062: VERSION file is the single source of truth; this literal is only
 # a build-time placeholder (setuptools-dynamic would rebuild on every bump,
 # which is more friction than value). verify-version-sync lint catches drift.
-version = "0.5.0"
+version = "0.6.0"
 description = "CVE scanning + auto-remediation for self-hosted operators"
 requires-python = ">=3.12"
 dependencies = [

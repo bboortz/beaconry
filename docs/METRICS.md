@@ -54,6 +54,28 @@ beaconry metrics all --since 24h --json   # machine-readable
 
 Also works as `make metrics ARGS="usability --since 7d"`.
 
+### Local vs remote (BC-076)
+
+`beaconry metrics` auto-routes the same way `beaconry status` and
+`beaconry findings` do, using `~/.config/beaconry/cli.yml`:
+
+- `hub_url` non-localhost → **remote** (`GET /audit` on the hub, bearer auth)
+- `hub_url` localhost or missing → **local** (`$DATA_DIR/audit.log`)
+
+Operator can override:
+
+```bash
+beaconry metrics --remote    # force HTTP to the configured hub
+beaconry metrics --local     # force local audit.log (useful for exports)
+```
+
+Output includes the source: `Window: last 7.0d, 1234 events from
+remote (/audit on http://100.1.2.3:8000)`.
+
+Remote mode fetches up to 10000 events per call (the `/audit`
+endpoint's cap). If the response hits the cap, metrics prints a
+truncation warning — shrink `--since` or run on the hub host.
+
 ## Usability lens — "is this tool worth it?"
 
 | Metric | What it means | Healthy range |

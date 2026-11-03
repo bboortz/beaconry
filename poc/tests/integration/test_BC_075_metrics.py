@@ -135,14 +135,16 @@ def test_features_tracks_heartbeat_gaps() -> None:
 def test_metrics_all_lens_runs_both(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
 ) -> None:
-    """CAP-T155: default (`all`) prints both lens headers."""
+    """CAP-T155: default (`all`) prints both lens headers. BC-076:
+    pin to --local so BC-076's auto-routing doesn't try to hit a
+    real hub during the test."""
     now = int(time.time())
     _write_audit(
         tmp_path / "audit.log",
         [{"ts": now - 60, "event": "notify_sent", "finding_id": "f1"}],
     )
     monkeypatch.setenv("DATA_DIR", str(tmp_path))
-    rc = metrics.main([])  # default lens = all
+    rc = metrics.main(["--local"])  # default lens = all
     assert rc == 0
     out = capsys.readouterr().out
     assert "Usability" in out
@@ -159,7 +161,7 @@ def test_metrics_json_mode(
         [{"ts": now - 60, "event": "notify_sent", "finding_id": "f1"}],
     )
     monkeypatch.setenv("DATA_DIR", str(tmp_path))
-    rc = metrics.main(["all", "--json"])
+    rc = metrics.main(["all", "--json", "--local"])
     assert rc == 0
     out = capsys.readouterr().out
     data = json.loads(out)
@@ -170,9 +172,11 @@ def test_metrics_json_mode(
 def test_metrics_missing_audit_log_returns_two(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    """CAP-T155: no audit log → exit 2 (same as soak's semantics)."""
+    """CAP-T155: no audit log → exit 2 (same as soak's semantics).
+    BC-076: pin to --local so the auto-router doesn't try remote mode
+    (which could succeed against a dev-env cli.yml)."""
     monkeypatch.setenv("DATA_DIR", str(tmp_path))
-    rc = metrics.main([])
+    rc = metrics.main(["--local"])
     assert rc == 2
 
 

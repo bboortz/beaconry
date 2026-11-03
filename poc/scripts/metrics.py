@@ -1,7 +1,8 @@
 """BC-075 — beaconry metrics: usability + feature-usage reports.
 
-Reads `$DATA_DIR/audit.log` + `$DATA_DIR/beaconry.db` and produces
-one of three reports:
+Reads either the hub's `/audit` HTTP endpoint (BC-076, default when
+`cli.yml`'s `hub_url` is non-localhost) or `$DATA_DIR/audit.log`
+(default when hub is local). Produces one of three reports:
 
     beaconry metrics usability    # key-user lens
     beaconry metrics features     # developer lens
@@ -10,6 +11,8 @@ one of three reports:
 Flags:
     --json                        # machine-readable
     --since 7d                    # analysis window (default 7d; use 1d, 6h, 30m)
+    --remote                      # force HTTP fetch from the configured hub
+    --local                       # force reading $DATA_DIR/audit.log
 
 Two personas, same data:
 - **Key user** asks "is this tool worth it?" (action rate, time-to-fix,
@@ -57,7 +60,7 @@ def _resolve_data_dir() -> Path:
     return Path(__file__).resolve().parents[2] / ".beaconry-cache"
 
 
-# ── Audit log reader ────────────────────────────────────────────────────────
+# ── Audit log reader (local file) ──────────────────────────────────────────
 
 
 def read_audit_events(audit_path: Path, *, since_ts: int | None = None) -> list[dict]:
@@ -76,6 +79,31 @@ def read_audit_events(audit_path: Path, *, since_ts: int | None = None) -> list[
                 continue
         out.append(ev)
     return out
+
+
+# BC-076: /audit endpoint caps at 10000 events per request. Metrics prints a
+# warning when the response hits this cap so the operator knows the window
+# may be truncated. Future BC could add pagination.
+REMOTE_AUDIT_CAP = 10000
+
+
+def fetch_remote_audit_events(hub_url: str, hub_token: str, *, since_ts: int) -> list[dict]:
+    """BC-076: fetch audit events from the hub's /audit endpoint.
+
+    Returns a list of event dicts in the same shape as the local
+    audit.log reader (so `usability_metrics` + `features_metrics` work
+    identically). Raises on HTTP errors; caller renders via
+    `friendly_http_error`.
+    """
+    # Local import so the metrics script keeps working without poc on
+    # sys.path (e.g. in a smoke-test subprocess).
+    from poc.scripts.cli_http import http_get
+
+    url = f"{hub_url.rstrip('/')}/audit?last={REMOTE_AUDIT_CAP}&since={since_ts}"
+    body = http_get(url, token=hub_token, timeout=30.0)
+    if not isinstance(body, list):
+        raise RuntimeError(f"unexpected /audit response shape: {type(body).__name__}")
+    return body
 
 
 # ── Usability lens (key user) ───────────────────────────────────────────────
@@ -330,6 +358,52 @@ def render_features(m: dict) -> str:
 # ── CLI ─────────────────────────────────────────────────────────────────────
 
 
+def _fmt_source_url() -> str:
+    """BC-076: render hub URL for the operator-visible 'from <label>' line."""
+    from poc.scripts.cli_config import load_cli_config
+
+    try:
+        return load_cli_config().hub_url or "<unset>"
+    except Exception:  # noqa: BLE001 - display-only, don't blow up
+        return "<unknown>"
+
+
+def _choose_source(args) -> str:  # noqa: ANN001
+    """BC-076: decide whether to fetch from the hub's /audit endpoint or
+    read a local audit.log. Returns 'remote' or 'local'.
+
+    Precedence: explicit flag → cli.yml auto-route → safe default (local)."""
+    if args.remote and args.local:
+        raise ValueError("--remote and --local are mutually exclusive")
+    if args.remote:
+        return "remote"
+    if args.local:
+        return "local"
+    # Auto-route via cli.yml, mirrors `beaconry status` / `findings`.
+    from poc.scripts.cli_config import load_cli_config
+    from poc.scripts.cli_http import is_localhost_url
+
+    cfg = load_cli_config()
+    if cfg.hub_url and not is_localhost_url(cfg.hub_url):
+        return "remote"
+    return "local"
+
+
+def _load_remote_events(since_ts: int) -> tuple[list[dict], bool]:
+    """BC-076: fetch events from the configured hub. Returns (events,
+    hit_cap_warning). Hub-side errors propagate up."""
+    from poc.scripts.cli_config import load_cli_config
+
+    cfg = load_cli_config()
+    if not cfg.hub_url:
+        raise RuntimeError(
+            "hub_url not configured in ~/.config/beaconry/cli.yml — "
+            "run `beaconry status` or see docs/INSTALL.md § Operator CLI setup"
+        )
+    events = fetch_remote_audit_events(cfg.hub_url, cfg.hub_token, since_ts=since_ts)
+    return events, len(events) >= REMOTE_AUDIT_CAP
+
+
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(
         prog="beaconry metrics",
@@ -348,6 +422,17 @@ def main(argv: list[str] | None = None) -> int:
         help="analysis window: 7d / 24h / 30m / 60s (default: 7d)",
     )
     parser.add_argument("--json", action="store_true", help="machine-readable output")
+    source_group = parser.add_mutually_exclusive_group()
+    source_group.add_argument(
+        "--remote",
+        action="store_true",
+        help="force HTTP fetch from the configured hub (default: auto via cli.yml)",
+    )
+    source_group.add_argument(
+        "--local",
+        action="store_true",
+        help="force reading $DATA_DIR/audit.log (default: auto via cli.yml)",
+    )
     args = parser.parse_args(argv)
 
     try:
@@ -356,19 +441,40 @@ def main(argv: list[str] | None = None) -> int:
         print(f"metrics: {e}", file=sys.stderr)
         return 2
 
-    audit_path = _resolve_data_dir() / "audit.log"
-    if not audit_path.exists():
-        print(
-            f"metrics: audit log not found at {audit_path} "
-            f"(set DATA_DIR to override, or run `make demo` to seed)",
-            file=sys.stderr,
-        )
+    try:
+        source = _choose_source(args)
+    except ValueError as e:  # pragma: no cover — argparse normally catches
+        print(f"metrics: {e}", file=sys.stderr)
         return 2
 
     now_ts = int(time.time())
-    events = read_audit_events(audit_path, since_ts=now_ts - window_s)
+    since_ts = now_ts - window_s
+    cap_warning = False
 
-    out: dict = {"since_s": window_s, "events": len(events)}
+    if source == "remote":
+        from poc.scripts.cli_http import friendly_http_error
+
+        try:
+            events, cap_warning = _load_remote_events(since_ts)
+        except Exception as exc:  # noqa: BLE001 - rendered via friendly error
+            from poc.scripts.cli_config import load_cli_config
+
+            url = load_cli_config().hub_url or "<unset>"
+            print(f"metrics: {friendly_http_error(url, exc)}", file=sys.stderr)
+            return 2
+    else:
+        audit_path = _resolve_data_dir() / "audit.log"
+        if not audit_path.exists():
+            print(
+                f"metrics: audit log not found at {audit_path} "
+                f"(set DATA_DIR to override, run `make demo` to seed, "
+                f"or use `beaconry metrics --remote` to fetch from the hub)",
+                file=sys.stderr,
+            )
+            return 2
+        events = read_audit_events(audit_path, since_ts=since_ts)
+
+    out: dict = {"since_s": window_s, "events": len(events), "source": source}
     if args.lens in ("usability", "all"):
         out["usability"] = usability_metrics(events, now_ts=now_ts)
     if args.lens in ("features", "all"):
@@ -378,7 +484,13 @@ def main(argv: list[str] | None = None) -> int:
         print(json.dumps(out, indent=2))
         return 0
 
-    print(f"Window: last {_fmt_duration(window_s)}, {len(events)} events\n")
+    source_label = f"remote (/audit on {_fmt_source_url()})" if source == "remote" else "local file"
+    print(f"Window: last {_fmt_duration(window_s)}, {len(events)} events from {source_label}\n")
+    if cap_warning:
+        print(
+            f"⚠  Response hit the /audit cap ({REMOTE_AUDIT_CAP} events). "
+            f"Numbers may be truncated; try a shorter --since or run on the hub host.\n"
+        )
     if "usability" in out:
         print(render_usability(out["usability"]))
         print()

@@ -1644,6 +1644,24 @@ Enforcement: `poc/scripts/verify_traceability.py` runs as part of `make check`. 
 - **verified by:**
   - `poc/tests/integration/test_BC_074_release_automation.py`
 
+### CAP-T158: beaconry metrics remote mode — HTTP fetch from hub /audit
+- **type:** technical
+- **status:** active
+- **origin:** BC-076 — operator asked to run `beaconry metrics` from a workstation without SSH-ing to the hub, following the same `beaconry status` / `findings` auto-routing pattern.
+- **description:** `poc/scripts/metrics.py` learns `--remote` / `--local` flags (mutually exclusive) + auto-mode via `cli_config.load_cli_config() + cli_http.is_localhost_url`. Remote mode fetches via `GET /audit?last=10000&since=<ts>` with `Authorization: Bearer <hub_token>`. Response (list of event dicts) feeds the same `usability_metrics` / `features_metrics` aggregators — zero changes to the measurement layer. Errors route through `friendly_http_error`: 401 = "check hub_token in cli.yml", URLError = "failed to reach hub at {url}". Response at the 10000-event cap prints a truncation warning so the operator knows to shrink `--since` or run on the hub host.
+- **supports:** CAP-B023
+- **verified by:**
+  - `poc/tests/integration/test_BC_076_metrics_remote.py`
+
+### CAP-T159: metrics auto-routes to hub when cli.yml points remote
+- **type:** technical
+- **status:** active
+- **origin:** BC-076
+- **description:** Default source selection mirrors `beaconry status` / `findings`: `~/.config/beaconry/cli.yml`'s `hub_url` → non-localhost auto-picks remote mode; localhost or missing → local file. Operator can override with `--local` / `--remote`. Matches the operator mental model that `beaconry <anything>` talks to the configured hub.
+- **supports:** CAP-B023
+- **verified by:**
+  - `poc/tests/integration/test_BC_076_metrics_remote.py`
+
 ### CAP-T155: beaconry metrics — usability + feature-usage reports
 - **type:** technical
 - **status:** active

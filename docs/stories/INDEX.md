@@ -70,3 +70,4 @@ Lifecycle: `draft → ready → in-progress → shipped`. Status matches each st
 | BC-073 | python-dotenv + requests dep bumps (closes PRs #2, #3)                    | shipped     | — (merged to dev)                   |
 | BC-074 | Release automation + 24h soak + feature-complete lint + CI-failure log   | shipped     | — (merged to dev)                   |
 | BC-075 | Metrics + threshold-based soak signals + privacy-first scout opt-in       | shipped     | — (merged to dev)                   |
+| BC-076 | `beaconry metrics --remote` reads from hub /audit over HTTP               | shipped     | — (merged to dev)                   |
