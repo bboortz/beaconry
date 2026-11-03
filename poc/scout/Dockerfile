@@ -15,5 +15,16 @@ COPY beaconry_health/ ./beaconry_health/
 # BC-062: single source of truth for software version.
 COPY VERSION ./VERSION
 
+# BC-077: non-root hardening. Scout only needs read access to the Docker
+# socket, so the beaconry user joins the docker group. See hub/Dockerfile
+# for the DOCKER_GID per-distro override notes. Scout has no persistent
+# data directory, so no /data chown needed.
+ARG DOCKER_GID=999
+RUN groupadd -g ${DOCKER_GID} docker 2>/dev/null || groupmod -g ${DOCKER_GID} docker 2>/dev/null || true \
+    && useradd -m -u 1000 -g users -G docker beaconry \
+    && chown -R beaconry:users /app
+
+USER beaconry
+
 EXPOSE 8001
 CMD ["python3", "-u", "scout.py"]

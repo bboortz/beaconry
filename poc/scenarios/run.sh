@@ -29,8 +29,11 @@ cleanup() {
 trap cleanup EXIT
 
 # Pre-cleanup in case a previous run left root-owned junk behind.
+# BC-077: hub now runs as uid 1000 — the dir itself must be owned by that
+# uid (or world-writable). chown the dir contents + the dir itself through
+# a short-lived root container before mkdir re-creates it as the current user.
 if [ -d "$DATA_DIR" ]; then
-  docker run --rm -v "$DATA_DIR:/d" alpine sh -c "rm -rf /d/* /d/.??*" >/dev/null 2>&1 || true
+  docker run --rm -v "$DATA_DIR:/d" alpine sh -c "rm -rf /d/* /d/.??* 2>/dev/null; chown 1000:100 /d" >/dev/null 2>&1 || true
 fi
 mkdir -p "$DATA_DIR"
 chmod 777 "$DATA_DIR" 2>/dev/null || true

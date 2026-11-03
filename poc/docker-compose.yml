@@ -4,6 +4,13 @@ services:
     build:
       context: ./
       dockerfile: hub/Dockerfile
+      args:
+        # BC-077: inside-container `docker` group gid must match the host's
+        # /var/run/docker.sock gid for the non-root beaconry user to use the
+        # socket. Default 999 matches Debian/Ubuntu. Check your host with
+        # `getent group docker | cut -d: -f3`. Override via .env on Arch
+        # (989), Fedora (995), etc.
+        DOCKER_GID: ${DOCKER_GID:-999}
     image: beaconry-hub:latest
     container_name: beaconry-hub
     restart: unless-stopped
@@ -80,6 +87,10 @@ services:
     build:
       context: ./
       dockerfile: scout/Dockerfile
+      args:
+        # BC-077: see hub above — scout only needs ro access to the socket
+        # but the group membership still needs to match the host's gid.
+        DOCKER_GID: ${DOCKER_GID:-999}
     image: beaconry-scout:latest
     container_name: beaconry-scout
     restart: unless-stopped

@@ -1644,6 +1644,15 @@ Enforcement: `poc/scripts/verify_traceability.py` runs as part of `make check`. 
 - **verified by:**
   - `poc/tests/integration/test_BC_074_release_automation.py`
 
+### CAP-T160: Non-root hub + scout containers
+- **type:** technical
+- **status:** active
+- **origin:** BC-077 — operator asked to reduce beaconry's own attack surface. Running hub + scout as root in-container plus a mounted Docker socket means a container-side RCE escalates to root on the host; dropping to a non-root user caps the blast radius at "unprivileged in container + the socket's own permission check".
+- **description:** Both Dockerfiles create a non-root `beaconry` user (uid 1000, group `users` gid 100) and add it to a `docker` group whose gid matches the host's `/var/run/docker.sock` gid via the `DOCKER_GID` build-arg (default 999 for Debian/Ubuntu; operator overrides for Fedora/Arch/Alpine via `.env`). `/app` + `/data` get `chown -R beaconry:users` so Docker's "new named volume inherits image dir ownership" rule gives fresh deploys the right permissions out of the box. Hub + scout both end with `USER beaconry`. Upgrade step for pre-BC-077 operators: one-time chown of the existing `beaconry-data` volume (documented in CHANGELOG). Prerequisite for BC-078 (distroless).
+- **supports:** CAP-B023
+- **verified by:**
+  - `poc/tests/integration/test_BC_077_non_root.py`
+
 ### CAP-T158: beaconry metrics remote mode — HTTP fetch from hub /audit
 - **type:** technical
 - **status:** active

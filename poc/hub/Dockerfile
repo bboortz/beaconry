@@ -29,4 +29,18 @@ COPY beaconry_health/ ./beaconry_health/
 # BC-062: single source of truth for software version.
 COPY VERSION ./VERSION
 
+# BC-077: non-root hardening. Create beaconry user (uid 1000) + add to a
+# docker group matching the host's socket gid. DOCKER_GID default 999
+# matches Debian/Ubuntu; override via `DOCKER_GID=995 docker compose build`
+# on Fedora, 989 on Arch, etc. (check with `getent group docker` on host).
+# /data gets chowned so fresh named volumes inherit beaconry ownership —
+# existing volumes from pre-BC-077 need a one-time chown (see CHANGELOG).
+ARG DOCKER_GID=999
+RUN groupadd -g ${DOCKER_GID} docker 2>/dev/null || groupmod -g ${DOCKER_GID} docker 2>/dev/null || true \
+    && useradd -m -u 1000 -g users -G docker beaconry \
+    && mkdir -p /data \
+    && chown -R beaconry:users /app /data
+
+USER beaconry
+
 CMD ["python3", "-u", "hub.py"]
