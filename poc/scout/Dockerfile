@@ -27,11 +27,6 @@ FROM ghcr.io/bboortz/python-scratch-trixie:3.13 AS runtime
 
 COPY --from=builder /install/lib/python3.13/site-packages /usr/local/lib/python3.13/site-packages
 
-# BC-083 workaround: forge image v2 is missing librt.so.1; pydantic_core
-# (transitive via fastapi) won't load without it. Remove once forge v3
-# ships with librt restored. See hub/Dockerfile for the full explanation.
-COPY --from=builder /usr/lib/x86_64-linux-gnu/librt.so.1 /usr/lib/x86_64-linux-gnu/librt.so.1
-
 COPY --from=builder /usr/local/bin/syft /usr/local/bin/syft
 
 WORKDIR /app

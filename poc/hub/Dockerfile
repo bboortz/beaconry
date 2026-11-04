@@ -48,14 +48,6 @@ FROM ghcr.io/bboortz/python-scratch-trixie:3.13 AS runtime
 # Python deps — forge sys.path is /usr/local/lib/python3.13/*, not /usr/lib/*.
 COPY --from=builder /install/lib/python3.13/site-packages /usr/local/lib/python3.13/site-packages
 
-# BC-083 workaround: forge image v2 is missing /usr/lib/x86_64-linux-gnu/librt.so.1.
-# pydantic_core (transitive via fastapi) is a Rust wheel that NEEDS libgcc_s,
-# librt, libpthread, libdl, libc — all four of the others are in the forge
-# image; only librt is stripped. On glibc 2.34+ librt is a stub symlink to
-# libc but the file must still exist for compiled binaries that resolve it
-# by name. Remove this line once forge image v3 ships with librt restored.
-COPY --from=builder /usr/lib/x86_64-linux-gnu/librt.so.1 /usr/lib/x86_64-linux-gnu/librt.so.1
-
 # Native binaries → /usr/local/bin (forge PATH).
 COPY --from=builder /usr/local/bin/syft /usr/local/bin/syft
 COPY --from=builder /usr/local/bin/grype /usr/local/bin/grype

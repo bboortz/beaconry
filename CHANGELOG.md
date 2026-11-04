@@ -4,6 +4,18 @@ All notable changes to beaconry are recorded here. The format is based
 on [Keep a Changelog](https://keepachangelog.com/), and this project
 follows [Semantic Versioning](https://semver.org/).
 
+## [v0.10.1] — 2026-11-04
+
+### Removed
+- **docker:** BC-083 librt.so.1 workaround (hub + scout Dockerfiles).
+  Forge image v3 (`ghcr.io/bboortz/python-scratch-trixie:3.13`) now
+  bundles `librt.so.1` + `libm.so.6` + `libutil.so.1` + `libresolv.so.2`
+  at `/lib/x86_64-linux-gnu/`, so beaconry no longer needs to COPY the
+  stub in from the builder stage. Verified: `pydantic_core` loads
+  cleanly, cold-start suite green (including the generic
+  `test_hub_can_import_all_runtime_deps` probe that originally caught
+  the gap).
+
 ## [v0.10.0] — 2026-11-04
 
 ### Changed — runtime image provider swap
