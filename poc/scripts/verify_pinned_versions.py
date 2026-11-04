@@ -36,17 +36,22 @@ BUILDER_BASE_RE = re.compile(
     re.MULTILINE,
 )
 
-# BC-078 runtime contract. BC-082 bumped debian12 → debian13 to pick up
-# newer libc/libssl/libexpat. Both tags are accepted during the migration
-# window; operators on debian12 see a dogfood-scan finding until they
-# rebuild. Any other distroless flavor (debug, bullseye) is a conscious
-# choice that should edit this lint too.
+# BC-078 → BC-082 → BC-083 runtime contract.
+# BC-083 moved runtime to the self-owned forge image;
+# distroless debian12/debian13 stay accepted for the migration window
+# (one release). Operators on distroless see a soft notice; the hard
+# cutoff ships in a future BC once the migration completes.
+# Any other variant (random ghcr repo, distroless-debug, etc.) must edit
+# this lint too — that's the "conscious choice" gate.
 RUNTIME_IMAGE_RE = re.compile(
-    r"^FROM\s+gcr\.io/distroless/python3-debian1[23]:nonroot\s+AS\s+runtime\b",
+    r"^FROM\s+(?:"
+    r"ghcr\.io/bboortz/python-scratch-trixie:3\.13"  # BC-083 primary
+    r"|gcr\.io/distroless/python3-debian1[23]:nonroot"  # BC-078/BC-082 fallback
+    r")\s+AS\s+runtime\b",
     re.MULTILINE,
 )
 # Preferred (newest accepted) tag — error messages name this one.
-RUNTIME_IMAGE_PREFERRED = "gcr.io/distroless/python3-debian13:nonroot"
+RUNTIME_IMAGE_PREFERRED = "ghcr.io/bboortz/python-scratch-trixie:3.13"
 
 # BC-081 docker CLI pin.
 DOCKER_CLI_RE = re.compile(

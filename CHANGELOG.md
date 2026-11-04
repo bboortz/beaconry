@@ -4,6 +4,39 @@ All notable changes to beaconry are recorded here. The format is based
 on [Keep a Changelog](https://keepachangelog.com/), and this project
 follows [Semantic Versioning](https://semver.org/).
 
+## [v0.10.0] — 2026-11-04
+
+### Changed — runtime image provider swap
+
+- **docker:** runtime stage FROM
+  `gcr.io/distroless/python3-debian13:nonroot` →
+  `ghcr.io/bboortz/python-scratch-trixie:3.13` (self-owned forge
+  image). Pre-flight recorded in the BC-083 plan doc; the forge
+  image bakes in the full BC-078 contract (uid 65532, ENTRYPOINT
+  `/usr/local/bin/python3`, `SSL_CERT_FILE`, `/etc/passwd` entry
+  for nonroot, `PYTHONDONTWRITEBYTECODE`, `PYTHONFAULTHANDLER`,
+  no shell). Distroless debian12/13 stays accepted by
+  `verify-pinned-versions` for one release window (soft
+  migration). Zero chown migration for operators already on
+  BC-082's debian13 — uid 65532 preserved.
+
+### Added
+
+- **make,scripts:** `make verify-base-images` (BC-083 CAP-T171)
+  — standing preflight. Enumerates every `FROM` across all
+  Dockerfiles, does an anonymous bearer-token + manifest fetch
+  against each registry (ghcr.io / gcr.io / docker.io), fails if
+  any returns 401/403/404/5xx. 24h on-disk cache in
+  `.beaconry-cache/verify-base-images.json` keeps the fast tier
+  from being network-bound every run. Catches: forge repo goes
+  private, `:3.13` floating tag gets retagged, registry outage.
+  `BEACONRY_SKIP_BASE_IMAGES=1` opts out (dev-only / air-gapped CI).
+- **tests:** `test_BC_083_forge_image.py` + `test_BC_083_forge_runtime.py`
+  — Dockerfile-level + live-runtime assertions. The runtime file
+  (@cold_start marker) verifies inside the booted hub/scout
+  container: no shell, uid=65532, HTTPS works, grype/syft/docker
+  binaries runnable, `pwd.getpwuid(65532)` resolves to `nonroot`.
+
 ## [v0.9.0] — 2026-11-03
 
 ### Added — BC-082 homelab-deployment coverage

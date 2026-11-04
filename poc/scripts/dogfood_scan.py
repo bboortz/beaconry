@@ -139,7 +139,7 @@ def _scan_image(image: str, docker_gid: str) -> dict[str, Any]:
         "-v",
         "/var/run/docker.sock:/var/run/docker.sock:ro",
         "--entrypoint",
-        "/usr/bin/grype",
+        "/usr/local/bin/grype",
         "beaconry-hub:latest",
         image,
         "-o",

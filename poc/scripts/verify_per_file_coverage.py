@@ -47,6 +47,14 @@ ALLOWLIST: dict[str, tuple[float, str]] = {
         "unit-tested (6 cases); _resolve_docker_gid() shells out to "
         "`getent group docker` which is live-tested.",
     ),
+    "poc/scripts/verify_base_images.py": (
+        50.0,
+        "HTTP shell-out to registry token+manifest endpoints — exercised "
+        "live via `make verify-base-images` in `make check`. Pure "
+        "helpers (enumerate_froms, _split_ref, check, cache load/save) "
+        "are unit-tested (5 cases); _probe_image_live is covered by the "
+        "live gate run, not by mocked tests.",
+    ),
     "poc/scenarios/__main__.py": (
         0.0,
         "CLI entry glue (argparse + pass/fail reporter); exercised end-to-end "

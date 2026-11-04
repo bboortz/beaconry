@@ -1655,6 +1655,34 @@ Enforcement: `poc/scripts/verify_traceability.py` runs as part of `make check`. 
 
 (BC-078 superseded the BC-077 build-arg path; non-root uid 65532 is now baked into the distroless base and verified by the CAP-T161 tests above.)
 
+### CAP-T169: Runtime image sourced from self-owned forge registry
+- **type:** technical
+- **status:** active
+- **origin:** BC-083 — operator asked to swap beaconry's runtime stage from Google distroless (`gcr.io/distroless/python3-debian13:nonroot`) to a self-owned image at `ghcr.io/bboortz/python-scratch-trixie:3.13`. Shifts the supply-chain trust surface from a third-party vendor to operator-maintained infrastructure.
+- **description:** Both `poc/hub/Dockerfile` and `poc/scout/Dockerfile` runtime stages FROM `ghcr.io/bboortz/python-scratch-trixie:3.13`. The forge image bakes the full BC-078 contract in: baked `USER 65532:65532`, `ENTRYPOINT /usr/local/bin/python3`, `SSL_CERT_FILE` set so HTTPS works out of the box, `/etc/passwd` + `/etc/group` entries for uid 65532 so `pwd.getpwuid` resolves, `PYTHONDONTWRITEBYTECODE=1 + PYTHONFAULTHANDLER=1`, no shell, cosign-signed manifest. beaconry's runtime stage therefore adds no `USER`, `ENTRYPOINT`, or `SSL_CERT_FILE` overrides — it just COPYs site-packages into `/usr/local/lib/python3.13/site-packages` (forge sys.path) and native binaries into `/usr/local/bin/` (forge PATH). uid 65532 preserved from BC-082 means zero chown migration for upgrading operators. Workaround still required: forge v2 strips `/usr/lib/x86_64-linux-gnu/librt.so.1` (needed by pydantic_core's Rust wheel); beaconry COPYs it in from the builder stage until forge v3 restores it. Cold-start suite's `test_hub_can_import_all_runtime_deps` + `test_scout_can_import_all_runtime_deps` walk every line of hub/scout requirements.txt and run `import <module>` inside the container — this catches the generic "missing shared lib" class of regression for every future base-image migration. `verify_pinned_versions` accepts the forge tag as primary + keeps distroless debian12/13 as a soft-migration fallback for one release window.
+- **supports:** CAP-B023
+- **verified by:**
+  - `poc/tests/integration/test_BC_083_forge_image.py`
+  - `poc/tests/integration/test_BC_083_forge_runtime.py`
+
+### CAP-T170: Pre-flight inspection recorded before base-image swap
+- **type:** technical
+- **status:** active
+- **origin:** BC-083 — base-image migrations are high-leverage, low-reversibility changes; the pre-flight gotchas (missing CA certs, missing passwd entry, uid-defaults-to-root) that forced the forge image's v2 would have landed as broken-in-prod without a "look before you swap" discipline.
+- **description:** Every base-image swap/upgrade records (in the paired plan doc, before the Dockerfile diff commits): (1) public anonymous pullability, (2) baked USER, (3) ENTRYPOINT/CMD, (4) PATH, (5) Python/runtime version, (6) sys.path site-packages location, (7) SSL_CERT_FILE + HTTPS end-to-end probe, (8) /etc/passwd + /etc/group entries for the expected uid, (9) shell presence, (10) image size, (11) signature status. The BC-083 plan doc (`docs/plan/BC-083-forge-base-image-plan.md`) is the reference implementation; future base-image BCs replicate the table. Complements CAP-T171 (which runs forever) — this is the one-shot that captures "what did we understand on the day we migrated?"
+- **supports:** CAP-B023
+- **verified by:**
+  - `poc/tests/integration/test_BC_083_forge_image.py`
+
+### CAP-T171: `make verify-base-images` — standing anonymous-pull preflight
+- **type:** technical
+- **status:** active
+- **origin:** BC-083 — follow-up to the pre-flight gotchas: a one-shot plan-doc table captures the state at migration time, but doesn't catch "the base-image provider makes the repo private six months later" or "the `:3.13` floating tag gets retagged to something broken". Need a standing gate.
+- **description:** `poc/scripts/verify_base_images.py` + `make verify-base-images` + wire into `make check`. Enumerates every `FROM <ref>` across `**/Dockerfile*` (skipping stage aliases). For each unique ref, splits into (registry, repo, tag) handling Docker Hub shorthand, requests an anonymous bearer token from the registry's token service (`ghcr.io/token`, `gcr.io/v2/token`, `auth.docker.io/token`), then fetches the manifest with OCI/Docker Accept headers. Success = both steps return 2xx. Successes cached in `.beaconry-cache/verify-base-images.json` with 24h TTL so fast tier isn't network-bound every run. Failures (401/403/404/5xx or unknown registry) list the exact image + hint. Opt-out: `BEACONRY_SKIP_BASE_IMAGES=1` (dev-only emergency / air-gapped CI). Catches: image went private, tag retagged, registry outage, unknown/typo'd registry prefix.
+- **supports:** CAP-B023
+- **verified by:**
+  - `poc/tests/integration/test_BC_083_forge_image.py`
+
 ### CAP-T166: Pinned-version floor lint for Dockerfiles
 - **type:** technical
 - **status:** active

@@ -76,4 +76,5 @@ Lifecycle: `draft → ready → in-progress → shipped`. Status matches each st
 | BC-079 | Pre-push runs full container verification                                | shipped     | — (merged to dev)                   |
 | BC-080 | `make cleanup` — teardown + image removal after tests                    | shipped     | — (merged to dev)                   |
 | BC-081 | fix — bump docker CLI to Go stdlib ≥1.26.9 (GO-2026-6604)                | shipped     | — (merged to dev)                   |
-| BC-082 | Homelab-deployment coverage — cold-start + dogfood-grype + pinned-floor  | shipped     | feat/BC-082-homelab-deployment-coverage |
+| BC-082 | Homelab-deployment coverage — cold-start + dogfood-grype + pinned-floor  | shipped     | — (merged to dev)                   |
+| BC-083 | Forge runtime base image + verify-base-images preflight                  | shipped     | feat/BC-083-forge-base-image        |

@@ -1,4 +1,4 @@
-.PHONY: help lint format type test check check-full demo smoke clean cleanup install-hooks verify-traceability verify-dockerfile-health-copy verify-dockerfile-sources verify-pinned-versions verify-memory-drift verify-compose-env-propagation verify-docs-drift verify-evidence-pointers verify-per-file-coverage verify-variables verify-install-doc verify-version-sync verify-version-bumped verify-changelog verify-feature-complete bump-patch bump-minor bump-major bump-auto changelog findings status audit soak metrics test-e2e live-rebuild live-status scan set-status test-scenarios test-cli dogfood-scan test-cold-start
+.PHONY: help lint format type test check check-full demo smoke clean cleanup install-hooks verify-traceability verify-dockerfile-health-copy verify-dockerfile-sources verify-pinned-versions verify-base-images verify-memory-drift verify-compose-env-propagation verify-docs-drift verify-evidence-pointers verify-per-file-coverage verify-variables verify-install-doc verify-version-sync verify-version-bumped verify-changelog verify-feature-complete bump-patch bump-minor bump-major bump-auto changelog findings status audit soak metrics test-e2e live-rebuild live-status scan set-status test-scenarios test-cli dogfood-scan test-cold-start
 
 PYTHON ?= python3
 PYTEST_ARGS ?=
@@ -67,6 +67,8 @@ help:
 	@echo "                                  BEACONRY_SKIP_DOGFOOD=1 to opt out (dev-only emergency)"
 	@echo "  make verify-pinned-versions     Dockerfile pinned-version floor lint (BC-082)"
 	@echo "                                  DOCKER_CLI_VERSION ≥ 29.9.2 (BC-081), builder base python:3.11+, distroless runtime"
+	@echo "  make verify-base-images         Anonymous-pull preflight for every FROM in Dockerfiles (BC-083)"
+	@echo "                                  24h cached; BEACONRY_SKIP_BASE_IMAGES=1 for air-gapped CI"
 	@echo ""
 	@echo "Demo:"
 	@echo "  make demo                       docker compose up (real pipeline, host inventory)"
@@ -130,6 +132,13 @@ verify-dockerfile-sources:
 # runtime stage distroless/python3-debian12:nonroot exactly.
 verify-pinned-versions:
 	$(PYTHON) -m poc.scripts.verify_pinned_versions
+
+# BC-083 CAP-T171: standing preflight. Enumerate every FROM across
+# Dockerfiles; anonymous-token + manifest probe against ghcr/gcr/docker.io
+# registries; fail on 401/403/404/5xx. 24h cache. Opt out with
+# BEACONRY_SKIP_BASE_IMAGES=1 (air-gapped CI).
+verify-base-images:
+	$(PYTHON) -m poc.scripts.verify_base_images
 
 # BC-039 + BC-040: four-way env variable drift lint.
 # Fails if a variable: (a) read in code without a VARIABLES.md row, (b) in
@@ -198,7 +207,7 @@ soak:
 metrics:
 	$(PYTHON) -m poc.scripts.metrics $(ARGS)
 
-check: lint type test verify-per-file-coverage verify-traceability verify-dockerfile-health-copy verify-dockerfile-sources verify-pinned-versions verify-memory-drift verify-compose-env-propagation verify-docs-drift verify-evidence-pointers verify-variables verify-install-doc verify-version-sync verify-changelog verify-feature-complete smoke
+check: lint type test verify-per-file-coverage verify-traceability verify-dockerfile-health-copy verify-dockerfile-sources verify-pinned-versions verify-base-images verify-memory-drift verify-compose-env-propagation verify-docs-drift verify-evidence-pointers verify-variables verify-install-doc verify-version-sync verify-changelog verify-feature-complete smoke
 	@echo ""
 	@echo "✓ Fast tier (make check) passed"
 
@@ -317,7 +326,7 @@ test-cold-start:
 	@echo "==> BC-082: starting isolated cold-start compose stack (project: beaconry-cold-start)"
 	cd poc && docker compose -p beaconry-cold-start -f docker-compose.cold-start.yml up -d --build
 	@echo "==> running cold-start test"
-	$(PYTHON) -m pytest -m cold_start poc/tests/integration/test_BC_082_cold_start.py -v --no-cov; EXIT=$$?; \
+	$(PYTHON) -m pytest -m cold_start poc/tests/integration/ -v --no-cov; EXIT=$$?; \
 	 echo "==> tearing down cold-start stack"; \
 	 cd poc && docker compose -p beaconry-cold-start -f docker-compose.cold-start.yml down -v; \
 	 cd .. && $(MAKE) --no-print-directory cleanup; \

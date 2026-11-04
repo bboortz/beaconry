@@ -36,18 +36,23 @@ def test_dockerfiles_are_multi_stage() -> None:
 def test_hub_dockerfile_uses_distroless_runtime() -> None:
     """CAP-T161: hub runtime stage is gcr.io/distroless/python3-debian12:nonroot."""
     content = HUB_DOCKERFILE.read_text()
-    # BC-082 bumped debian12 → debian13 for newer libc/libssl/libexpat;
-    # accept either in the migration window.
-    assert re.search(r"gcr\.io/distroless/python3-debian1[23]:nonroot", content), (
-        "hub Dockerfile runtime stage must use distroless python3-debian{12,13}:nonroot"
+    # BC-082 bumped debian12 → debian13; BC-083 migrated to the self-owned
+    # forge image. Accept any of the three during the soft-migration window
+    # (verify_pinned_versions has the authoritative acceptance regex).
+    accepted = r"(gcr\.io/distroless/python3-debian1[23]:nonroot|ghcr\.io/bboortz/python-scratch-trixie:3\.13)"
+    assert re.search(accepted, content), (
+        "hub Dockerfile runtime stage must use an accepted base image "
+        "(forge primary; distroless fallback during migration)"
     )
 
 
 def test_scout_dockerfile_uses_distroless_runtime() -> None:
-    """CAP-T161: same for scout."""
+    """CAP-T161 (BC-083 broadened): accepted runtime is forge OR distroless."""
     content = SCOUT_DOCKERFILE.read_text()
-    assert re.search(r"gcr\.io/distroless/python3-debian1[23]:nonroot", content), (
-        "scout Dockerfile runtime stage must use distroless python3-debian{12,13}:nonroot"
+    accepted = r"(gcr\.io/distroless/python3-debian1[23]:nonroot|ghcr\.io/bboortz/python-scratch-trixie:3\.13)"
+    assert re.search(accepted, content), (
+        "scout Dockerfile runtime stage must use an accepted base image "
+        "(forge primary; distroless fallback during migration)"
     )
 
 
