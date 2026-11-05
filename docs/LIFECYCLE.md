@@ -1,6 +1,7 @@
 # Finding lifecycle — authoritative reference
 
-*Last updated: 2026-11-05 (BC-088). Single source of truth for how a
+*Last updated: 2026-11-05 (BC-088 initial; BC-089 added snooze expiry
+paths). Single source of truth for how a
 CVE becomes a finding, is dispatched to the operator, resolved (or
 auto-closed, or regressed), and tracked thereafter.*
 
@@ -36,12 +37,19 @@ constraint).
                      new   │          │
                  ────────▶ │  OPEN    │ ◀────────────┐
                  notify()  │          │              │  snooze_until expired
-                           └─────┬────┘              │  (⚠️ NOT IMPLEMENTED
-                                 │                   │   — see §13 bug 1)
+                           └─────┬────┘              │  (BC-089, via periodic
+                                 │                   │   snooze_expiry_sweep —
+                                 │                   │   fires notify_snooze_
+                                 │                   │   expired unless
+                                 │                   │   BEACONRY_SNOOZE_NOTIFY_
+                                 │                   │   ON_EXPIRE=0)
                        buttons   ├───────────┬───────┤
                                  │           │       │
-          [🔧 Fix now]           │  [⏰4h]   │  [✅] │
-                                 │           │       │
+          [🔧 Fix now]           │ [⏰Nh] ×k │  [✅] │
+                                 │ (k=len(   │       │
+                                 │  SNOOZE_  │       │
+                                 │  DEFAULT_ │       │
+                                 │  HOURS))  │       │
                                  │           │       │   absent N scans
                                  │           │       │  (BC-086,
                                  │           │       │   THRESHOLD=3)
@@ -107,7 +115,7 @@ constraint).
 | Status | Set by | Next transitions | Notification shape |
 |---|---|---|---|
 | `open` | `save_finding` on new ingest | fixed \| snoozed \| accepted \| auto_fixed | first-fire via `notify()` |
-| `snoozed` | `_handle_snooze` button | (should be → open after 4h; bug §13) | silent |
+| `snoozed` | `_handle_snooze` button | **open** via `snooze_expiry_sweep` at `snooze_until_ts` (BC-089) \| auto_fixed (if target disappears for `AUTO_FIX_THRESHOLD` scans) | silent at snooze; `⏰ Snooze expired` at auto-re-open (unless `BEACONRY_SNOOZE_NOTIFY_ON_EXPIRE=0`) |
 | `accepted` | `_handle_ack` button | auto_fixed (if disappears) \| regressed-from-auto-fix (if reappears via auto_fixed path) | silent |
 | `fixed` | `_handle_fix` button | fixed_verified \| verification_failed \| regressed | silent after dispatch |
 | `fixed_verified` | verify after fix | regressed (if CVE reappears) | silent |
@@ -164,8 +172,9 @@ concerns). It generates SBOMs via syft and posts; it never executes.
 
 ## 3. Timestamps on the finding row
 
-The `findings` table carries six time-column columns that drive display
-and state. Each is an INTEGER unix timestamp; 0 means "unknown".
+The `findings` table carries seven time-column columns that drive display
+and state. Each is an INTEGER unix timestamp; 0 means "unknown" (or
+"no expiry" for `snooze_until_ts`).
 
 | Column | Set when | Consumed by |
 |---|---|---|
@@ -175,6 +184,7 @@ and state. Each is an INTEGER unix timestamp; 0 means "unknown".
 | `last_fixed_ts` | `_handle_fix` succeeds + `_handle_verify` succeeds | Regression body "fixed Xd ago, now back" |
 | `auto_fixed_ts` | BC-086 counter close (`reconcile_scan` flip to `auto_fixed`) | Auto-fix regression body "auto-fixed Xd ago, now back" |
 | `absent_count` | Per reconcile cycle where `in_scan=False` | BC-086 auto-fix threshold (`BEACONRY_AUTO_FIX_THRESHOLD=3`) |
+| `snooze_until_ts` | `_handle_snooze` tap: `now + hours*3600` (BC-089). Cleared to 0 when sweep flips back to `open`, or if operator manually re-opens. | BC-089 `snooze_expiry_sweep` SQL filter `WHERE snooze_until_ts > 0 AND snooze_until_ts <= now`. `0` means "no expiry" — preserves pre-BC-089 legacy snoozes. |
 
 The `bump_last_seen` call **also resets `absent_count=0`** for findings
 present in the scan — see `hub.py:662`. This is why a finding that
@@ -185,15 +195,16 @@ auto-closes: the counter resets each time it's seen.
 
 ## 4. Outbound notifications
 
-Four production functions in `hub.py`, each wrapped by
+Five production functions in `hub.py`, each wrapped by
 `_dispatch_*` → `notifiers.notify_*` → adapter `send_*`:
 
 | Trigger | Function | Body shape | Keyboard |
 |---|---|---|---|
-| First ingest of a new finding | `notify()` (hub.py:1595) | Severity emoji + CVSS + host + target + package → fixed-version + description + fix cmd + "Last seen: just now" | [🔧 Fix now] [⏰ Snooze 4h] [✅ Accept risk] |
-| Stale open finding past heartbeat window | `notify_heartbeat()` (hub.py:1609) | Same body + "📌 open since Xd" + "Last seen: X ago" | Same three |
-| Previously-fixed finding reappears (BC-031) | `notify_regression()` (hub.py:1544) | 🔥 FIX REGRESSED header + "last fixed Xd ago" + "Last seen: X ago" | [🔧 Fix now] [✅ Accept risk] (no snooze for regressions) |
-| auto_fixed finding reappears (BC-086) | `notify_auto_fix_regression()` (hub.py:1567) | 🔥 AUTO-FIX REGRESSED header + "auto-fixed Xd ago, now back" + "Last seen: X ago" | Same as regression |
+| First ingest of a new finding | `notify()` | Severity emoji + CVSS + host + target + package → fixed-version + description + fix cmd + "Last seen: just now" | [🔧 Fix now] + [⏰ Nh] × k + [✅ Accept risk] (BC-089: k = len(`SNOOZE_DEFAULT_HOURS`)) |
+| Stale open finding past heartbeat window | `notify_heartbeat()` | Same body + "📌 open since Xd" + "Last seen: X ago" | Same shape as first-fire |
+| Previously-fixed finding reappears (BC-031) | `notify_regression()` | 🔥 FIX REGRESSED header + "last fixed Xd ago" + "Last seen: X ago" | [🔧 Fix now] [✅ Accept risk] (no snooze for regressions) |
+| auto_fixed finding reappears (BC-086) | `notify_auto_fix_regression()` | 🔥 AUTO-FIX REGRESSED header + "auto-fixed Xd ago, now back" + "Last seen: X ago" | Same as regression |
+| Snoozed finding's expiry hits (BC-089) | `notify_snooze_expired()` | ⏰ SNOOZE EXPIRED header + "back on your radar" + severity + target + package + description | [🔧 Fix now] + [⏰ Nh] × k + [✅ Accept risk] (fresh first-fire shape) |
 | Suppressed findings this run | `notify_digest()` | Per-host batch: "📋 N finding(s) suppressed" + table of (CVE / source_ref) | none |
 
 **Last-seen line (BC-087, CAP-T180)** — every notification body now
@@ -224,7 +235,7 @@ Dispatch at hub.py:1626 (`on_button_click` → regex match →
 | Button | callback_data | Handler | What it does |
 |---|---|---|---|
 | **🔧 Fix now** | `fix:<fid>` | `_handle_fix` (hub.py:1635) | `edit_message_text("⏳ Working…")` → execute EXECUTOR adapter → `edit_message_text("✅ Fix dispatched · reverify at next scan")`. Status → `fixed`. Audit: `finding_fixed`. Keyboard removed by the edit. |
-| **⏰ Snooze 4h** | `snooze:<fid>:4` | `_handle_snooze` (hub.py:1759) | Status → `snoozed`, keyboard removed, audit `finding_snoozed`. **⚠️ Does NOT re-open after 4h** — the `4` is parsed and printed in the reply but never stored. See §13 bug #1. |
+| **⏰ Nh × k** (BC-089) | `snooze:<fid>:<hours>` | `_handle_snooze` | Status → `snoozed`, `snooze_until_ts = now + hours*3600`, audit `finding_snoozed`. Reply names the exact expiry time. Keyboard removed. The `k` buttons come from `BEACONRY_SNOOZE_DEFAULT_HOURS` (default `1,4,24,168` → `1h/4h/1d/1w`). Expiry is honoured by `snooze_expiry_sweep` (see §4 — `notify_snooze_expired`). Legacy pre-BC-089 snoozes (`snooze_until_ts=0`) stay indefinite. |
 | **✅ Accept risk** | `ack:<fid>` | `_handle_ack` | Status → `accepted`, audit `finding_accepted`. Finding stays in DB; reconcile tracks presence; no more alerts. |
 | (regression only) **Verify** | `verify:<fid>` | `_handle_verify` (hub.py:1810) | Forced re-scan of the target; clean → `fixed_verified`, still present → `verification_failed`. |
 
@@ -324,6 +335,17 @@ WHERE host = ? AND status IN
     stay operator-owned)
   - everything else → counter reset via `bump_last_seen`
 
+**Separate path for snoozed → open (BC-089):** the `snooze_expiry_
+sweep` task (independent of reconcile, runs every
+`BEACONRY_SNOOZE_SWEEP_INTERVAL_S`) does `SELECT ... WHERE
+status='snoozed' AND snooze_until_ts > 0 AND snooze_until_ts <= now`,
+flips to `open`, clears `snooze_until_ts`. This is the "snoozed → open
+after Nh" path — reconcile does not handle it. Reconcile's
+`snoozed + absent → auto_fixed` path still fires too; the two
+mechanisms can race on a snooze whose target disappears during the
+snooze window (whichever runs first wins; both are audited
+distinctly).
+
 **Reconcile fires on every POST /scan**, even if `scanned_ids` is empty
 — `bump_last_seen` short-circuits (hub.py:671) but `reconcile_scan`
 does NOT. An empty scan from a scout (e.g. scout crash mid-collect)
@@ -359,6 +381,9 @@ returns three empty lists immediately.
 | `SCAN_INTERVAL` | **300 s (5 min)** | scout re-scans inventory + POSTs to hub |
 | `SCOUT_HEARTBEAT_INTERVAL_S` | **60 s (1 min)** | scout keepalive → hub fleet view (BC-063) |
 | `BEACONRY_AUTO_FIX_THRESHOLD` | **3 scans** (~15 min at default SCAN_INTERVAL) | consecutive absent before `open/snoozed/accepted/regressed → auto_fixed` |
+| `BEACONRY_SNOOZE_SWEEP_INTERVAL_S` | **60 s (1 min)**, clamped ≥5 | BC-089 snooze-expiry sweep cadence; drift ceiling ≈ this value |
+| `BEACONRY_SNOOZE_DEFAULT_HOURS` | **`1,4,24,168`** | BC-089 — hours offered as `[⏰ Nh]` inline keyboard buttons; parsed list |
+| `BEACONRY_SNOOZE_NOTIFY_ON_EXPIRE` | **1** | BC-089 — `0` makes expiry re-open silent (audit still fires) |
 | `BEACONRY_HEARTBEAT_SWEEP_INTERVAL_S` | **3600 s (1 h)** | how often hub walks the DB looking for stale open findings (BC-035) |
 | `BEACONRY_HEARTBEAT_INTERVAL_S` | **604800 s (7 d)** | per-finding cooldown — same finding won't ping twice within this window |
 | `BEACONRY_HEARTBEAT_LIVENESS_WINDOW_S` | **604800 s (7 d)** | findings whose `last_seen_ts` is older than this don't get heartbeats (the target is gone) |
@@ -384,12 +409,13 @@ Written to `/data/audit.log` as JSONL. Readable via `make audit
 | Event | Fired when |
 |---|---|
 | `finding_ingested` | New row created (not re-ingest) |
-| `notify_sent` | Any `notify*()` dispatched (kind=`finding` \| `regression` \| `heartbeat` \| `auto_fix_regression` \| `digest`) |
+| `notify_sent` | Any `notify*()` dispatched (kind=`finding` \| `regression` \| `heartbeat` \| `auto_fix_regression` \| `snooze_expired` \| `digest`) |
 | `notify_sent_failed` | A notification adapter raised; one failure doesn't block siblings (BC-035) |
 | `finding_fixed` | `_handle_fix` succeeded (executor ran) |
 | `finding_fixed_verified` | Re-scan confirmed the fix |
 | `verification_failed` | Health waterfall or re-scan still shows CVE |
-| `finding_snoozed` | [⏰ Snooze 4h] (stays snoozed indefinitely — §13 bug 1) |
+| `finding_snoozed` | Any `[⏰ Nh]` button; `snooze_until_ts = now + hours*3600` (BC-089) |
+| `snooze_expired` | BC-089: sweep flipped `snoozed → open` at expiry |
 | `finding_accepted` | [✅ Accept risk] |
 | `finding_auto_fixed` | BC-086: counter hit threshold (silent — no Telegram) |
 | `regressed` | BC-031: `fixed`/`fixed_verified` finding reappeared |
@@ -414,10 +440,13 @@ Within the ingest/sweep loop (per scan, per host):
   5. new finding ingested     → notify()                    ← first fire
   6. still open past
      HEARTBEAT_INTERVAL        → notify_heartbeat() at sweep
-  7. over per-run cap          → digest at BC-036 interval or
+  7. snoozed + snooze_until   → snooze_expiry_sweep flips → open +
+     past                        notify_snooze_expired (BC-089)
+  8. over per-run cap          → digest at BC-036 interval or
                                  BC-065 content-change bypass
-  8. snoozed | accepted |
-     fixed_verified | fixed    → no action (unless reconcile flips them)
+  9. snoozed (not yet expired) → no action
+  10. accepted | fixed_verified| no action (unless reconcile flips them)
+      | fixed
 ```
 
 ---
@@ -427,13 +456,17 @@ Within the ingest/sweep loop (per scan, per host):
 Questions that can't be answered from code + design-decisions.md alone.
 Candidates for a future BC to resolve.
 
-1. **Snoozed findings and reconcile**: a `snoozed` finding whose target
-   disappears will tick `absent_count` and auto-close to `auto_fixed`.
-   Is this intended? The operator snoozed knowing the CVE exists; silent
-   auto-close changes their mental model ("I snoozed it, now it's
-   silently gone"). No explicit doc of this interaction. (Grep:
-   hub.py:779 — `('open', 'regressed', 'snoozed', 'accepted')` in the
-   reconcile branch.)
+1. **Snoozed findings and reconcile vs BC-089 sweep race**: a `snoozed`
+   finding whose target disappears during the snooze window has two
+   paths back out: (a) BC-089 `snooze_expiry_sweep` flips it to `open`
+   at `snooze_until_ts`, or (b) BC-086 reconcile ticks `absent_count`
+   and silently flips to `auto_fixed` at threshold. Whichever runs
+   first wins; both are audited distinctly. Unclear whether this race
+   is intended or should have a tiebreak (e.g. "if target absent at
+   expiry, prefer silent auto_fixed"). Today the operator sees whichever
+   event fired — behaviour is well-defined per-run but not deterministic
+   across instances. Code pointer: `hub.py:snooze_expiry_sweep` vs
+   `hub.py:reconcile_scan` both run on separate async loops.
 
 2. **Idempotency of button taps**: operator double-taps [🔧 Fix now].
    The handler edits the message, but the DB UPDATE and audit event
@@ -605,8 +638,10 @@ has no code backing. Each is a future BC candidate.
    Separation of concerns. None exist. Operators on Ansible-managed
    fleets must fall back to ManualAdapter.
 
-7. **Snoozed → open on expiry** (see §13 bug 1 — formalised as
-   missing feature here): the whole snooze-with-timer mechanism.
+7. ~~Snoozed → open on expiry~~ — **Shipped in BC-089** (CAP-T183).
+   `snooze_until_ts` column + `snooze_expiry_sweep` + distinct
+   `notify_snooze_expired` body. Multi-button keyboard via
+   `BEACONRY_SNOOZE_DEFAULT_HOURS` (CAP-T184).
 
 ---
 
@@ -615,20 +650,17 @@ has no code backing. Each is a future BC candidate.
 Reproducible defects with operator-visible effect. Code-grep or
 monitor-verified.
 
-1. **Snooze 4h button doesn't actually snooze for 4h.** Label says
-   "Snooze 4h"; reality is "snooze indefinitely". `_handle_snooze`
-   parses the `hours` arg from callback_data and prints it in the
-   operator-facing reply ("Snoozed 4h — CVE-…"), but never stores it.
-   No `snooze_until_ts` column; no sweep moves `snoozed → open`.
-   Current escape routes: (a) manual `make set-status`, (b) BC-086
-   auto-close when target disappears for N scans (goes to `auto_fixed`,
-   not `open`).
-   Logged in `docs/plan/IDEAS.md`. See §16.7.
+1. ~~Snooze 4h button doesn't actually snooze for 4h~~ — **Fixed in
+   BC-089** (CAP-T183). `snooze_until_ts` column stores the expiry;
+   `snooze_expiry_sweep` re-opens at that time and fires
+   `notify_snooze_expired` (unless `BEACONRY_SNOOZE_NOTIFY_ON_EXPIRE=0`).
+   Pre-BC-089 snoozes (`snooze_until_ts=0`) stay indefinite —
+   legacy state preserved.
 
 2. **Auto-fix regression body renders as BC-031 regression body on
    Telegram** — §15.1 above. Code-grep confirmed. The distinct
    "🔥 AUTO-FIX REGRESSED" body is dead code on the real Telegram
-   path.
+   path. Tracked for BC-090.
 
 3. **KEV refresh hourly 403 on hetzner-staging**: CISA KEV endpoint
    returns 403 Forbidden on every hourly refresh attempt from the
@@ -637,8 +669,8 @@ monitor-verified.
    Cache fallback works short-term, but if CISA stays locked out
    past the cache TTL, Tier 0 KEV classification degrades to
    CVSS-only. Suspected cause: CISA started enforcing a User-Agent;
-   fix is `User-Agent: beaconry/0.12.0 (+repo)` on the GET in
-   `poc/hub/kev.py`. No BC opened yet; candidate for BC-089 or 090.
+   fix is `User-Agent: beaconry/<version> (+repo)` on the GET in
+   `poc/hub/kev.py`. Tracked for BC-091.
 
 4. **BC-086's initial-scan counter stall** (BC-086 ship-verification
    anomaly): 11 findings observed stuck at `absent_count=2` after 3
