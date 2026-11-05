@@ -1720,6 +1720,15 @@ Enforcement: `poc/scripts/verify_traceability.py` runs as part of `make check`. 
 - **verified by:**
   - `poc/tests/integration/test_BC_087_last_seen_and_log_level.py`
 
+### CAP-T182: `docs/LIFECYCLE.md` — single source of truth for finding lifecycle
+- **type:** technical
+- **status:** active
+- **origin:** BC-088 — the finding lifecycle (states, transitions, timers, notifications, buttons) was fully implemented but scattered across `memory/design-decisions.md`, fifteen plan docs, and `poc/hub/hub.py`. Onboarding required an afternoon per fresh question; the authoring exercise also surfaced the auto-fix-regression body wire-up bug (hub.py:1589) that nobody had noticed because nobody had read the lifecycle top-to-bottom.
+- **description:** `docs/LIFECYCLE.md` is the authoritative reference. Twelve descriptive sections (state diagram, ingest path, row timestamps, notifications, buttons+handlers, fix pipeline, health waterfall, reconcile scope, isolation, timers, audit events, precedence) plus five known-flaw inventories (Unclearities, Necessary improvements, Contradictions/inconsistencies, Missing implementation, Known bugs). Each flaw entry carries a code-grep pointer or a `memory/design-decisions.md` pointer. Soft convention: future BCs that materially change a state transition, timer, or notification path update LIFECYCLE.md as part of Definition of Done (honour system; no `verify-lifecycle-drift` lint today).
+- **supports:** CAP-B023
+- **verified by:**
+  - `poc/tests/unit/test_lifecycle_doc.py`
+
 ### CAP-T181: `BEACONRY_LOG_LEVEL` env controls hub + scout root log level
 - **type:** technical
 - **status:** active
