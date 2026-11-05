@@ -1783,6 +1783,33 @@ Enforcement: `poc/scripts/verify_traceability.py` runs as part of `make check`. 
 - **verified by:**
   - `poc/tests/integration/test_BC_092_canary_ring.py`
 
+### CAP-T191: Daily full rescan at configured wall-clock hour
+- **type:** technical
+- **status:** active
+- **origin:** BC-093 — `memory/design-decisions.md § Inventory cadence` promised a daily 02:00 host-local rescan; pre-BC-093 scout only ran `SCAN_INTERVAL` cadence. Operators with long intervals missed slow drift between ticks.
+- **description:** New `_daily_rescan_loop_forever` async task started in scout lifespan. `_seconds_until_next_daily_tick` computes next target wall-clock (today or tomorrow depending on current time) and sleeps. On fire, calls `_run_scan_once(reason="scheduled_daily")`. Env `BEACONRY_DAILY_RESCAN_HOUR` (0-23, default `2`; `-1` disables) controls the hour. Invalid values clamp to `2` with warning. Loop runs independently of `_scan_loop_forever`; shares the scan mutex so concurrent fires never collide.
+- **supports:** CAP-B023
+- **verified by:**
+  - `poc/tests/integration/test_BC_093_rescan_hooks.py`
+
+### CAP-T192: Docker events listener triggers debounced scans
+- **type:** technical
+- **status:** active
+- **origin:** BC-093 — `docker pull nginx:1.27` sat invisible for up to SCAN_INTERVAL seconds pre-BC-093. Operators with heavy container churn (compose up/down cycles) felt the lag.
+- **description:** `_docker_events_loop_forever` subscribes to `docker.events(filters={"type": ["image","container"], "event": ["pull","create","start"]})` via a blocking iterator running in a worker thread. Every event schedules a trailing scan `DOCKER_EVENTS_DEBOUNCE_S` later (default 10s), cancelling any earlier pending schedule — so a compose up pulling 5 images coalesces into ONE scan 10s after the last pull, not 5 back-to-back. `BEACONRY_DOCKER_EVENTS_ENABLED=0` disables the listener. `BEACONRY_DOCKER_EVENTS_DEBOUNCE_S` tunes the window.
+- **supports:** CAP-B023
+- **verified by:**
+  - `poc/tests/integration/test_BC_093_rescan_hooks.py`
+
+### CAP-T193: Pacman post-transaction hook template
+- **type:** technical
+- **status:** active
+- **origin:** BC-093 — `pacman -S openssl` delayed detection by up to SCAN_INTERVAL. Arch operators (dev workstations, some servers) benefit from immediate rescan after every package transaction.
+- **description:** `poc/hooks/beaconry-pacman.hook` — alpm hook template. Operator installs to `/etc/pacman.d/hooks/` manually (needs root; system-specific placement). Hook runs post-transaction on every install/upgrade/remove, POSTs to `scout:/scan/trigger`. Failure (scout down, curl timeout) is silently swallowed so pacman transactions are not blocked. `poc/hooks/README.md` documents installation + security notes (scout should stay bound to 127.0.0.1 since `/scan/trigger` is unauthenticated).
+- **supports:** CAP-B023
+- **verified by:**
+  - `poc/tests/integration/test_BC_093_rescan_hooks.py`
+
 ### CAP-T190: `make status` fleet view shows role column
 - **type:** technical
 - **status:** active
