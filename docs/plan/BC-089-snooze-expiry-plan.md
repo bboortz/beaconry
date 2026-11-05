@@ -195,7 +195,7 @@ No surprise for legacy state (§2 above).
 | Scenario 5 — multi-button keyboard | integration | `test_BC_089_snooze_expiry.py::test_keyboard_renders_env_hours_default` | ✓ |
 | Scenario 6 — opt-out of expiry notify | integration | `test_BC_089_snooze_expiry.py::test_opt_out_notify_on_expire` | ✓ |
 | Schema v5 → v6 migration | integration | `test_BC_089_snooze_expiry.py::test_schema_migration_adds_column` | ✓ |
-| Schema PRAGMA user_version == 6 | integration | `test_BC_089_snooze_expiry.py::test_schema_version_is_6` | ✓ |
+| Schema PRAGMA user_version ≥ 6 (BC-089 floor; later BCs bump further) | integration | `test_BC_089_snooze_expiry.py::test_schema_version_at_least_6` | ✓ |
 | `_parse_snooze_hours` dedupes + rejects garbage | integration | `test_BC_089_snooze_expiry.py::test_parse_snooze_hours[-expected0]` | ✓ |
 | Keyboard renders default 1,4,24,168 → 1h/4h/1d/1w | integration | `test_BC_089_snooze_expiry.py::test_keyboard_renders_env_hours_default` | ✓ |
 | Keyboard renders custom env hours | integration | `test_BC_089_snooze_expiry.py::test_keyboard_renders_env_hours_custom[4-expected_labels0]` | ✓ |

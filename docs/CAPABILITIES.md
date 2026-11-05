@@ -1765,6 +1765,33 @@ Enforcement: `poc/scripts/verify_traceability.py` runs as part of `make check`. 
 - **verified by:**
   - `poc/tests/integration/test_BC_090_auto_fix_regression_body.py`
 
+### CAP-T188: Scout advertises `SCOUT_HOST_ROLE` on heartbeat + /scan
+- **type:** technical
+- **status:** active
+- **origin:** BC-092 — `memory/design-decisions.md § Multi-host canary ring` described a 3-ring canary (workstation → staging → production) but had zero code backing. First step is a host's own self-declaration of its ring position so the hub can reason about it.
+- **description:** `poc/scout/scout.py` reads `SCOUT_HOST_ROLE` env at boot. Valid values: `workstation | staging | production` (set normalised + validated; invalid input clamps to `workstation` with a `log.warning`). Scout includes `role` in every `/scan` + `/heartbeat` payload. Hub's `record_scout_post` extracts, re-normalises (defence-in-depth), and persists via schema v6→v7 (`ALTER TABLE scouts ADD COLUMN role TEXT NOT NULL DEFAULT 'workstation'`). Legacy scouts that don't send the field get `workstation` on first POST (DB default on INSERT, excluded.role on UPDATE which defaults to workstation too).
+- **supports:** CAP-T189, CAP-B023
+- **verified by:**
+  - `poc/tests/integration/test_BC_092_canary_ring.py`
+
+### CAP-T189: Hub canary-ring gate on production fixes
+- **type:** technical
+- **status:** active
+- **origin:** BC-092 — operators without a gate can accidentally ship a broken fix to production. BC-092 forces the canary ordering per design-decisions.md.
+- **description:** `_handle_fix` runs the gate before executor dispatch: looks up the host's role (`_get_host_role`), and for `role=production` checks whether any `role=staging` scout has the same CVE in `fixed_verified`. Match → `canary_gate_passed` audit + proceed. No match → `canary_gate_blocked` audit + Telegram reply naming the available staging hosts (or configuration hint if none exist) + return without dispatching. `BEACONRY_CANARY_RING_ENABLED=0` disables the gate globally; `BEACONRY_CANARY_PRODUCTION_FORCE_ALLOW=1` bypasses for one tap and emits a distinct `canary_gate_force_allowed` audit event. All three outcomes are observable post-hoc via `make audit`.
+- **supports:** CAP-T188, CAP-B023
+- **verified by:**
+  - `poc/tests/integration/test_BC_092_canary_ring.py`
+
+### CAP-T190: `make status` fleet view shows role column
+- **type:** technical
+- **status:** active
+- **origin:** BC-092 — operators need an at-a-glance view of each host's canary position so they can spot "no staging flagged" or "two production hosts" at a glance.
+- **description:** `/fleet` endpoint joins `scouts.role` into each row. `poc/scripts/status.py` adds a `ROLE` column (rendered only when at least one scout is non-`workstation` — keeps single-host operators' output clean). Glyphs: `W/S/P` for workstation/staging/production; falls back to raw string for unknown values (future ring additions).
+- **supports:** CAP-T188
+- **verified by:**
+  - `poc/tests/integration/test_BC_092_canary_ring.py`
+
 ### CAP-T187: KEV fetch User-Agent is identifiable and operator-overridable
 - **type:** technical
 - **status:** active

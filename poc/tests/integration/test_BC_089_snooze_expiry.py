@@ -105,11 +105,13 @@ def test_schema_migration_adds_column(db_env: Path) -> None:
     assert "snooze_until_ts" in cols
 
 
-def test_schema_version_is_6(db_env: Path) -> None:
+def test_schema_version_at_least_6(db_env: Path) -> None:
+    """BC-089 bumped to v6; later BCs (BC-092 → v7) bumped further.
+    Assert at-least-6 so this test tolerates future migrations."""
     con = sqlite3.connect(db_env / "beaconry.db")
     v = con.execute("PRAGMA user_version").fetchone()[0]
     con.close()
-    assert v == 6
+    assert v >= 6
 
 
 # ── _parse_snooze_hours ──────────────────────────────────────────────────────
