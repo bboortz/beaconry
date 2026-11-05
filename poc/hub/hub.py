@@ -161,6 +161,32 @@ SNOOZE_NOTIFY_ON_EXPIRE = os.environ.get("BEACONRY_SNOOZE_NOTIFY_ON_EXPIRE", "1"
 AUTO_FIX_REGRESSION_NOTIFY_ENABLED = (
     os.environ.get("BEACONRY_AUTO_FIX_REGRESSION_NOTIFY_ENABLED", "1") != "0"
 )
+# BC-092: canary ring gate. Default ON (gate enforced) — production fixes
+# require a staging-verified precedent for the same CVE. Operator opt-out:
+# BEACONRY_CANARY_RING_ENABLED=0 disables the gate globally; operators with
+# no staging host must either opt out or explicitly flag at least one host
+# as staging.
+CANARY_RING_ENABLED = os.environ.get("BEACONRY_CANARY_RING_ENABLED", "1") != "0"
+# Emergency escape: force-allow a single production fix (audited distinctly).
+# Operator sets to 1 before tapping, resets to 0 after. Not a long-standing
+# posture — audit log records every force-allowed fix with its CVE + host.
+CANARY_PRODUCTION_FORCE_ALLOW = os.environ.get("BEACONRY_CANARY_PRODUCTION_FORCE_ALLOW", "0") == "1"
+# BC-092: valid host roles for canary ordering.
+VALID_HOST_ROLES = frozenset({"workstation", "staging", "production"})
+
+
+def _normalize_role(raw: str | None) -> str:
+    """BC-092: clamp a scout-provided role to the valid set. Invalid /
+    missing → 'workstation'. Keeps production-level gating conservative —
+    a misconfigured scout defaults to the least-privileged ring."""
+    if not raw:
+        return "workstation"
+    cleaned = raw.strip().lower()
+    if cleaned not in VALID_HOST_ROLES:
+        return "workstation"
+    return cleaned
+
+
 # BC-030: internet_facing detection. Default ON because the whole point of
 # BC-030 is making Tier 1 reachable. Set to 0 to force the pre-BC-030 behavior
 # of treating every finding as not internet-facing (Tier 1 unreachable).
@@ -285,7 +311,7 @@ except ImportError:
 
 HUB_VERSION = SOFTWARE_VERSION  # back-compat alias
 API_VERSION = 1
-EXPECTED_SCHEMA_VERSION = 6
+EXPECTED_SCHEMA_VERSION = 7
 STRICT_API = os.environ.get("BEACONRY_STRICT_API") == "1"
 
 
@@ -323,7 +349,7 @@ def _fleet_status(last_posted_ts: int, now: int) -> str:
     return "dead"
 
 
-def record_scout_post(
+def record_scout_post(  # noqa: PLR0913 — BC-092 added role; grew over time with lifecycle
     host: str,
     *,
     now: int,
@@ -332,6 +358,7 @@ def record_scout_post(
     api_version: int | None = None,
     health: str | None = None,
     bump_scan_ts: bool = True,
+    role: str | None = None,
 ) -> None:
     """BC-061/BC-063: upsert a scouts-registry row on every scout POST.
 
@@ -342,11 +369,19 @@ def record_scout_post(
     FLEET view reflects the current scout, not whatever it was when
     it first registered. `bump_scan_ts=False` (heartbeat POSTs) keeps
     `last_scan_ts` untouched so FLEET's LAST SCAN column reflects
-    actual scan activity — not the last keepalive. Tolerant of
-    pre-BC-061 DBs (no scouts table yet) so test fixtures that skip
-    init_db don't break.
+    actual scan activity — not the last keepalive.
+
+    BC-092: `role` (workstation|staging|production) is read from the
+    scout's heartbeat / scan payload. Missing / invalid values clamp
+    to `workstation`. The INSERT path writes the role explicitly;
+    the ON CONFLICT UPDATE path writes it too so a scout that changes
+    its role via env + restart propagates on the next POST.
+
+    Tolerant of pre-BC-061 DBs (no scouts table yet) so test fixtures
+    that skip init_db don't break.
     """
     scan_ts = now if bump_scan_ts else None
+    effective_role = _normalize_role(role)
     con = sqlite3.connect(DB_PATH)
     try:
         with contextlib.suppress(sqlite3.OperationalError):
@@ -354,29 +389,41 @@ def record_scout_post(
                 con.execute(
                     "INSERT INTO scouts (host, first_seen_ts, last_posted_ts, "
                     "  last_sbom_count, software_version, api_version, last_health, "
-                    "  last_scan_ts) "
-                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?) "
+                    "  last_scan_ts, role) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?) "
                     "ON CONFLICT(host) DO UPDATE SET "
                     "  last_posted_ts = excluded.last_posted_ts, "
                     "  last_sbom_count = excluded.last_sbom_count, "
                     "  software_version = excluded.software_version, "
                     "  api_version = excluded.api_version, "
                     "  last_health = excluded.last_health, "
-                    "  last_scan_ts = excluded.last_scan_ts",
-                    (host, now, now, sbom_count, software_version, api_version, health, scan_ts),
+                    "  last_scan_ts = excluded.last_scan_ts, "
+                    "  role = excluded.role",
+                    (
+                        host,
+                        now,
+                        now,
+                        sbom_count,
+                        software_version,
+                        api_version,
+                        health,
+                        scan_ts,
+                        effective_role,
+                    ),
                 )
             else:
                 # Heartbeat path: leave last_scan_ts + last_sbom_count untouched.
                 con.execute(
                     "INSERT INTO scouts (host, first_seen_ts, last_posted_ts, "
-                    "  last_sbom_count, software_version, api_version, last_health) "
-                    "VALUES (?, ?, ?, ?, ?, ?, ?) "
+                    "  last_sbom_count, software_version, api_version, last_health, role) "
+                    "VALUES (?, ?, ?, ?, ?, ?, ?, ?) "
                     "ON CONFLICT(host) DO UPDATE SET "
                     "  last_posted_ts = excluded.last_posted_ts, "
                     "  software_version = excluded.software_version, "
                     "  api_version = excluded.api_version, "
-                    "  last_health = excluded.last_health",
-                    (host, now, now, 0, software_version, api_version, health),
+                    "  last_health = excluded.last_health, "
+                    "  role = excluded.role",
+                    (host, now, now, 0, software_version, api_version, health, effective_role),
                 )
             con.commit()
     finally:
@@ -413,19 +460,23 @@ def init_db() -> None:
             software_version TEXT,
             api_version      INTEGER,
             last_health      TEXT,
-            last_scan_ts     INTEGER
+            last_scan_ts     INTEGER,
+            role             TEXT NOT NULL DEFAULT 'workstation'
         )
     """)
     # BC-063 migration v2 → v3: PRAGMA table_info drives idempotency so a
     # fresh DB (columns already present via CREATE TABLE above) and a
     # repeat migration are both no-ops. `last_scan_ts` is distinct from
     # `last_posted_ts`: heartbeat POSTs bump only the latter.
+    # BC-092 v6 → v7: `role` column for canary-ring gate; legacy rows get
+    # `workstation` default so pre-BC-092 scouts stay unaffected.
     existing_cols = {row[1] for row in con.execute("PRAGMA table_info(scouts)").fetchall()}
     for col, decl in (
         ("software_version", "TEXT"),
         ("api_version", "INTEGER"),
         ("last_health", "TEXT"),
         ("last_scan_ts", "INTEGER"),
+        ("role", "TEXT NOT NULL DEFAULT 'workstation'"),
     ):
         if col not in existing_cols:
             con.execute(f"ALTER TABLE scouts ADD COLUMN {col} {decl}")
@@ -1771,12 +1822,62 @@ def _esc(s: str) -> str:
     return html.escape(s, quote=False)
 
 
+def _get_host_role(host: str) -> str:
+    """BC-092: read `scouts.role` for a host; fall back to 'workstation' for
+    unknown hosts (scout never heartbeated — shouldn't block, operator will
+    see the issue elsewhere)."""
+    con = sqlite3.connect(DB_PATH)
+    try:
+        row = con.execute("SELECT role FROM scouts WHERE host = ?", (host,)).fetchone()
+    except sqlite3.OperationalError:
+        return "workstation"
+    finally:
+        con.close()
+    return _normalize_role(row[0] if row else None)
+
+
+def _staging_hosts_with_cve_verified(cve_id: str) -> list[str]:
+    """BC-092: find staging hosts whose same CVE is in `fixed_verified`.
+    Non-empty result means the canary gate can allow the production fix."""
+    con = sqlite3.connect(DB_PATH)
+    try:
+        rows = con.execute(
+            "SELECT DISTINCT f.host FROM findings f "
+            "JOIN scouts s ON f.host = s.host "
+            "WHERE f.cve_id = ? AND f.status = 'fixed_verified' "
+            "AND s.role = 'staging'",
+            (cve_id,),
+        ).fetchall()
+    except sqlite3.OperationalError:
+        return []
+    finally:
+        con.close()
+    return [r[0] for r in rows]
+
+
+def _staging_hosts_in_fleet() -> list[str]:
+    """BC-092: list every scout tagged `staging`. Used in the gate-block
+    reply so the operator sees which scouts they could have fixed first."""
+    con = sqlite3.connect(DB_PATH)
+    try:
+        rows = con.execute("SELECT host FROM scouts WHERE role = 'staging'").fetchall()
+    except sqlite3.OperationalError:
+        return []
+    finally:
+        con.close()
+    return [r[0] for r in rows]
+
+
 async def _handle_fix(query, finding: Finding, finding_id: str, parts: list[str]) -> None:  # noqa: ARG001
     """Fix action: dispatch to the configured executor and edit the message.
 
     BC-066: `EXECUTOR` is a single policy choice (manual|docker) picked at
     hub startup. Manual mode logs operator intent + reminds in 1h; docker
     mode re-pulls the image + verifies via next scan reconcile.
+
+    BC-092: canary-ring gate runs before dispatch. Production-role hosts
+    need a staging-verified precedent for the same CVE unless the operator
+    explicitly opts out of the gate or force-allows this fix.
     """
     if not FIX_ENABLED:
         await query.edit_message_text(
@@ -1785,6 +1886,54 @@ async def _handle_fix(query, finding: Finding, finding_id: str, parts: list[str]
             parse_mode="HTML",
         )
         return
+
+    # BC-092: canary-ring gate.
+    role = _get_host_role(finding.host)
+    if CANARY_RING_ENABLED and role == "production":
+        if CANARY_PRODUCTION_FORCE_ALLOW:
+            _audit.append(
+                "canary_gate_force_allowed",
+                finding_id=finding.id,
+                cve_id=finding.cve_id,
+                host=finding.host,
+                reason="BEACONRY_CANARY_PRODUCTION_FORCE_ALLOW=1",
+            )
+        else:
+            staging_verified = _staging_hosts_with_cve_verified(finding.cve_id)
+            if not staging_verified:
+                staging_in_fleet = _staging_hosts_in_fleet()
+                hint = (
+                    f"staging hosts: <code>{_esc(', '.join(staging_in_fleet))}</code>"
+                    if staging_in_fleet
+                    else (
+                        "no staging hosts configured — set "
+                        "<code>SCOUT_HOST_ROLE=staging</code> on at least one scout, "
+                        "or disable the gate with "
+                        "<code>BEACONRY_CANARY_RING_ENABLED=0</code>"
+                    )
+                )
+                _audit.append(
+                    "canary_gate_blocked",
+                    finding_id=finding.id,
+                    cve_id=finding.cve_id,
+                    host=finding.host,
+                    staging_hosts=staging_in_fleet,
+                )
+                await query.edit_message_text(
+                    f"🛑 <b>Canary gate blocked this fix</b>\n"
+                    f"<code>{_esc(finding.cve_id)}</code> on <code>{_esc(finding.host)}</code> "
+                    f"is production-role; no staging host has verified the same CVE yet.\n"
+                    f"Verify on {hint} first, then re-tap.",
+                    parse_mode="HTML",
+                )
+                return
+            _audit.append(
+                "canary_gate_passed",
+                finding_id=finding.id,
+                cve_id=finding.cve_id,
+                host=finding.host,
+                staging_hosts=staging_verified,
+            )
 
     # BC-066: manual executor short-circuits — audit intent, log claim_ts,
     # show operator the command, schedule reminder. No execution.
@@ -2435,6 +2584,10 @@ async def http_fleet() -> list[dict]:
                 # BC-063: four extra per-scout columns surface in /fleet.
                 # Columns 7-10 are nullable (pre-BC-063 scouts); callers
                 # treat them as optional / render "-" / "?" when missing.
+                # BC-092: also surface s.role so `make status` can render
+                # the canary ring position. Column index 11; None for pre-
+                # BC-092 scouts (SELECT returns the DB default `workstation`
+                # via ALTER TABLE in init_db).
                 rows = con.execute("""
                     SELECT s.host,
                            s.first_seen_ts,
@@ -2446,12 +2599,14 @@ async def http_fleet() -> list[dict]:
                            s.software_version,
                            s.api_version,
                            s.last_health,
-                           s.last_scan_ts
+                           s.last_scan_ts,
+                           s.role
                     FROM scouts s
                     LEFT JOIN findings f ON f.host = s.host
                     GROUP BY s.host, s.first_seen_ts, s.last_posted_ts,
                              s.last_sbom_count, s.software_version,
-                             s.api_version, s.last_health, s.last_scan_ts
+                             s.api_version, s.last_health, s.last_scan_ts,
+                             s.role
                 """).fetchall()
                 legacy = False
         finally:
@@ -2496,6 +2651,9 @@ async def http_fleet() -> list[dict]:
             "api_version": r[8],
             "last_health": r[9],
             "last_scan_ts": int(r[10]) if r[10] is not None else None,
+            # BC-092: canary ring role. Falls back to 'workstation' for pre-
+            # BC-092 scouts (the schema ALTER adds the column with that default).
+            "role": r[11] if r[11] else "workstation",
             # BC-064: honest "last contact" + stale flag so the UI can
             # drop a cached last_health label that we can't trust anymore.
             "last_heartbeat_ts": int(r[2] or 0),
@@ -3144,6 +3302,7 @@ async def receive_scan(payload: dict, request: _FastAPIRequest) -> dict:
         software_version=payload.get("software_version"),
         api_version=payload.get("api_version"),
         health=payload.get("health"),
+        role=payload.get("role"),  # BC-092
     )
     # BC-042: audit every scan reception, even if 0 candidates. Closes the
     # "did scout even post?" blind spot — a silent scout and a scout-with-0
@@ -3195,6 +3354,7 @@ async def receive_heartbeat(payload: dict, request: _FastAPIRequest) -> dict:
         api_version=payload.get("api_version"),
         health=payload.get("health"),
         bump_scan_ts=False,
+        role=payload.get("role"),  # BC-092
     )
     if request.headers.get("X-Beaconry-Metrics-Opt-In") == "1":
         _audit.append(

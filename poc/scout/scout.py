@@ -88,6 +88,21 @@ SCOUT_HEARTBEAT_INTERVAL_S = int(os.environ.get("SCOUT_HEARTBEAT_INTERVAL_S", "6
 # CVE matching, notifications, fleet view all keep working regardless.
 SCOUT_METRICS_ENABLED = os.environ.get("SCOUT_METRICS_ENABLED", "0") == "1"
 
+# BC-092: canary-ring role. Default `workstation` (least-privileged ring) —
+# a misconfigured or legacy scout stays unaffected by the hub's
+# production-fix gate. Valid values: workstation | staging | production.
+# Operator must explicitly set to flag a host for the canary ladder.
+_VALID_ROLES = frozenset({"workstation", "staging", "production"})
+_raw_role = (os.environ.get("SCOUT_HOST_ROLE") or "workstation").strip().lower()
+if _raw_role not in _VALID_ROLES:
+    log.warning(
+        "SCOUT_HOST_ROLE=%r invalid; using 'workstation' (valid: %s)",
+        _raw_role,
+        sorted(_VALID_ROLES),
+    )
+    _raw_role = "workstation"
+HOST_ROLE = _raw_role
+
 # BC-005 defaults — demo-safe allowlist, no excludes by default.
 DEFAULT_INCLUDE_GLOBS = "nginx*,redis*,postgres*"
 
@@ -448,6 +463,9 @@ def collect_and_post():  # pragma: no cover - orchestrator; integration-tested l
         "software_version": SOFTWARE_VERSION,
         "api_version": CLIENT_API_VERSION,
         "health": "ok" if _docker_socket_ok else "degraded",
+        # BC-092: canary ring role on /scan too, so hub stays in sync even
+        # if the heartbeat loop is disabled.
+        "role": HOST_ROLE,
         "sboms": sboms,
         "open_ports": open_ports,
         "container_exposure": container_exposure,
@@ -586,6 +604,10 @@ def heartbeat_once() -> bool:
             "software_version": SOFTWARE_VERSION,
             "api_version": CLIENT_API_VERSION,
             "health": "ok" if _docker_socket_ok else "degraded",
+            # BC-092: canary ring role (workstation | staging | production).
+            # Hub updates scouts.role on each heartbeat so the production fix
+            # gate sees fresh data.
+            "role": HOST_ROLE,
         }
     )
     headers = {

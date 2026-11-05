@@ -33,6 +33,9 @@ services:
       # auto-generated `beaconry/<version> (+repo)`. CISA 403'd the
       # pre-BC-091 hardcoded UA on anonymous requests.
       - BEACONRY_KEV_USER_AGENT=${BEACONRY_KEV_USER_AGENT:-}
+      # BC-092: canary-ring gate on production fixes.
+      - BEACONRY_CANARY_RING_ENABLED=${BEACONRY_CANARY_RING_ENABLED:-1}
+      - BEACONRY_CANARY_PRODUCTION_FORCE_ALLOW=${BEACONRY_CANARY_PRODUCTION_FORCE_ALLOW:-0}
       # BC-031: scan reconciliation (fix-is-not-forget). Default on; set to 0
       # to disable the long-term diff for privacy/surveillance-conscious setups.
       - BEACONRY_RECONCILE_ENABLED=${BEACONRY_RECONCILE_ENABLED:-1}
@@ -127,6 +130,9 @@ services:
       - HUB_TOKEN=${HUB_TOKEN:-${HUB_SCOUT_TOKEN:-}}
       # BC-087: shared knob with hub — same value controls scout's root logger.
       - BEACONRY_LOG_LEVEL=${BEACONRY_LOG_LEVEL:-INFO}
+      # BC-092: canary-ring role (workstation|staging|production). Scout
+      # advertises on heartbeat + /scan; hub uses it to gate production fixes.
+      - SCOUT_HOST_ROLE=${SCOUT_HOST_ROLE:-workstation}
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
       - /var/lib/pacman:/host/var/lib/pacman:ro

@@ -160,12 +160,18 @@ def format_fleet(rows: list[dict], *, hub_api: int | None = None) -> str:
     # last contact). Column is now `LAST HEARTBEAT`, backed by
     # last_heartbeat_ts (new BC-064 field) with a fallback to
     # last_posted_ts for a pre-BC-064 hub paired with a BC-064 CLI.
+    # BC-092: role column rendered iff any row carries a non-default role.
+    # Keeps `make status` clean for single-host operators who never flagged
+    # anything; shows up as soon as the first staging/production scout joins.
+    has_role = any((r.get("role") or "workstation") != "workstation" for r in rows)
     header = ["HOST", "LAST HEARTBEAT"]
     if has_bc063:
         header += ["LAST SCAN", "VERSION", "HEALTH"]
     header += ["OPEN", "TOTAL"]
     if has_status:
         header.append("STATUS")
+    if has_role:
+        header.append("ROLE")
     body: list[list[str]] = []
     for r in rows:
         heartbeat_ts = r.get("last_heartbeat_ts") or r.get("last_posted_ts") or 0
@@ -182,6 +188,11 @@ def format_fleet(rows: list[dict], *, hub_api: int | None = None) -> str:
         cells.append(str(r.get("total_findings") or 0))
         if has_status:
             cells.append(_format_fleet_status(r))
+        if has_role:
+            # Single-letter glyph: W/S/P. BC-092 defines three roles; fall
+            # back to raw string if a future ring adds a value we don't map.
+            role = (r.get("role") or "workstation").lower()
+            cells.append({"workstation": "W", "staging": "S", "production": "P"}.get(role, role))
         body.append(cells)
     all_rows = [header, *body]
     widths = [max(len(row[i]) for row in all_rows) for i in range(len(header))]
