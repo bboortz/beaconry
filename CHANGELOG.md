@@ -4,6 +4,40 @@ All notable changes to beaconry are recorded here. The format is based
 on [Keep a Changelog](https://keepachangelog.com/), and this project
 follows [Semantic Versioning](https://semver.org/).
 
+## [v0.12.0] — 2026-11-05
+
+### Fixed (BC-087)
+
+- **notify:** every Telegram alert body now carries the `Last seen: X ago`
+  line. BC-086 added the format-helper hook (`format_last_seen` +
+  `last_seen_ts` kwarg on every `format_*`) and unit-tested it in
+  isolation, but the production `notify*()` call sites never loaded
+  `last_seen_ts` from the DB → kwarg defaulted to `None` → line
+  omitted from every real alert. BC-087 adds `_load_last_seen` + wires
+  it through `hub.notify / notify_regression / notify_heartbeat /
+  notify_auto_fix_regression → _dispatch_* → adapter.send_* →
+  format_*`. Adapter base signatures gained an optional
+  `last_seen_ts` kwarg; TelegramAdapter forwards it. CAP-T180.
+
+### Added (BC-087)
+
+- **env:** `BEACONRY_LOG_LEVEL` (default `INFO`; values `DEBUG|INFO|
+  WARNING|ERROR|CRITICAL`; invalid values silently fall back to INFO
+  with a one-time warning). Applies to **both** hub and scout root
+  loggers at process boot — a single operator dial instead of two.
+  Set to `DEBUG` to re-enable BC-086's per-finding reconcile trace +
+  `bump_last_seen` diagnostic. Documented in `docs/VARIABLES.md` +
+  `poc/.env.example` + wired into `poc/docker-compose.yml`. CAP-T181.
+
+### Changed (BC-087)
+
+- **hub:** BC-086's `reconcile_scan ENTER`, per-finding `reconcile
+  fid=...`, and `bump_last_seen host=...` diagnostic lines downgraded
+  from `log.info` to `log.debug`. These were shipped at INFO in
+  v0.11.1 to prove natural counter progression; once proven, the
+  ~20-lines-per-scan-per-host noise is net-negative at INFO.
+  Operator re-enables with `BEACONRY_LOG_LEVEL=DEBUG` + rebuild.
+
 ## [v0.11.1] — 2026-11-05
 
 ### Fixed

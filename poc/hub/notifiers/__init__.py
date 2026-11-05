@@ -56,16 +56,20 @@ async def _dispatch(method_name: str, *args: object) -> None:
             log.warning("notifier '%s' failed %s: %s", adapter.name, method_name, exc)
 
 
-async def notify_finding(finding: Finding) -> None:
-    await _dispatch("send_finding", finding)
+async def notify_finding(finding: Finding, last_seen_ts: int | None = None) -> None:
+    await _dispatch("send_finding", finding, last_seen_ts)
 
 
-async def notify_regression(finding: Finding, last_fixed_ts: int) -> None:
-    await _dispatch("send_regression", finding, last_fixed_ts)
+async def notify_regression(
+    finding: Finding, last_fixed_ts: int, last_seen_ts: int | None = None
+) -> None:
+    await _dispatch("send_regression", finding, last_fixed_ts, last_seen_ts)
 
 
-async def notify_heartbeat(finding: Finding, open_since_ts: int) -> None:
-    await _dispatch("send_heartbeat", finding, open_since_ts)
+async def notify_heartbeat(
+    finding: Finding, open_since_ts: int, last_seen_ts: int | None = None
+) -> None:
+    await _dispatch("send_heartbeat", finding, open_since_ts, last_seen_ts)
 
 
 async def notify_digest(suppressed: list[Finding]) -> None:

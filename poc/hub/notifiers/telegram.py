@@ -60,18 +60,22 @@ class TelegramAdapter(NotificationAdapter):
             kwargs["reply_markup"] = reply_markup
         await tg_app.bot.send_message(**kwargs)
 
-    async def send_finding(self, finding: Finding) -> None:
-        text = self._fmt["notification"](finding)
+    async def send_finding(self, finding: Finding, last_seen_ts: int | None = None) -> None:
+        text = self._fmt["notification"](finding, last_seen_ts=last_seen_ts)
         kb = self._kb["finding"](finding)
         await self._send(text, reply_markup=kb)
 
-    async def send_regression(self, finding: Finding, last_fixed_ts: int) -> None:
-        text = self._fmt["regression"](finding, last_fixed_ts)
+    async def send_regression(
+        self, finding: Finding, last_fixed_ts: int, last_seen_ts: int | None = None
+    ) -> None:
+        text = self._fmt["regression"](finding, last_fixed_ts, last_seen_ts=last_seen_ts)
         kb = self._kb["regression"](finding)
         await self._send(text, reply_markup=kb)
 
-    async def send_heartbeat(self, finding: Finding, open_since_ts: int) -> None:
-        text = self._fmt["heartbeat"](finding, open_since_ts)
+    async def send_heartbeat(
+        self, finding: Finding, open_since_ts: int, last_seen_ts: int | None = None
+    ) -> None:
+        text = self._fmt["heartbeat"](finding, open_since_ts, last_seen_ts=last_seen_ts)
         kb = self._kb["heartbeat"](finding)
         await self._send(text, reply_markup=kb)
 

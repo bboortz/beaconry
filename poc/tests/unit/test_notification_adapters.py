@@ -25,17 +25,21 @@ class _RecordingAdapter(NotificationAdapter):
         self._raises = raises
         self.calls: list[tuple[str, tuple]] = []
 
-    async def send_finding(self, finding: Finding) -> None:
+    async def send_finding(self, finding: Finding, last_seen_ts: int | None = None) -> None:
         self.calls.append(("send_finding", (finding.id,)))
         if self._raises:
             raise RuntimeError(f"{self.name} failed intentionally")
 
-    async def send_regression(self, finding: Finding, last_fixed_ts: int) -> None:
+    async def send_regression(
+        self, finding: Finding, last_fixed_ts: int, last_seen_ts: int | None = None
+    ) -> None:
         self.calls.append(("send_regression", (finding.id, last_fixed_ts)))
         if self._raises:
             raise RuntimeError(f"{self.name} failed intentionally")
 
-    async def send_heartbeat(self, finding: Finding, open_since_ts: int) -> None:
+    async def send_heartbeat(
+        self, finding: Finding, open_since_ts: int, last_seen_ts: int | None = None
+    ) -> None:
         self.calls.append(("send_heartbeat", (finding.id, open_since_ts)))
         if self._raises:
             raise RuntimeError(f"{self.name} failed intentionally")

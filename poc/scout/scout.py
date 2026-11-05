@@ -45,11 +45,24 @@ except ImportError:
 # breaking change to the hub's /scan payload or response shape.
 CLIENT_API_VERSION = 1
 
+# BC-087: operator-controlled root log level. Shared semantics with hub.
+_LOG_LEVEL_RAW = os.environ.get("BEACONRY_LOG_LEVEL", "INFO").upper()
+_LOG_LEVEL = getattr(logging, _LOG_LEVEL_RAW, None)
+if not isinstance(_LOG_LEVEL, int):
+    _LOG_LEVEL = logging.INFO
 logging.basicConfig(
-    level=logging.INFO,
+    level=_LOG_LEVEL,
     format="%(asctime)s [scout] %(levelname)s %(message)s",
 )
 log = logging.getLogger("scout")
+if os.environ.get("BEACONRY_LOG_LEVEL") and _LOG_LEVEL_RAW not in {
+    "DEBUG",
+    "INFO",
+    "WARNING",
+    "ERROR",
+    "CRITICAL",
+}:
+    log.warning("BEACONRY_LOG_LEVEL=%r invalid; falling back to INFO", _LOG_LEVEL_RAW)
 
 # Suppress noisy loggers (httpx might leak scan payloads at INFO).
 for _noisy in ("httpx", "httpcore"):

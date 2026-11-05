@@ -46,10 +46,13 @@ class _FakeApp:
 
 
 def _formatters() -> dict[str, Any]:
+    # BC-087: format_notification / format_regression / format_heartbeat now
+    # accept a `last_seen_ts` keyword argument. Stub formatters accept it as
+    # a sink so the adapter signature contract holds.
     return {
-        "notification": lambda f: f"finding:{f.id}",
-        "regression": lambda f, ts: f"regression:{f.id}:{ts}",
-        "heartbeat": lambda f, ts: f"heartbeat:{f.id}:{ts}",
+        "notification": lambda f, last_seen_ts=None: f"finding:{f.id}",
+        "regression": lambda f, ts, last_seen_ts=None: f"regression:{f.id}:{ts}",
+        "heartbeat": lambda f, ts, last_seen_ts=None: f"heartbeat:{f.id}:{ts}",
         "digest": lambda sup: f"digest:{len(sup)}",
     }
 

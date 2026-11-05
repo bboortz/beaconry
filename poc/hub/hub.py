@@ -58,11 +58,26 @@ except ImportError:
     from poc.hub.notifiers import notify_regression as _dispatch_regression
     from poc.hub.notifiers import register as _register_adapter
 
+# BC-087: operator-controlled root log level. DEBUG re-enables BC-086's
+# per-finding reconcile trace. Unknown values silently fall back to INFO
+# (warning emitted below once the logger exists).
+_LOG_LEVEL_RAW = os.environ.get("BEACONRY_LOG_LEVEL", "INFO").upper()
+_LOG_LEVEL = getattr(logging, _LOG_LEVEL_RAW, None)
+if not isinstance(_LOG_LEVEL, int):
+    _LOG_LEVEL = logging.INFO
 logging.basicConfig(
-    level=logging.INFO,
+    level=_LOG_LEVEL,
     format="%(asctime)s [hub] %(levelname)s %(message)s",
 )
 log = logging.getLogger("hub")
+if os.environ.get("BEACONRY_LOG_LEVEL") and _LOG_LEVEL_RAW not in {
+    "DEBUG",
+    "INFO",
+    "WARNING",
+    "ERROR",
+    "CRITICAL",
+}:
+    log.warning("BEACONRY_LOG_LEVEL=%r invalid; falling back to INFO", _LOG_LEVEL_RAW)
 
 # Suppress HTTP client logs — python-telegram-bot's httpx logs include the
 # bot token in request URLs, which would leak secrets to stdout / docker logs.
@@ -621,6 +636,27 @@ def set_status(finding_id: str, status: str, *, source: str = "telegram") -> Non
     )
 
 
+def _load_last_seen(finding_id: str) -> int | None:
+    """BC-087: pull `last_seen_ts` for one finding so notify*() can pass it
+    through to format_*. Returns None when the row is missing OR the column
+    is 0 (unseen since BC-034) — `format_last_seen` treats both as
+    'no info, skip the Last-seen line'."""
+    try:
+        con = sqlite3.connect(DB_PATH)
+    except sqlite3.OperationalError:
+        return None
+    try:
+        row = con.execute("SELECT last_seen_ts FROM findings WHERE id=?", (finding_id,)).fetchone()
+    except sqlite3.OperationalError:
+        # init_db hasn't run yet — nothing to read.
+        return None
+    finally:
+        con.close()
+    if row is None or not row[0]:
+        return None
+    return int(row[0])
+
+
 def bump_last_seen(host: str, scanned_ids: set[str], *, now_ts: int | None = None) -> None:
     """BC-034: update `last_seen_ts` for every DB finding whose id scout
     still reported in the current scan.
@@ -648,9 +684,9 @@ def bump_last_seen(host: str, scanned_ids: set[str], *, now_ts: int | None = Non
         )
         affected = con.total_changes
         con.commit()
-        # BC-086 temporary diagnostic: how many DB rows had their counter
-        # reset by this scan. Helps correlate with reconcile's absent list.
-        log.info(
+        # BC-086 diagnostic (BC-087: DEBUG, opt-in via BEACONRY_LOG_LEVEL=DEBUG).
+        # Helps correlate with reconcile's absent list when debugging the counter.
+        log.debug(
             "BC-086 bump_last_seen host=%s scanned_ids=%d rows_updated=%d",
             host,
             len(scanned_ids),
@@ -694,10 +730,9 @@ def reconcile_scan(
     """
     if not RECONCILE_ENABLED:
         return [], [], []
-    # BC-086 temporary diagnostic: log entry so we can watch counter
-    # progression on real scans. Will be downgraded to log.debug (or removed)
-    # once the counter puzzle from BC-086 ship-verification is understood.
-    log.info(
+    # BC-086 diagnostic (BC-087: DEBUG, opt-in via BEACONRY_LOG_LEVEL=DEBUG).
+    # Entry line so the per-finding lines below have context.
+    log.debug(
         "BC-086 reconcile ENTER host=%s scanned_ids_count=%d threshold=%d",
         host,
         len(scanned_ids),
@@ -748,9 +783,10 @@ def reconcile_scan(
                 kev=bool(row[12]),
             )
 
-            # BC-086 temporary diagnostic: per-finding decision log so we
-            # can prove what the reconcile loop does on real scans.
-            log.info(
+            # BC-086 diagnostic (BC-087: DEBUG, opt-in via BEACONRY_LOG_LEVEL=DEBUG).
+            # Per-finding decision log — essential for debugging but too noisy
+            # at INFO (one line per finding per scan per host).
+            log.debug(
                 "BC-086 reconcile fid=%s status=%s absent_count=%d in_scan=%s",
                 fid,
                 status,
@@ -1512,12 +1548,16 @@ def _emit_notify_sent_failed(finding: Finding, kind: str, exc: Exception) -> Non
 
 async def notify_regression(finding: Finding, last_fixed_ts: int) -> None:
     """BC-031: 🔥 FIX REGRESSED. Dispatched to all enabled notification adapters."""
+    last_seen_ts = _load_last_seen(finding.id)
     if MOCK and not _notifiers_pkg.enabled_adapters():
-        _mock_print("Regression", format_regression(finding, last_fixed_ts))
+        _mock_print(
+            "Regression",
+            format_regression(finding, last_fixed_ts, last_seen_ts=last_seen_ts),
+        )
         _emit_notify_sent(finding, "regression")
         return
     try:
-        await _dispatch_regression(finding, last_fixed_ts)
+        await _dispatch_regression(finding, last_fixed_ts, last_seen_ts)
     except Exception as exc:
         _emit_notify_sent_failed(finding, "regression", exc)
         raise
@@ -1533,8 +1573,12 @@ async def notify_auto_fix_regression(finding: Finding, auto_fixed_ts: int) -> No
     schema change. The format_* helper carries the distinct message body
     so the operator can tell which process reclosed the finding.
     """
+    last_seen_ts = _load_last_seen(finding.id)
     if MOCK and not _notifiers_pkg.enabled_adapters():
-        _mock_print("AutoFixRegression", format_auto_fix_regression(finding, auto_fixed_ts))
+        _mock_print(
+            "AutoFixRegression",
+            format_auto_fix_regression(finding, auto_fixed_ts, last_seen_ts=last_seen_ts),
+        )
         _emit_notify_sent(finding, "auto_fix_regression")
         return
     try:
@@ -1542,7 +1586,7 @@ async def notify_auto_fix_regression(finding: Finding, auto_fixed_ts: int) -> No
         # already shaped by format_auto_fix_regression upstream. For
         # adapters that render their own text (telegram_mock test hook),
         # this piggybacks on the existing wiring.
-        await _dispatch_regression(finding, auto_fixed_ts)
+        await _dispatch_regression(finding, auto_fixed_ts, last_seen_ts)
     except Exception as exc:
         _emit_notify_sent_failed(finding, "auto_fix_regression", exc)
         raise
@@ -1551,12 +1595,16 @@ async def notify_auto_fix_regression(finding: Finding, auto_fixed_ts: int) -> No
 
 async def notify(finding: Finding) -> None:
     """BC-003: first-fire notification. Dispatched to all enabled adapters."""
+    last_seen_ts = _load_last_seen(finding.id)
     if MOCK and not _notifiers_pkg.enabled_adapters():
-        _mock_print("Notification", format_notification(finding))
+        _mock_print(
+            "Notification",
+            format_notification(finding, last_seen_ts=last_seen_ts),
+        )
         _emit_notify_sent(finding, "finding")
         return
     try:
-        await _dispatch_finding(finding)
+        await _dispatch_finding(finding, last_seen_ts)
     except Exception as exc:
         _emit_notify_sent_failed(finding, "finding", exc)
         raise
@@ -1565,12 +1613,16 @@ async def notify(finding: Finding) -> None:
 
 async def notify_heartbeat(finding: Finding, open_since_ts: int) -> None:
     """BC-035: periodic reminder. Dispatched to all enabled adapters."""
+    last_seen_ts = _load_last_seen(finding.id)
     if MOCK and not _notifiers_pkg.enabled_adapters():
-        _mock_print("Heartbeat", format_heartbeat(finding, open_since_ts))
+        _mock_print(
+            "Heartbeat",
+            format_heartbeat(finding, open_since_ts, last_seen_ts=last_seen_ts),
+        )
         _emit_notify_sent(finding, "heartbeat")
         return
     try:
-        await _dispatch_heartbeat(finding, open_since_ts)
+        await _dispatch_heartbeat(finding, open_since_ts, last_seen_ts)
     except Exception as exc:
         _emit_notify_sent_failed(finding, "heartbeat", exc)
         raise
