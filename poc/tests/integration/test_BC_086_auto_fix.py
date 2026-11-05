@@ -93,12 +93,12 @@ def test_schema_has_absent_count_and_auto_fix_columns(recon_env: Path) -> None:
     assert "auto_fixed_ts" in cols
 
 
-def test_schema_version_is_5(recon_env: Path) -> None:
-    """CAP-T176: BC-086 bumps schema_version 4 → 5."""
+def test_schema_version_is_6(recon_env: Path) -> None:
+    """CAP-T176 (+ BC-089): migration runs to v6 (BC-089 added snooze_until_ts)."""
     con = sqlite3.connect(recon_env / "beaconry.db")
     version = con.execute("PRAGMA user_version").fetchone()[0]
     con.close()
-    assert version == 5
+    assert version == 6
 
 
 # ── CAP-T177 threshold ──────────────────────────────────────────────────────

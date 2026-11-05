@@ -1738,6 +1738,24 @@ Enforcement: `poc/scripts/verify_traceability.py` runs as part of `make check`. 
 - **verified by:**
   - `poc/tests/integration/test_BC_087_last_seen_and_log_level.py`
 
+### CAP-T183: Snooze buttons honour their label — `snooze_until_ts` + sweep + distinct expiry notification
+- **type:** technical
+- **status:** active
+- **origin:** BC-089 — pre-BC-089 `_handle_snooze` parsed the hour count from `callback_data` and printed it in the operator reply but never stored it. "Snooze 4h" meant "snooze indefinitely". Logged in `docs/plan/IDEAS.md` on 2026-11-05 after BC-086 ship verification.
+- **description:** Schema v5 → v6 adds `snooze_until_ts INTEGER DEFAULT 0` to the `findings` table. `_handle_snooze` now stores `now + hours*3600`. New periodic task `snooze_expiry_sweep` (cadence `BEACONRY_SNOOZE_SWEEP_INTERVAL_S`, default 60s) `SELECT`s rows where `status='snoozed' AND snooze_until_ts > 0 AND snooze_until_ts <= now`, flips to `open`, emits `snooze_expired` audit event, fires `notify_snooze_expired()` (new distinct body: `⏰ Snooze expired — back on your radar`) unless `BEACONRY_SNOOZE_NOTIFY_ON_EXPIRE=0`. Legacy snoozed rows (pre-BC-089, `snooze_until_ts=0`) stay snoozed indefinitely — the `> 0` filter preserves pre-BC-089 operator expectation.
+- **supports:** CAP-B023
+- **verified by:**
+  - `poc/tests/integration/test_BC_089_snooze_expiry.py`
+
+### CAP-T184: Configurable snooze-duration buttons on the inline keyboard
+- **type:** technical
+- **status:** active
+- **origin:** BC-089 — one hard-coded `[⏰ Snooze 4h]` button was too rigid. Tier-3 findings often warrant 1-week deferral; critical-but-interrupted needs 1 hour. Multiple buttons give the operator direct choice without a follow-up command.
+- **description:** `BEACONRY_SNOOZE_DEFAULT_HOURS` (default `1,4,24,168`) is parsed by `_parse_snooze_hours` into an int list; `_kb_finding` iterates it to render `[⏰ 1h] [⏰ 4h] [⏰ 1d] [⏰ 1w]`. Rendering helper `_snooze_button_label` humanises multiples of 24 (→`Nd`) and 168 (→`Nw`); other values stay as raw `Nh`. Non-integer env tokens drop silently; empty env falls back to the default list. Operator can collapse to a single button (`BEACONRY_SNOOZE_DEFAULT_HOURS=4`) if they prefer less clutter.
+- **supports:** CAP-T183
+- **verified by:**
+  - `poc/tests/integration/test_BC_089_snooze_expiry.py`
+
 ### CAP-T171: `make verify-base-images` — standing anonymous-pull preflight
 - **type:** technical
 - **status:** active

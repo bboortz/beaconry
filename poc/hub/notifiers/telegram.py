@@ -84,3 +84,11 @@ class TelegramAdapter(NotificationAdapter):
             return
         text = self._fmt["digest"](suppressed)
         await self._send(text, reply_markup=None)
+
+    async def send_snooze_expired(self, finding: Finding) -> None:
+        """BC-089: '⏰ Snooze expired' body + a fresh first-fire keyboard
+        (Fix / Snooze / Accept) so the operator can act without hunting the
+        original message."""
+        text = self._fmt["snooze_expired"](finding)
+        kb = self._kb["finding"](finding)
+        await self._send(text, reply_markup=kb)

@@ -42,6 +42,7 @@ try:
     from notifiers import notify_finding as _dispatch_finding
     from notifiers import notify_heartbeat as _dispatch_heartbeat
     from notifiers import notify_regression as _dispatch_regression
+    from notifiers import notify_snooze_expired as _dispatch_snooze_expired
     from notifiers import register as _register_adapter
 except ImportError:
     # Host test path: imported as poc.hub.hub, package at poc.beaconry_health
@@ -56,6 +57,7 @@ except ImportError:
     from poc.hub.notifiers import notify_finding as _dispatch_finding
     from poc.hub.notifiers import notify_heartbeat as _dispatch_heartbeat
     from poc.hub.notifiers import notify_regression as _dispatch_regression
+    from poc.hub.notifiers import notify_snooze_expired as _dispatch_snooze_expired
     from poc.hub.notifiers import register as _register_adapter
 
 # BC-087: operator-controlled root log level. DEBUG re-enables BC-086's
@@ -113,6 +115,40 @@ RECONCILE_ENABLED = os.environ.get("BEACONRY_RECONCILE_ENABLED", "1") != "0"
 # won't trigger auto-close. Set to 1 to reproduce pre-BC-086 behaviour
 # (immediate close on first absence).
 AUTO_FIX_THRESHOLD = max(1, int(os.environ.get("BEACONRY_AUTO_FIX_THRESHOLD", "3")))
+
+
+def _parse_snooze_hours(raw: str) -> list[int]:
+    """BC-089: parse `BEACONRY_SNOOZE_DEFAULT_HOURS=1,4,24,168` → [1, 4, 24, 168].
+    Drops non-integer tokens silently; result clamped to ≥1 and deduped
+    while preserving operator-chosen order. Empty → [1, 4, 24, 168] default."""
+    if not raw.strip():
+        return [1, 4, 24, 168]
+    out: list[int] = []
+    seen: set[int] = set()
+    for tok in raw.split(","):
+        tok = tok.strip()
+        if not tok:
+            continue
+        try:
+            n = max(1, int(tok))
+        except ValueError:
+            continue
+        if n not in seen:
+            seen.add(n)
+            out.append(n)
+    return out or [1, 4, 24, 168]
+
+
+# BC-089: snooze button no longer lies. Three knobs:
+#   - SNOOZE_DEFAULT_HOURS — comma-separated hours rendered as [⏰ Nh]
+#     buttons on every snooze-eligible notification keyboard.
+#   - SNOOZE_SWEEP_INTERVAL_S — cadence of the auto-expiry task.
+#     Precision-vs-load tradeoff; worst-case drift is this value.
+#   - SNOOZE_NOTIFY_ON_EXPIRE — whether to Telegram-ping on expiry.
+#     Set to 0 for silent re-open (audit still fires).
+SNOOZE_DEFAULT_HOURS = _parse_snooze_hours(os.environ.get("BEACONRY_SNOOZE_DEFAULT_HOURS", ""))
+SNOOZE_SWEEP_INTERVAL_S = max(5, int(os.environ.get("BEACONRY_SNOOZE_SWEEP_INTERVAL_S") or "60"))
+SNOOZE_NOTIFY_ON_EXPIRE = os.environ.get("BEACONRY_SNOOZE_NOTIFY_ON_EXPIRE", "1") != "0"
 # BC-030: internet_facing detection. Default ON because the whole point of
 # BC-030 is making Tier 1 reachable. Set to 0 to force the pre-BC-030 behavior
 # of treating every finding as not internet-facing (Tier 1 unreachable).
@@ -237,7 +273,7 @@ except ImportError:
 
 HUB_VERSION = SOFTWARE_VERSION  # back-compat alias
 API_VERSION = 1
-EXPECTED_SCHEMA_VERSION = 5
+EXPECTED_SCHEMA_VERSION = 6
 STRICT_API = os.environ.get("BEACONRY_STRICT_API") == "1"
 
 
@@ -405,7 +441,8 @@ def init_db() -> None:
             cve_alias TEXT,
             last_claim_ts INTEGER DEFAULT 0,
             absent_count INTEGER DEFAULT 0,
-            auto_fixed_ts INTEGER DEFAULT 0
+            auto_fixed_ts INTEGER DEFAULT 0,
+            snooze_until_ts INTEGER DEFAULT 0
         )
     """)
     # Idempotent migrations for DBs created before each column existed.
@@ -472,6 +509,12 @@ def init_db() -> None:
         con.execute("ALTER TABLE findings ADD COLUMN absent_count INTEGER DEFAULT 0")
     with contextlib.suppress(sqlite3.OperationalError):
         con.execute("ALTER TABLE findings ADD COLUMN auto_fixed_ts INTEGER DEFAULT 0")
+    # BC-089: unix ts when snoozed finding should auto-re-open. 0 = no expiry
+    # (either not snoozed, or pre-BC-089 legacy snooze). sweep SQL filters
+    # `WHERE snooze_until_ts > 0 AND snooze_until_ts <= now` so legacy rows
+    # stay snoozed indefinitely (preserves pre-BC-089 operator expectation).
+    with contextlib.suppress(sqlite3.OperationalError):
+        con.execute("ALTER TABLE findings ADD COLUMN snooze_until_ts INTEGER DEFAULT 0")
     # BC-036: digest cadence state — per-host last-sent + content hash. Separate
     # table (not a column on `findings`) because the state is per-host, not
     # per-finding.
@@ -1274,7 +1317,10 @@ def _render_mock_telegram(text: str) -> str:
     top = "    ╭" + "─" * width + "╮"
     bot = "    ╰" + "─" * width + "╯"
     body = "\n".join(f"    │ {line.ljust(width - 1)}│" for line in text.splitlines())
-    buttons = "      Inline keyboard: [🔧 Fix now] [⏰ Snooze 4h] [✅ Accept risk]"
+    # BC-089: mock-renderer reflects the configurable snooze keyboard so the
+    # printed demo + tests stay in sync with what Telegram actually shows.
+    snooze_labels = " ".join(f"[⏰ {_snooze_button_label(h)}]" for h in SNOOZE_DEFAULT_HOURS)
+    buttons = f"      Inline keyboard: [🔧 Fix now] {snooze_labels} [✅ Accept risk]"
     return "\n".join([top, body, bot, buttons])
 
 
@@ -1442,6 +1488,29 @@ def format_heartbeat(
     return "\n".join(lines)
 
 
+def format_snooze_expired(finding: Finding) -> str:
+    """BC-089: distinct body for a finding whose snooze just expired.
+    Semantics differ from regression (= 'thought fixed, isn't') — this
+    says 'you deferred, timer rang, here it is again'."""
+    import html
+
+    def esc(s: str) -> str:
+        return html.escape(s, quote=False)
+
+    emoji = {"Critical": "🔴", "High": "🟠", "Medium": "🟡"}.get(finding.severity, "⚪")
+    lines = [
+        "⏰ <b>SNOOZE EXPIRED — back on your radar</b>",
+        _severity_line(finding, emoji, esc),
+        f"CVSS: <code>{finding.cvss:.1f}</code> · Host: <code>{esc(finding.host)}</code>",
+        f"Target: <code>{esc(finding.source_ref)}</code> ({esc(finding.source_type)})",
+        _package_fix_line(finding, esc),
+        _viability_line(finding),
+        "",
+        f"<i>{esc(finding.description[:160])}</i>",
+    ]
+    return "\n".join(line for line in lines if line is not None)
+
+
 # ── BC-035: keyboard builders exposed to the TelegramAdapter ─────────────────
 
 
@@ -1466,19 +1535,37 @@ def _cb_data(action: str, finding: Finding, *extra: str) -> str:
     return with_cve if len(with_cve.encode()) <= _CB_MAX_BYTES else base
 
 
+def _snooze_button_label(hours: int) -> str:
+    """BC-089: '1h', '4h', '1d', '1w' — human-friendly duration suffix for
+    the inline keyboard."""
+    if hours >= 168 and hours % 168 == 0:
+        return f"{hours // 168}w"
+    if hours >= 24 and hours % 24 == 0:
+        return f"{hours // 24}d"
+    return f"{hours}h"
+
+
 def _kb_finding(finding: Finding) -> "InlineKeyboardMarkup":
-    """First-fire + heartbeat buttons — Fix / Snooze / Accept risk."""
-    return InlineKeyboardMarkup(
-        [
-            [
-                InlineKeyboardButton("🔧 Fix now", callback_data=_cb_data("fix", finding)),
-                InlineKeyboardButton(
-                    "⏰ Snooze 4h", callback_data=_cb_data("snooze", finding, "4")
-                ),
-            ],
-            [InlineKeyboardButton("✅ Accept risk", callback_data=_cb_data("ack", finding))],
-        ]
-    )
+    """First-fire + heartbeat buttons — Fix / Snooze(s) / Accept risk.
+
+    BC-089: snooze buttons are now plural, driven by
+    `BEACONRY_SNOOZE_DEFAULT_HOURS` (default `1,4,24,168` = 1h/4h/1d/1w).
+    Operator can set the env to a single value (e.g. `4`) to keep the
+    original one-button layout.
+    """
+    snooze_buttons = [
+        InlineKeyboardButton(
+            f"⏰ {_snooze_button_label(h)}",
+            callback_data=_cb_data("snooze", finding, str(h)),
+        )
+        for h in SNOOZE_DEFAULT_HOURS
+    ]
+    rows: list[list[InlineKeyboardButton]] = [
+        [InlineKeyboardButton("🔧 Fix now", callback_data=_cb_data("fix", finding))],
+        snooze_buttons,
+        [InlineKeyboardButton("✅ Accept risk", callback_data=_cb_data("ack", finding))],
+    ]
+    return InlineKeyboardMarkup(rows)
 
 
 def _kb_regression(finding: Finding) -> "InlineKeyboardMarkup":
@@ -1609,6 +1696,22 @@ async def notify(finding: Finding) -> None:
         _emit_notify_sent_failed(finding, "finding", exc)
         raise
     _emit_notify_sent(finding, "finding")
+
+
+async def notify_snooze_expired(finding: Finding) -> None:
+    """BC-089: distinct '⏰ Snooze expired' notification. Operator-visible path
+    is `BEACONRY_SNOOZE_NOTIFY_ON_EXPIRE=1` (default). If the env is `0`,
+    `snooze_expiry_sweep` audits the transition but doesn't call this."""
+    if MOCK and not _notifiers_pkg.enabled_adapters():
+        _mock_print("SnoozeExpired", format_snooze_expired(finding))
+        _emit_notify_sent(finding, "snooze_expired")
+        return
+    try:
+        await _dispatch_snooze_expired(finding)
+    except Exception as exc:
+        _emit_notify_sent_failed(finding, "snooze_expired", exc)
+        raise
+    _emit_notify_sent(finding, "snooze_expired")
 
 
 async def notify_heartbeat(finding: Finding, open_since_ts: int) -> None:
@@ -1757,12 +1860,40 @@ async def _handle_fix(query, finding: Finding, finding_id: str, parts: list[str]
 
 
 async def _handle_snooze(query, finding: Finding, finding_id: str, parts: list[str]) -> None:
+    """BC-089: parse hours, store `now + hours*3600` into `snooze_until_ts` so
+    the periodic sweep can auto-re-open at expiry. Pre-BC-089 behaviour was
+    'snooze stores nothing, stays indefinite' — now the label tells the truth.
+    """
     hours = int(parts[2]) if len(parts) > 2 else 4
+    now_ts = int(time.time())
+    expiry_ts = now_ts + hours * 3600
     set_status(finding_id, "snoozed")
+    _set_snooze_until(finding_id, expiry_ts)
+    # Render the expiry time in operator-local format alongside the hour count
+    # so the operator can sanity-check it against their wall clock.
+    import datetime as _dt
+
+    expiry_str = _dt.datetime.fromtimestamp(expiry_ts).strftime("%Y-%m-%d %H:%M")
     await query.edit_message_text(
-        f"⏰ Snoozed {hours}h — <code>{_esc(finding.cve_id)}</code>",
+        f"⏰ Snoozed {hours}h — <code>{_esc(finding.cve_id)}</code>\n"
+        f"Returns at <b>{expiry_str}</b>",
         parse_mode="HTML",
     )
+
+
+def _set_snooze_until(finding_id: str, snooze_until_ts: int) -> None:
+    """BC-089: UPDATE the single column. Separate from set_status so the
+    audit event emitted by set_status already fired for `snoozed` — this
+    is pure metadata."""
+    con = sqlite3.connect(DB_PATH)
+    try:
+        con.execute(
+            "UPDATE findings SET snooze_until_ts = ? WHERE id = ?",
+            (snooze_until_ts, finding_id),
+        )
+        con.commit()
+    finally:
+        con.close()
 
 
 async def _handle_ack(query, finding: Finding, finding_id: str, parts: list[str]) -> None:  # noqa: ARG001
@@ -1965,6 +2096,7 @@ async def lifespan(
                 "regression": format_regression,
                 "heartbeat": format_heartbeat,
                 "digest": format_digest_body,
+                "snooze_expired": format_snooze_expired,
             },
             keyboard_builders={
                 "finding": _kb_finding,
@@ -1978,13 +2110,19 @@ async def lifespan(
     # BC-035: periodic reminder loop for stale open findings.
     _heartbeat_task = asyncio.create_task(_heartbeat_loop_forever())
 
+    # BC-089: periodic sweep of snoozed findings whose expiry has passed.
+    _snooze_task = asyncio.create_task(_snooze_expiry_loop_forever())
+
     yield
 
     # BC-020: cancel KEV refresh loop on shutdown.
     _kev_task.cancel()
     _heartbeat_task.cancel()
+    _snooze_task.cancel()
     with contextlib.suppress(asyncio.CancelledError):
         await _kev_task
+    with contextlib.suppress(asyncio.CancelledError):
+        await _snooze_task
     with contextlib.suppress(asyncio.CancelledError):
         await _heartbeat_task
 
@@ -2836,6 +2974,85 @@ async def manual_claim_sweep(*, now_ts: int | None = None) -> int:
     if sent:
         log.info("BC-066: manual-claim sweep sent %d reminder(s)", sent)
     return sent
+
+
+async def snooze_expiry_sweep(*, now_ts: int | None = None) -> int:
+    """BC-089: find snoozed findings whose expiry has passed, flip to `open`,
+    audit, optionally fire a distinct expiry notification.
+
+    SQL filter `snooze_until_ts > 0` preserves pre-BC-089 legacy snoozes
+    (which have `snooze_until_ts = 0` = indefinite). Returns the number of
+    rows flipped — operator can observe via DEBUG logs or `make audit
+    EVENT=snooze_expired`."""
+    now = now_ts if now_ts is not None else int(time.time())
+    con = sqlite3.connect(DB_PATH)
+    try:
+        try:
+            rows = con.execute(
+                "SELECT id, host, cve_id, package, version, fixed_version, severity, "
+                "cvss, source_type, source_ref, description, tier, kev, "
+                "snooze_until_ts FROM findings "
+                "WHERE status = 'snoozed' AND snooze_until_ts > 0 "
+                "AND snooze_until_ts <= ?",
+                (now,),
+            ).fetchall()
+        except sqlite3.OperationalError:
+            # init_db hasn't run or column missing on pre-BC-089 DB.
+            return 0
+        if not rows:
+            return 0
+        expired: list[tuple[Finding, int]] = []
+        for row in rows:
+            f = Finding(
+                id=row[0],
+                host=row[1],
+                cve_id=row[2],
+                package=row[3],
+                version=row[4],
+                fixed_version=row[5],
+                severity=row[6],
+                cvss=row[7],
+                source_type=row[8],
+                source_ref=row[9],
+                description=row[10] or "",
+                tier=row[11],
+                kev=bool(row[12]),
+            )
+            expired.append((f, row[13]))
+            con.execute(
+                "UPDATE findings SET status = 'open', snooze_until_ts = 0 WHERE id = ?",
+                (f.id,),
+            )
+        con.commit()
+    finally:
+        con.close()
+
+    for f, prior_snooze_until in expired:
+        _audit.append(
+            "snooze_expired",
+            finding_id=f.id,
+            cve_id=f.cve_id,
+            host=f.host,
+            snooze_until_ts=prior_snooze_until,
+        )
+        if SNOOZE_NOTIFY_ON_EXPIRE:
+            try:
+                await notify_snooze_expired(f)
+            except Exception as e:  # noqa: BLE001
+                log.warning("BC-089 notify_snooze_expired failed for %s: %s", f.cve_id, e)
+    log.debug("BC-089 snooze_expiry_sweep flipped=%d now_ts=%d", len(expired), now)
+    return len(expired)
+
+
+async def _snooze_expiry_loop_forever() -> None:  # pragma: no cover - infinite loop
+    """BC-089: background task started by lifespan; polls every
+    SNOOZE_SWEEP_INTERVAL_S (default 60s)."""
+    while True:
+        try:
+            await snooze_expiry_sweep()
+        except Exception as e:  # noqa: BLE001
+            log.warning("BC-089: snooze expiry sweep failed: %s", e)
+        await asyncio.sleep(SNOOZE_SWEEP_INTERVAL_S)
 
 
 async def _heartbeat_loop_forever() -> (

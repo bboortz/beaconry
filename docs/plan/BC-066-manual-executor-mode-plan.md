@@ -122,7 +122,7 @@ non-open rows never fire reminders.
 | Reminder sweep skips rows without a claim | integration | `test_BC_066_manual_executor.py::test_sweep_skips_rows_without_claim` | ✓ |
 | Reminder sweep bumps last_notified_ts (dedup w/ BC-035) | integration | `test_BC_066_manual_executor.py::test_sweep_also_bumps_last_notified_ts` | ✓ |
 | MANUAL_REMINDER_INTERVAL_S=0 disables sweep | integration | `test_BC_066_manual_executor.py::test_interval_zero_disables_reminders` | ✓ |
-| EXPECTED_SCHEMA_VERSION == 4 | integration | `test_BC_066_manual_executor.py::test_expected_schema_version_is_5` | ✓ |
+| EXPECTED_SCHEMA_VERSION tracks the current migration (6 after BC-086 + BC-089) | integration | `test_BC_066_manual_executor.py::test_expected_schema_version_is_6` | ✓ |
 | CAPs registered | verify-traceability | `docs/CAPABILITIES.md` | ✓ |
 | `make check` + `make check-full` green | multi-gate | logs | ✓ |
 

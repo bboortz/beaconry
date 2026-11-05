@@ -35,6 +35,10 @@ services:
       # BC-086: consecutive absent scans before an open/snoozed/accepted/regressed
       # finding flips to `auto_fixed`. Default 3; set to 1 to reproduce pre-BC-086 behaviour.
       - BEACONRY_AUTO_FIX_THRESHOLD=${BEACONRY_AUTO_FIX_THRESHOLD:-3}
+      # BC-089: snooze buttons + sweep.
+      - BEACONRY_SNOOZE_DEFAULT_HOURS=${BEACONRY_SNOOZE_DEFAULT_HOURS:-1,4,24,168}
+      - BEACONRY_SNOOZE_SWEEP_INTERVAL_S=${BEACONRY_SNOOZE_SWEEP_INTERVAL_S:-60}
+      - BEACONRY_SNOOZE_NOTIFY_ON_EXPIRE=${BEACONRY_SNOOZE_NOTIFY_ON_EXPIRE:-1}
       # BC-087: root log level for hub (DEBUG|INFO|WARNING|ERROR|CRITICAL).
       # DEBUG re-enables BC-086's reconcile + bump_last_seen diagnostic trace.
       - BEACONRY_LOG_LEVEL=${BEACONRY_LOG_LEVEL:-INFO}
