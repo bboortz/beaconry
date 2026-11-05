@@ -1,7 +1,8 @@
 # Finding lifecycle — authoritative reference
 
-*Last updated: 2026-11-05 (BC-088 initial; BC-089 added snooze expiry
-paths). Single source of truth for how a
+*Last updated: 2026-11-05 (BC-088 initial; BC-089 snooze expiry;
+BC-090 auto-fix regression body; BC-091 KEV UA fix; BC-092 canary
+ring; BC-093 rescan triggers). Single source of truth for how a
 CVE becomes a finding, is dispatched to the operator, resolved (or
 auto-closed, or regressed), and tracked thereafter.*
 
@@ -96,9 +97,16 @@ constraint).
                                    │ REGRESSED_FROM_      │
                                    │   AUTO_FIX           │
                                    │ 🔥 AUTO-FIX REGRESSED│
-                                   │ (⚠️ body wire-up bug,│
-                                   │   see §15 inconsist. │
-                                   │   #1)                │
+                                   │ (BC-090: now routed  │
+                                   │  via send_auto_fix_  │
+                                   │  regression — body   │
+                                   │  is the intended     │
+                                   │  distinct one;       │
+                                   │  per-kind silence    │
+                                   │  via                 │
+                                   │  BEACONRY_AUTO_FIX_  │
+                                   │  REGRESSION_NOTIFY_  │
+                                   │  ENABLED=0)          │
                                    └──────────────────────┘
 
     ┌────────────────────────────────────────────────────────┐
@@ -391,6 +399,14 @@ returns three empty lists immediately.
 | `BEACONRY_MAX_FINDINGS_PER_RUN` | **5** | per-run cap on first-fire notifications; overflow → digest |
 | KEV refresh | **3600 s (1 h)** | CISA KEV feed re-pull (BC-020) |
 | `BEACONRY_LOG_LEVEL` | **INFO** | root log level for hub + scout (BC-087, CAP-T181) |
+| `BEACONRY_AUTO_FIX_REGRESSION_NOTIFY_ENABLED` | **1** | BC-090 — `0` suppresses Telegram ping on auto-fix regression (audit still fires) |
+| `BEACONRY_KEV_USER_AGENT` | *(auto-generated)* | BC-091 — override UA sent to CISA KEV endpoint |
+| `SCOUT_HOST_ROLE` | **workstation** | BC-092 — scout canary ring position (`workstation`/`staging`/`production`) |
+| `BEACONRY_CANARY_RING_ENABLED` | **1** | BC-092 — global gate toggle for production fixes |
+| `BEACONRY_CANARY_PRODUCTION_FORCE_ALLOW` | **0** | BC-092 — emergency one-off bypass (audits distinctly) |
+| `BEACONRY_DAILY_RESCAN_HOUR` | **2** (02:00 local) | BC-093 — wall-clock full-rescan hour; -1 disables |
+| `BEACONRY_DOCKER_EVENTS_ENABLED` | **1** | BC-093 — subscribe to docker events for pull/create/start |
+| `BEACONRY_DOCKER_EVENTS_DEBOUNCE_S` | **10 s** | BC-093 — debounce window; coalesces compose up bursts |
 | Tier 0 (KEV) target | **15 min** | from CVE ingest to Telegram button (design) |
 | Tier 1 (CVSS≥9 + internet-facing) target | **15 min** | same |
 | Tier 2 (CVSS 7–8 or LAN-only) target | **1 h** | confirm button |
@@ -419,7 +435,11 @@ Written to `/data/audit.log` as JSONL. Readable via `make audit
 | `finding_accepted` | [✅ Accept risk] |
 | `finding_auto_fixed` | BC-086: counter hit threshold (silent — no Telegram) |
 | `regressed` | BC-031: `fixed`/`fixed_verified` finding reappeared |
-| `regressed_from_auto_fix` | BC-086: `auto_fixed` finding reappeared |
+| `regressed_from_auto_fix` | BC-086: `auto_fixed` finding reappeared (BC-090 now routes through distinct `send_auto_fix_regression` adapter — body is the intended BC-086 CAP-T178 shape, not BC-031's generic) |
+| `notify_suppressed` | BC-090: operator opted out of a specific notification kind; fires with `kind=auto_fix_regression` + `reason=BEACONRY_AUTO_FIX_REGRESSION_NOTIFY_ENABLED=0` |
+| `canary_gate_passed` | BC-092: production fix allowed (staging-verified for same CVE) |
+| `canary_gate_blocked` | BC-092: production fix blocked (no staging verified) |
+| `canary_gate_force_allowed` | BC-092: emergency bypass via `BEACONRY_CANARY_PRODUCTION_FORCE_ALLOW=1` |
 | `kev_cache_hit` | KEV lookup resolved from local cache |
 | `heartbeat_reminder_sent` | Heartbeat sweep fired a reminder |
 | `digest_throttled` | Digest skipped due to cooldown window |
@@ -555,30 +575,14 @@ a candidate future BC.
 Where the design doc says one thing, the code does another; or where
 code paths disagree with each other.
 
-1. **`notify_auto_fix_regression` body wire-up** — **high priority
-   bug, code-grep confirmed:**
-
-   - `notify_auto_fix_regression` (hub.py:1567) only uses
-     `format_auto_fix_regression` on the MOCK/no-adapter path
-     (hub.py:1580).
-   - The real production path at hub.py:1589 does
-     `await _dispatch_regression(finding, auto_fixed_ts, last_seen_ts)`.
-   - `_dispatch_regression` → `notifiers.notify_regression` →
-     `TelegramAdapter.send_regression` (notifiers/telegram.py:68),
-     which calls `self._fmt["regression"](finding, last_fixed_ts, ...)`
-     — i.e. `format_regression`, **not** `format_auto_fix_regression`.
-   - Comment at hub.py:1586 claims "the text body is already shaped by
-     `format_auto_fix_regression` upstream" — **false for the Telegram
-     path**. True only for the MOCK path.
-
-   **Operator-visible effect:** auto-fix regressions on Telegram look
-   identical to BC-031 regressions. The distinct "🔥 AUTO-FIX
-   REGRESSED" body (the whole point of BC-086's CAP-T178) never
-   reaches a real operator.
-
-   Fix candidate: either (a) rename adapter method
-   `send_auto_fix_regression` with its own formatter key, or (b) pass
-   a `formatter_key: str` through the adapter dispatch.
+1. ~~`notify_auto_fix_regression` body wire-up~~ — **Fixed in BC-090**
+   (CAP-T185). `NotificationAdapter.send_auto_fix_regression` added
+   as the distinct dispatch target;
+   `TelegramAdapter.send_auto_fix_regression` renders
+   `format_auto_fix_regression`. Hub's `notify_auto_fix_regression`
+   routes through `_dispatch_auto_fix_regression` instead of
+   `_dispatch_regression`. Per-kind silence knob
+   `BEACONRY_AUTO_FIX_REGRESSION_NOTIFY_ENABLED` added (CAP-T186).
 
 2. **Scout "read-only forever" vs scout initiating fix**: design-
    decisions.md § Separation of concerns says "Scout is read-only
@@ -605,10 +609,14 @@ code paths disagree with each other.
 Behaviour described in design-decisions.md (locked 2026-10-29) that
 has no code backing. Each is a future BC candidate.
 
-1. **Canary ring** (§14.5 above): Ring 0 workstation → Ring 1 staging
-   → Ring 2 production. Design is complete; code has zero
-   implementation. No `role` attribute on scout config, no ring
-   ordering in `_handle_fix`.
+1. ~~Canary ring~~ — **Shipped in BC-092** (CAP-T188 + T189 + T190).
+   Scouts advertise `SCOUT_HOST_ROLE`; hub's `_handle_fix` blocks
+   production fixes without a staging-verified precedent for the
+   same CVE. `BEACONRY_CANARY_RING_ENABLED` / `BEACONRY_CANARY_
+   PRODUCTION_FORCE_ALLOW` override knobs. Schema v6→v7 adds
+   `scouts.role`. `make status` shows the ROLE column. Follow-up:
+   automatic ring promotion (Ring 0 → 1 → 2) is still deferred;
+   v1 is block/allow only.
 
 2. **Package auto-rollback via ZFS snapshot**: design-decisions.md
    § Auto-fix trust model says "ZFS snapshot (packages) OR `:rollback`
@@ -617,15 +625,18 @@ has no code backing. Each is a future BC candidate.
    present. If a future adapter does package fixes, there's no
    safety net.
 
-3. **Daily full rescan at 02:00 host-local** (§14.2): design-
-   decisions.md § Inventory cadence. No scheduler, no cron-equivalent.
-   Scout runs `SCAN_INTERVAL` loop only.
+3. ~~Daily full rescan at 02:00 host-local~~ — **Shipped in BC-093**
+   (CAP-T191). `BEACONRY_DAILY_RESCAN_HOUR` (default 2; -1 disables).
+   `_daily_rescan_loop_forever` task wakes at the configured wall-
+   clock hour and fires `_run_scan_once(reason="scheduled_daily")`.
 
-4. **Real-time push via pacman hook + docker events** (§14.3): same
-   section of design doc. Nothing in scout code listens to docker
-   events; no pacman hook script shipped. Operator who installs
-   beaconry on an Arch host doesn't get a `pacman -S` → instant scan
-   trigger.
+4. ~~Real-time push via pacman hook + docker events~~ — **Shipped
+   in BC-093** (CAP-T192 docker events; CAP-T193 pacman hook).
+   Scout's `_docker_events_loop_forever` subscribes to image
+   pull/create/start events and schedules debounced scans via
+   `BEACONRY_DOCKER_EVENTS_DEBOUNCE_S`. `poc/hooks/beaconry-
+   pacman.hook` is a template operators install manually on Arch
+   hosts; posts to scout's `/scan/trigger`.
 
 5. **Health check waterfall levels 3–4**: §7 describes four levels.
    `poc/hub/waterfall.py` exists (CAP-B023 related) but its level-3
@@ -657,20 +668,16 @@ monitor-verified.
    Pre-BC-089 snoozes (`snooze_until_ts=0`) stay indefinite —
    legacy state preserved.
 
-2. **Auto-fix regression body renders as BC-031 regression body on
-   Telegram** — §15.1 above. Code-grep confirmed. The distinct
-   "🔥 AUTO-FIX REGRESSED" body is dead code on the real Telegram
-   path. Tracked for BC-090.
+2. ~~Auto-fix regression body renders as BC-031 regression body on
+   Telegram~~ — **Fixed in BC-090** (CAP-T185). `notify_auto_fix_
+   regression` now routes through `send_auto_fix_regression` which
+   renders `format_auto_fix_regression`. See §15.1 (now struck).
 
-3. **KEV refresh hourly 403 on hetzner-staging**: CISA KEV endpoint
-   returns 403 Forbidden on every hourly refresh attempt from the
-   hetzner hub (monitor stream 2026-11-05 07:55 onward, hourly to
-   10:55+). `/healthz` shows `"kev": "unfetched", "kev_count": 0`.
-   Cache fallback works short-term, but if CISA stays locked out
-   past the cache TTL, Tier 0 KEV classification degrades to
-   CVSS-only. Suspected cause: CISA started enforcing a User-Agent;
-   fix is `User-Agent: beaconry/<version> (+repo)` on the GET in
-   `poc/hub/kev.py`. Tracked for BC-091.
+3. ~~KEV refresh hourly 403 on hetzner-staging~~ — **Fixed in
+   BC-091** (CAP-T187). Dynamic `User-Agent: beaconry/<version>
+   (+https://github.com/bboortz/beaconry)` replaces the hardcoded
+   stale UA. `BEACONRY_KEV_USER_AGENT` override for air-gapped/
+   proxied setups.
 
 4. **BC-086's initial-scan counter stall** (BC-086 ship-verification
    anomaly): 11 findings observed stuck at `absent_count=2` after 3
