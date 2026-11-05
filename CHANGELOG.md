@@ -4,6 +4,35 @@ All notable changes to beaconry are recorded here. The format is based
 on [Keep a Changelog](https://keepachangelog.com/), and this project
 follows [Semantic Versioning](https://semver.org/).
 
+## [v0.12.1] — 2026-11-05
+
+### Documentation (BC-088)
+
+- **lifecycle reference:** new `docs/LIFECYCLE.md` — single authoritative
+  reference for how a finding moves from grype match through
+  notification, operator action, fix execution, verification, and
+  reconcile. Twelve descriptive sections (state diagram, ingest, row
+  timestamps, notifications, buttons, fix pipeline, health waterfall,
+  reconcile scope, isolation, timers, audit events, precedence) plus
+  five known-flaw inventories (unclearities, necessary improvements,
+  contradictions/inconsistencies, missing implementation, known bugs).
+  Each flaw entry carries a code-grep pointer or a
+  `memory/design-decisions.md` pointer. Future BCs materially changing
+  the lifecycle are expected to update this doc as part of DoD (honour
+  system; no lint today).
+- **capability:** CAP-T182 registered in `docs/CAPABILITIES.md`
+  pointing at the new doc.
+- **test:** `poc/tests/unit/test_lifecycle_doc.py` — doc-structure test
+  (every status mentioned, every timer env var mentioned, every flaw
+  section populated, CAP-T182 registered). Catches drift when a future
+  BC renames a status enum or timer var.
+
+### No code behavior changes
+
+Pure docs + a doc-structure test. No runtime code touched; no new env
+var; no new state transition. Operator-visible behaviour of beaconry
+v0.12.1 is identical to v0.12.0.
+
 ## [v0.12.0] — 2026-11-05
 
 ### Fixed (BC-087)
