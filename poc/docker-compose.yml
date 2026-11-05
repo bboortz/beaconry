@@ -133,6 +133,10 @@ services:
       # BC-092: canary-ring role (workstation|staging|production). Scout
       # advertises on heartbeat + /scan; hub uses it to gate production fixes.
       - SCOUT_HOST_ROLE=${SCOUT_HOST_ROLE:-workstation}
+      # BC-093: rescan triggers beyond SCAN_INTERVAL.
+      - BEACONRY_DAILY_RESCAN_HOUR=${BEACONRY_DAILY_RESCAN_HOUR:-2}
+      - BEACONRY_DOCKER_EVENTS_ENABLED=${BEACONRY_DOCKER_EVENTS_ENABLED:-1}
+      - BEACONRY_DOCKER_EVENTS_DEBOUNCE_S=${BEACONRY_DOCKER_EVENTS_DEBOUNCE_S:-10}
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
       - /var/lib/pacman:/host/var/lib/pacman:ro

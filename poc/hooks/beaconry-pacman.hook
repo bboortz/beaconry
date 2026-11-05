@@ -1,0 +1,28 @@
+# BC-093: alpm hook — poke the local scout to rescan after every pacman transaction.
+#
+# Install:
+#   sudo cp poc/hooks/beaconry-pacman.hook /etc/pacman.d/hooks/
+#   sudo chmod 644 /etc/pacman.d/hooks/beaconry-pacman.hook
+#
+# The hook runs AFTER every pacman package install / upgrade / remove. It
+# POSTs to the local scout's /scan/trigger endpoint. Scout runs on
+# 127.0.0.1:8001 by default (SCOUT_HTTP_PORT); adjust if you rebound it.
+#
+# Security notes:
+#   - This hook runs as root (pacman context).
+#   - /scan/trigger is unauthenticated in scout today — bind scout to
+#     localhost (default) so no remote host can trigger your rescans.
+#   - If scout is down or busy, curl fails silently — pacman transaction
+#     is NOT blocked.
+
+[Trigger]
+Operation = Install
+Operation = Upgrade
+Operation = Remove
+Type = Package
+Target = *
+
+[Action]
+Description = Notify beaconry scout to rescan
+When = PostTransaction
+Exec = /usr/bin/curl -fsS --max-time 2 -X POST http://127.0.0.1:8001/scan/trigger >/dev/null 2>&1 || true

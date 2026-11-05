@@ -103,6 +103,26 @@ if _raw_role not in _VALID_ROLES:
     _raw_role = "workstation"
 HOST_ROLE = _raw_role
 
+# BC-093: wall-clock daily rescan hour (0-23, default 02:00 local;
+# -1 disables). Catches slow drift between regular SCAN_INTERVAL
+# ticks (pip installs, port changes).
+_daily_hour_raw = os.environ.get("BEACONRY_DAILY_RESCAN_HOUR") or "2"
+try:
+    DAILY_RESCAN_HOUR = int(_daily_hour_raw)
+except ValueError:
+    log.warning("BEACONRY_DAILY_RESCAN_HOUR=%r invalid; using 2 (02:00 local)", _daily_hour_raw)
+    DAILY_RESCAN_HOUR = 2
+if DAILY_RESCAN_HOUR != -1 and (DAILY_RESCAN_HOUR < 0 or DAILY_RESCAN_HOUR > 23):
+    log.warning("BEACONRY_DAILY_RESCAN_HOUR=%d out of [0,23]; using 2", DAILY_RESCAN_HOUR)
+    DAILY_RESCAN_HOUR = 2
+
+# BC-093: subscribe to docker events to trigger scans on image pull /
+# container start. Default on (scouts run on Linux w/ docker socket mounted).
+DOCKER_EVENTS_ENABLED = os.environ.get("BEACONRY_DOCKER_EVENTS_ENABLED", "1") != "0"
+# Debounce window — compose up pulling N images fires one scan DEBOUNCE_S
+# after the last event, not N scans back-to-back.
+DOCKER_EVENTS_DEBOUNCE_S = max(1, int(os.environ.get("BEACONRY_DOCKER_EVENTS_DEBOUNCE_S") or "10"))
+
 # BC-005 defaults — demo-safe allowlist, no excludes by default.
 DEFAULT_INCLUDE_GLOBS = "nginx*,redis*,postgres*"
 
@@ -590,6 +610,90 @@ async def _scan_loop_forever() -> None:  # pragma: no cover - infinite async loo
         await asyncio.sleep(SCAN_INTERVAL)
 
 
+def _seconds_until_next_daily_tick(target_hour: int, now_ts: float | None = None) -> float:
+    """BC-093: seconds until the next wall-clock `target_hour:00` local time.
+
+    If `now_ts` is before today's target hour, the target is today. Otherwise
+    it's tomorrow. Returns a non-negative float; caller sleeps for this many
+    seconds. Pulled out for unit-testability.
+    """
+    import datetime as _dt
+
+    now_wall = _dt.datetime.fromtimestamp(now_ts) if now_ts is not None else _dt.datetime.now()
+    today_target = now_wall.replace(hour=target_hour, minute=0, second=0, microsecond=0)
+    if now_wall >= today_target:
+        today_target = today_target + _dt.timedelta(days=1)
+    return max(0.0, (today_target - now_wall).total_seconds())
+
+
+async def _daily_rescan_loop_forever() -> None:  # pragma: no cover - infinite async loop
+    """BC-093: wake at `BEACONRY_DAILY_RESCAN_HOUR:00` local, scan, sleep ~24h.
+
+    Independent of SCAN_INTERVAL. Catches slow drift that regular ticks
+    might miss (pip installs that didn't trigger a docker event, port
+    reconfigurations). Disabled when `DAILY_RESCAN_HOUR == -1`.
+    """
+    while True:
+        delay = _seconds_until_next_daily_tick(DAILY_RESCAN_HOUR)
+        log.info("Daily rescan scheduled in %.0fs (target %d:00 local)", delay, DAILY_RESCAN_HOUR)
+        await asyncio.sleep(delay)
+        try:
+            await _run_scan_once(reason="scheduled_daily")
+        except Exception as e:  # noqa: BLE001
+            log.warning("BC-093 daily rescan failed: %s", e)
+        # Avoid tight-loop corner case if the scan took >24h (it won't,
+        # but the sleep guarantees we don't re-fire within the same hour).
+        await asyncio.sleep(60)
+
+
+def _docker_events_stream():  # pragma: no cover - docker.from_env wrapper
+    """BC-093: return a docker events iterator filtered to pull/create/start.
+
+    Separated for test monkeypatch; the real implementation hits the
+    docker daemon.
+    """
+    client = docker.from_env()
+    return client.events(
+        decode=True,
+        filters={"type": ["image", "container"], "event": ["pull", "create", "start"]},
+    )
+
+
+async def _docker_events_loop_forever() -> None:  # pragma: no cover - infinite async loop
+    """BC-093: subscribe to docker events; trigger a (debounced) scan on
+    image pull / container create+start.
+
+    The docker events stream is blocking → runs in a worker thread. The
+    debounce uses a monotonic timestamp: an event schedules a trailing scan
+    `DOCKER_EVENTS_DEBOUNCE_S` later, cancelling any earlier pending scan.
+    """
+    loop = asyncio.get_running_loop()
+    pending: list[asyncio.TimerHandle] = []
+
+    def _schedule_scan() -> None:
+        # Cancel any already-scheduled trailing scan so a burst coalesces
+        # into one.
+        for h in pending:
+            h.cancel()
+        pending.clear()
+        handle = loop.call_later(
+            DOCKER_EVENTS_DEBOUNCE_S,
+            lambda: asyncio.create_task(_run_scan_once(reason="docker_event")),
+        )
+        pending.append(handle)
+
+    def _blocking_consume() -> None:
+        try:
+            for _event in _docker_events_stream():
+                loop.call_soon_threadsafe(_schedule_scan)
+        except Exception as e:  # noqa: BLE001
+            log.warning("BC-093 docker events stream ended: %s", e)
+
+    # Fire-and-forget worker thread; it'll end on scout shutdown when the
+    # docker client is closed.
+    await loop.run_in_executor(None, _blocking_consume)
+
+
 def heartbeat_once() -> bool:
     """BC-063: POST /heartbeat with host + version + health.
 
@@ -652,6 +756,19 @@ async def lifespan(_app: FastAPI):
         tasks.append(asyncio.create_task(_heartbeat_loop_forever()))
     else:
         log.info("Heartbeat disabled (SCOUT_HEARTBEAT_INTERVAL_S=0)")
+    # BC-093: wall-clock daily rescan.
+    if DAILY_RESCAN_HOUR != -1:
+        log.info("Daily rescan loop enabled (target %d:00 local)", DAILY_RESCAN_HOUR)
+        tasks.append(asyncio.create_task(_daily_rescan_loop_forever()))
+    else:
+        log.info("Daily rescan disabled (BEACONRY_DAILY_RESCAN_HOUR=-1)")
+    # BC-093: docker events listener — triggers debounced scan on image
+    # pull / container create+start.
+    if DOCKER_EVENTS_ENABLED:
+        log.info("Docker events listener enabled (debounce %ds)", DOCKER_EVENTS_DEBOUNCE_S)
+        tasks.append(asyncio.create_task(_docker_events_loop_forever()))
+    else:
+        log.info("Docker events listener disabled (BEACONRY_DOCKER_EVENTS_ENABLED=0)")
     yield
     for t in tasks:
         t.cancel()

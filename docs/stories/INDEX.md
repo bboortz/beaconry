@@ -84,4 +84,5 @@ Lifecycle: `draft → ready → in-progress → shipped`. Status matches each st
 | BC-089 | Snooze with real expiry (⏰ Nh buttons actually re-open at expiry)        | shipped     | — (merged to dev)                   |
 | BC-090 | Auto-fix regression body actually reaches Telegram                       | shipped     | — (merged to dev)                   |
 | BC-091 | KEV fetch User-Agent fix — CISA 403 escape                               | shipped     | — (merged to dev)                   |
-| BC-092 | Canary ring — production fixes gated on staging precedent                | in-progress | feat/BC-092-canary-ring             |
+| BC-092 | Canary ring — production fixes gated on staging precedent                | shipped     | — (merged to dev)                   |
+| BC-093 | Rescan triggers — daily + docker events + pacman hook                    | in-progress | feat/BC-093-rescan-hooks            |
