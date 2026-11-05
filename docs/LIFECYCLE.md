@@ -41,39 +41,57 @@ constraint).
                        buttons   ├───────────┬───────┤
                                  │           │       │
           [🔧 Fix now]           │  [⏰4h]   │  [✅] │
-                                 ▼           ▼       ▼
-                           ┌─────────┐  ┌────────┐  ┌──────────┐
-                           │  FIXED  │  │SNOOZED │  │ ACCEPTED │
-                           └────┬────┘  └────┬───┘  └────┬─────┘
-                verify            │           │           │
-                 (next scan)      │           │           │
-                                 ▼           │           │
-                           ┌──────────────┐  │           │
-                           │FIXED_VERIFIED│  │           │
-                           └──────┬───────┘  │           │
-                                  │          │           │
-      ┌──────┐ reappears in scan  │          │           │
-      │      │ (BC-031)           │          │           │
-      │ 🔥   │◀───────────────────┘          │           │
-      │REGR  │                  absent N scans           │
-      │ESSED │                  (BC-086,                 │
-      │      │                   THRESHOLD=3)            │
-      └──────┘                        │                  │
-                                      ▼                  │
-                               ┌──────────────┐          │
-                               │  AUTO_FIXED  │ ◀────────┘
-                               │  (silent)    │
-                               └──────┬───────┘
-                                      │ reappears (BC-086)
-                                      ▼
-                               ┌──────────────────────┐
-                               │ REGRESSED_FROM_      │
-                               │   AUTO_FIX           │
-                               │ 🔥 AUTO-FIX REGRESSED│
-                               │ (⚠️ body wire-up bug,│
-                               │   see §15 inconsist. │
-                               │   #1)                │
-                               └──────────────────────┘
+                                 │           │       │
+                                 │           │       │   absent N scans
+                                 │           │       │  (BC-086,
+                                 │           │       │   THRESHOLD=3)
+                                 │           │       │
+                                 │           │       │  OPEN also auto-
+                                 │           │       │  closes if the
+                                 │           │       │  target disappears
+                                 │           │       │  without operator
+                                 │           │       │  action
+                                 │           │       │           │
+                                 ▼           ▼       ▼           │
+                           ┌─────────┐  ┌────────┐ ┌──────────┐  │
+                           │  FIXED  │  │SNOOZED │ │ ACCEPTED │  │
+                           └────┬────┘  └────┬───┘ └────┬─────┘  │
+                verify            │           │          │        │
+                 (next scan)      │           │          │        │
+                                 ▼           │          │        │
+                           ┌──────────────┐  │          │        │
+                           │FIXED_VERIFIED│  │          │        │
+                           └──────┬───────┘  │          │        │
+                                  │          │          │        │
+      ┌──────┐ reappears in scan  │          │          │        │
+      │      │ (BC-031)           │          │          │        │
+      │ 🔥   │◀───────────────────┘          │          │        │
+      │REGR  │                  absent N scans          │        │
+      │ESSED │  ────────────────┐    │                  │        │
+      │      │                   │   │                  │        │
+      └──────┘                   │   │                  │        │
+                                 ▼   ▼                  ▼        ▼
+                               ┌─────────────────────────────────────┐
+                               │            AUTO_FIXED               │
+                               │  (silent — audit `finding_auto_     │
+                               │   fixed` only, no Telegram)         │
+                               │                                     │
+                               │  SQL filter in reconcile_scan:      │
+                               │  ('open' | 'regressed' | 'snoozed'  │
+                               │   | 'accepted') + absent + counter  │
+                               │  ≥ BEACONRY_AUTO_FIX_THRESHOLD      │
+                               │  → flip to auto_fixed               │
+                               └──────────────┬──────────────────────┘
+                                              │ reappears (BC-086)
+                                              ▼
+                                   ┌──────────────────────┐
+                                   │ REGRESSED_FROM_      │
+                                   │   AUTO_FIX           │
+                                   │ 🔥 AUTO-FIX REGRESSED│
+                                   │ (⚠️ body wire-up bug,│
+                                   │   see §15 inconsist. │
+                                   │   #1)                │
+                                   └──────────────────────┘
 
     ┌────────────────────────────────────────────────────────┐
     │  VERIFICATION_FAILED (from any fix dispatch):          │
