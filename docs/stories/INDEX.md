@@ -82,4 +82,5 @@ Lifecycle: `draft → ready → in-progress → shipped`. Status matches each st
 | BC-087 | Wire `Last seen` into notify() + BEACONRY_LOG_LEVEL env                  | shipped     | feat/BC-087-last-seen-wire-and-log-level |
 | BC-088 | Finding lifecycle reference document (`docs/LIFECYCLE.md`)               | shipped     | — (merged to dev)                   |
 | BC-089 | Snooze with real expiry (⏰ Nh buttons actually re-open at expiry)        | shipped     | — (merged to dev)                   |
-| BC-090 | Auto-fix regression body actually reaches Telegram                       | in-progress | feat/BC-090-auto-fix-regression-body |
+| BC-090 | Auto-fix regression body actually reaches Telegram                       | shipped     | — (merged to dev)                   |
+| BC-091 | KEV fetch User-Agent fix — CISA 403 escape                               | in-progress | feat/BC-091-kev-user-agent          |

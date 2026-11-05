@@ -23,6 +23,12 @@ import urllib.error
 import urllib.request
 from pathlib import Path
 
+try:
+    # Container path — beaconry_health is COPY'd next to kev.py on /app.
+    from beaconry_health import SOFTWARE_VERSION  # type: ignore[import-not-found]
+except ImportError:  # pragma: no cover - host test path
+    from poc.beaconry_health import SOFTWARE_VERSION
+
 log = logging.getLogger("hub.kev")
 
 DEFAULT_FEED_URL = (
@@ -32,6 +38,15 @@ DEFAULT_FEED_URL = (
 # VAR is explicitly set to "". docker-compose's `${VAR:-}` expansion propagates
 # empty strings exactly that way. Use `or` to treat empty-string as unset.
 FEED_URL = os.environ.get("BEACONRY_KEV_FEED_URL") or DEFAULT_FEED_URL
+# BC-091: CISA KEV endpoint started 403'ing anonymous fetches hourly on
+# hetzner-staging (2026-11-05, monitor stream 07:55 UTC onwards). The pre-
+# BC-091 UA was `beaconry/0.1 (+kev)` — stale version string, no repo
+# reference. CISA's public "Policy" page recommends identifiable User-Agent
+# strings with a contact URL. BC-091 switches to a dynamic UA that names the
+# real version + repo; operators in air-gapped / proxied setups override via
+# BEACONRY_KEV_USER_AGENT.
+DEFAULT_KEV_USER_AGENT = f"beaconry/{SOFTWARE_VERSION} (+https://github.com/bboortz/beaconry)"
+KEV_USER_AGENT = os.environ.get("BEACONRY_KEV_USER_AGENT") or DEFAULT_KEV_USER_AGENT
 REFRESH_INTERVAL_S = 3600  # hourly
 STALE_THRESHOLD_S = 25 * 3600  # 25h — one missed daily publication + grace
 FETCH_TIMEOUT_S = 20
@@ -48,8 +63,13 @@ def _cache_path() -> Path:
 
 
 def _http_fetch(url: str) -> bytes:
-    """Blocking HTTP GET. Isolated so tests can monkeypatch it."""
-    req = urllib.request.Request(url, headers={"User-Agent": "beaconry/0.1 (+kev)"})
+    """Blocking HTTP GET. Isolated so tests can monkeypatch it.
+
+    BC-091: User-Agent string identifies beaconry (version + repo) so the
+    CISA endpoint doesn't 403 anonymous bot-looking fetches. Operator can
+    override via BEACONRY_KEV_USER_AGENT.
+    """
+    req = urllib.request.Request(url, headers={"User-Agent": KEV_USER_AGENT})
     with urllib.request.urlopen(req, timeout=FETCH_TIMEOUT_S) as resp:  # noqa: S310
         return resp.read()
 

@@ -1765,6 +1765,15 @@ Enforcement: `poc/scripts/verify_traceability.py` runs as part of `make check`. 
 - **verified by:**
   - `poc/tests/integration/test_BC_090_auto_fix_regression_body.py`
 
+### CAP-T187: KEV fetch User-Agent is identifiable and operator-overridable
+- **type:** technical
+- **status:** active
+- **origin:** BC-091 — CISA KEV endpoint started 403'ing anonymous fetches hourly on hetzner-staging (2026-11-05 07:55–11:55 UTC, monitor stream). Pre-BC-091 the `_http_fetch` UA was hardcoded `beaconry/0.1 (+kev)` — stale version, no repo reference. CISA policy recommends identifiable UAs with contact URL.
+- **description:** `kev.py` imports `SOFTWARE_VERSION` from `beaconry_health`, composes `DEFAULT_KEV_USER_AGENT = f"beaconry/{SOFTWARE_VERSION} (+https://github.com/bboortz/beaconry)"`. Module-level `KEV_USER_AGENT = os.environ.get("BEACONRY_KEV_USER_AGENT") or DEFAULT_KEV_USER_AGENT`. Empty env falls back to the default. `_http_fetch` reads `KEV_USER_AGENT` for every request. Operator override is a module-level constant — restart hub to change (matches `FEED_URL` pattern). Fallback-to-cache behaviour on 403 unchanged.
+- **supports:** CAP-B023
+- **verified by:**
+  - `poc/tests/unit/test_BC_091_kev_user_agent.py`
+
 ### CAP-T186: `BEACONRY_AUTO_FIX_REGRESSION_NOTIFY_ENABLED` per-kind silence knob
 - **type:** technical
 - **status:** active

@@ -105,6 +105,7 @@ See also:
 | Variable | Default | Type | Where read | Reason | Origin |
 |---|---|---|---|---|---|
 | `BEACONRY_KEV_FEED_URL` | CISA upstream | URL | `poc/hub/kev.py` | Override the CISA KEV feed source. Air-gapped setups mirror the JSON internally; test suites point at a fixture file. Default is the public CISA endpoint which disaster-recovers from stale disk cache. | BC-020 |
+| `BEACONRY_KEV_USER_AGENT` | *(empty, auto-generated)* | UA string | `poc/hub/kev.py` | Override the `User-Agent` HTTP header sent to the KEV feed (BC-091). Empty / unset → auto-composed `beaconry/<SOFTWARE_VERSION> (+https://github.com/bboortz/beaconry)` — identifiable per CISA policy. Operator override needed for air-gapped or proxied deployments where a specific UA must traverse a gateway. Context: CISA 403'd beaconry's pre-BC-091 hardcoded UA `beaconry/0.1 (+kev)` on 2026-11-05 on hetzner-staging — hourly fetches failed for ~4 h before BC-091 landed. | BC-091 |
 
 ## Paths & storage
 
