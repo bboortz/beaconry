@@ -30,11 +30,15 @@ class _StubAdapter(NotificationAdapter):
     def __init__(self) -> None:
         self.heartbeats: list[tuple[str, int]] = []
 
-    async def send_finding(self, finding: Finding) -> None: ...
-    async def send_regression(self, finding: Finding, last_fixed_ts: int) -> None: ...
+    async def send_finding(self, finding: Finding, last_seen_ts: int | None = None) -> None: ...
+    async def send_regression(
+        self, finding: Finding, last_fixed_ts: int, last_seen_ts: int | None = None
+    ) -> None: ...
     async def send_digest(self, suppressed: list[Finding]) -> None: ...
 
-    async def send_heartbeat(self, finding: Finding, open_since_ts: int) -> None:
+    async def send_heartbeat(
+        self, finding: Finding, open_since_ts: int, last_seen_ts: int | None = None
+    ) -> None:
         self.heartbeats.append((finding.id, open_since_ts))
 
 

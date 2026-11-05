@@ -79,3 +79,4 @@ Lifecycle: `draft → ready → in-progress → shipped`. Status matches each st
 | BC-082 | Homelab-deployment coverage — cold-start + dogfood-grype + pinned-floor  | shipped     | — (merged to dev)                   |
 | BC-083 | Forge runtime base image + verify-base-images preflight                  | shipped     | — (merged to dev)                   |
 | BC-086 | Auto-fix with counter threshold — snoozed/accepted/open eligible         | shipped     | feat/BC-086-auto-fix-counter        |
+| BC-087 | Wire `Last seen` into notify() + BEACONRY_LOG_LEVEL env                  | shipped     | feat/BC-087-last-seen-wire-and-log-level |

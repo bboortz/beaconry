@@ -1711,6 +1711,24 @@ Enforcement: `poc/scripts/verify_traceability.py` runs as part of `make check`. 
 - **verified by:**
   - `poc/tests/integration/test_BC_086_auto_fix.py`
 
+### CAP-T180: `notify*()` loads last_seen_ts from DB and threads it to adapters
+- **type:** technical
+- **status:** active
+- **origin:** BC-087 — BC-086's CAP-T179 added the format-helper hook, but production call sites (`hub.notify`, `hub.notify_regression`, `hub.notify_heartbeat`, `hub.notify_auto_fix_regression`) never loaded `last_seen_ts` from the DB, so the kwarg defaulted to None and the "Last seen" line was missing from every real Telegram alert the operator received on 2026-11-04.
+- **description:** New helper `hub._load_last_seen(finding_id) -> int | None` reads the row's `last_seen_ts` with a one-column `SELECT`. Each of the four `notify*()` coroutines loads it before dispatch and passes the value both into the mock-print format_* call and through the adapter dispatch chain (`notify_finding/regression/heartbeat` in `poc.hub.notifiers` + the abstract `NotificationAdapter.send_*` + `TelegramAdapter`). Absent row OR `last_seen_ts == 0` both resolve to `None`, which `format_last_seen` renders as an empty string — so the existing "no info, no line" semantics are preserved.
+- **supports:** CAP-T179, CAP-B023
+- **verified by:**
+  - `poc/tests/integration/test_BC_087_last_seen_and_log_level.py`
+
+### CAP-T181: `BEACONRY_LOG_LEVEL` env controls hub + scout root log level
+- **type:** technical
+- **status:** active
+- **origin:** BC-087 — BC-086's reconcile diagnostic was shipped at `log.info` to prove natural counter progression. Once proven, ~20 lines/scan/host of hub noise remained permanent until another ship cycle. Needed a knob the operator can toggle in `.env` without rebuilding.
+- **description:** Hub + scout both read `BEACONRY_LOG_LEVEL` at import time (default `INFO`). Accepted values: `DEBUG`, `INFO`, `WARNING`, `ERROR`, `CRITICAL`. Invalid values silently fall back to INFO with a `log.warning` describing the bad value. BC-086's `bump_last_seen` + `reconcile_scan` diagnostic lines downgraded from `log.info` to `log.debug` — operator opts in via `BEACONRY_LOG_LEVEL=DEBUG`. Documented in `docs/VARIABLES.md` and surfaced in `docker-compose.yml` + `.env.example`.
+- **supports:** CAP-B023
+- **verified by:**
+  - `poc/tests/integration/test_BC_087_last_seen_and_log_level.py`
+
 ### CAP-T171: `make verify-base-images` — standing anonymous-pull preflight
 - **type:** technical
 - **status:** active

@@ -28,16 +28,24 @@ class NotificationAdapter(ABC):
             return True
         return os.environ.get(self.env_var, "1") != "0"
 
+    # BC-087: `last_seen_ts` threads the "Last seen: X ago" line through to
+    # format_*. Kwarg with default None so new adapters stay back-compat if
+    # they don't care about the line.
+
     @abstractmethod
-    async def send_finding(self, finding: Finding) -> None:
+    async def send_finding(self, finding: Finding, last_seen_ts: int | None = None) -> None:
         """First-fire notification for a new finding."""
 
     @abstractmethod
-    async def send_regression(self, finding: Finding, last_fixed_ts: int) -> None:
+    async def send_regression(
+        self, finding: Finding, last_fixed_ts: int, last_seen_ts: int | None = None
+    ) -> None:
         """BC-031 regression alarm — previously-fixed CVE is back."""
 
     @abstractmethod
-    async def send_heartbeat(self, finding: Finding, open_since_ts: int) -> None:
+    async def send_heartbeat(
+        self, finding: Finding, open_since_ts: int, last_seen_ts: int | None = None
+    ) -> None:
         """BC-035 periodic reminder for findings sitting open too long."""
 
     @abstractmethod
