@@ -4,7 +4,8 @@ Covers:
     - CAP-B021: Operator sees regression alerts — previously-fixed CVE that returns raises a loud alarm
     - CAP-T071: Scan reconciliation diffs current scan against DB open+fixed rows
     - CAP-T072: `regressed` DB status with distinct Telegram notification format
-    - CAP-T073: Audit log carries auto_closed, regressed, fix_held_through_scan event types
+    - CAP-T073: Audit log carries finding_auto_fixed, regressed, fix_held_through_scan event types
+    - CAP-T176: Counter-based auto-fix (BC-086 — fixture pins AUTO_FIX_THRESHOLD=1 to preserve BC-031 cadence)
 
 Each test simulates a different container/finding regression scenario by
 calling hub.reconcile_scan with crafted (scanned_ids) sets against a tmp DB.
@@ -33,6 +34,10 @@ def recon_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Path:
     monkeypatch.setattr(hub, "DATA_DIR", data_dir)
     monkeypatch.setattr(hub, "DB_PATH", data_dir / "beaconry.db")
     monkeypatch.setattr(hub, "RECONCILE_ENABLED", True)
+    # BC-086: these BC-031 tests predate the counter-based threshold and
+    # assume immediate close on first absence. Set AUTO_FIX_THRESHOLD=1
+    # to preserve that cadence; BC-086's own tests exercise the counter.
+    monkeypatch.setattr(hub, "AUTO_FIX_THRESHOLD", 1)
     hub.init_db()
     return data_dir
 
@@ -90,14 +95,14 @@ def test_open_finding_absent_from_scan_auto_closes(recon_env: Path) -> None:
     assert _read_status(recon_env, f.id) == "open"
 
     # Simulate: scout rescans but the fix stuck — f.id not in scanned set.
-    regressed, auto_closed = hub.reconcile_scan("homelab", scanned_ids=set())
+    regressed, auto_closed, _ = hub.reconcile_scan("homelab", scanned_ids=set())
 
     assert regressed == []
     assert len(auto_closed) == 1 and auto_closed[0].id == f.id
-    assert _read_status(recon_env, f.id) == "fixed_verified"
+    assert _read_status(recon_env, f.id) == "auto_fixed"
 
     events = _audit_events(recon_env)
-    assert any(e["event"] == "auto_closed" and e["finding_id"] == f.id for e in events)
+    assert any(e["event"] == "finding_auto_fixed" and e["finding_id"] == f.id for e in events)
 
 
 # ── Gherkin Scenario 2: Regression triggers a loud alarm ─────────────────────
@@ -115,7 +120,7 @@ def test_fixed_finding_reappears_triggers_regression(
     assert _read_status(recon_env, f.id) == "fixed"
 
     # Simulate the regression: scout sees the vuln again.
-    regressed, auto_closed = hub.reconcile_scan("homelab", scanned_ids={f.id})
+    regressed, auto_closed, _ = hub.reconcile_scan("homelab", scanned_ids={f.id})
 
     assert auto_closed == []
     assert len(regressed) == 1 and regressed[0].cve_id == "CVE-REGRESSION-01"
@@ -130,12 +135,14 @@ def test_fixed_finding_reappears_triggers_regression(
 
 
 def test_fixed_verified_reappears_also_triggers_regression(recon_env: Path) -> None:
-    """Same rule applies to findings that reached fixed_verified."""
+    """Same rule applies to findings that reached fixed_verified via
+    operator-triggered [Fix now] (BC-031 path — distinct from BC-086's
+    auto_fixed path tested separately)."""
     f = _finding(fid="cccc000000000003", cve_id="CVE-REGRESSION-02")
     hub.save_finding(f)
     hub.set_status(f.id, "fixed_verified")
 
-    regressed, _ = hub.reconcile_scan("homelab", scanned_ids={f.id})
+    regressed, _, _ = hub.reconcile_scan("homelab", scanned_ids={f.id})
     assert len(regressed) == 1
     assert _read_status(recon_env, f.id) == "regressed"
 
@@ -143,23 +150,27 @@ def test_fixed_verified_reappears_also_triggers_regression(recon_env: Path) -> N
 # ── Gherkin Scenario 4: Snoozed finding ignored by reconciliation ────────────
 
 
-def test_snoozed_finding_untouched_by_reconciliation(recon_env: Path) -> None:
-    """Operator explicitly deferred — don't second-guess them."""
+def test_snoozed_finding_still_in_scan_is_untouched(recon_env: Path) -> None:
+    """Snoozed finding still appearing in scan stays snoozed. BC-086 only
+    closes snoozed findings that disappear — present ones are untouched."""
     f = _finding(fid="dddd000000000004")
     hub.save_finding(f)
     hub.set_status(f.id, "snoozed")
 
-    # Both present-in-scan and absent-from-scan paths must leave it alone.
     hub.reconcile_scan("homelab", scanned_ids={f.id})
     assert _read_status(recon_env, f.id) == "snoozed"
-    hub.reconcile_scan("homelab", scanned_ids=set())
-    assert _read_status(recon_env, f.id) == "snoozed"
 
 
-# ── Gherkin Scenario 5: Accepted finding ignored ─────────────────────────────
+# BC-086 explicitly supersedes the old BC-031 rule that snoozed/accepted
+# are ignored by reconcile. See `test_snoozed_closes_on_absent` +
+# `test_accepted_closes_on_absent` in `test_BC_086_auto_fix.py`.
 
 
-def test_accepted_finding_untouched(recon_env: Path) -> None:
+# ── Gherkin Scenario 5: Accepted finding still in scan is untouched ─────────
+
+
+def test_accepted_finding_still_in_scan_is_untouched(recon_env: Path) -> None:
+    """Accepted + present in scan: stays accepted. Absent case tested by BC-086."""
     f = _finding(fid="eeee000000000005")
     hub.save_finding(f)
     hub.set_status(f.id, "accepted")
@@ -183,9 +194,9 @@ def test_regressed_absent_from_scan_auto_closes_to_fixed_verified(
     assert _read_status(recon_env, f.id) == "regressed"
 
     # Operator re-applies fix. Next scan doesn't see it.
-    _, auto_closed = hub.reconcile_scan("homelab", scanned_ids=set())
+    _, auto_closed, _ = hub.reconcile_scan("homelab", scanned_ids=set())
     assert len(auto_closed) == 1
-    assert _read_status(recon_env, f.id) == "fixed_verified"
+    assert _read_status(recon_env, f.id) == "auto_fixed"
 
 
 # ── Configuration: BEACONRY_RECONCILE_ENABLED=0 disables everything ──────────
@@ -199,12 +210,14 @@ def test_reconcile_disabled_is_a_noop(recon_env: Path, monkeypatch: pytest.Monke
     monkeypatch.setattr(hub, "RECONCILE_ENABLED", False)
 
     # Would normally trigger regression if enabled.
-    regressed, auto_closed = hub.reconcile_scan("homelab", scanned_ids={f.id})
+    regressed, auto_closed, _ = hub.reconcile_scan("homelab", scanned_ids={f.id})
 
     assert regressed == [] and auto_closed == []
     assert _read_status(recon_env, f.id) == "fixed"  # unchanged
     # And no audit events written.
-    events = [e for e in _audit_events(recon_env) if e["event"] in ("auto_closed", "regressed")]
+    events = [
+        e for e in _audit_events(recon_env) if e["event"] in ("finding_auto_fixed", "regressed")
+    ]
     assert events == []
 
 
@@ -222,7 +235,7 @@ def test_reconcile_scoped_to_host(recon_env: Path) -> None:
     # We pass only the host-a id but the function filters by host anyway.
     hub.reconcile_scan("host-a", scanned_ids=set())  # auto-close f_a
 
-    assert _read_status(recon_env, f_a.id) == "fixed_verified"
+    assert _read_status(recon_env, f_a.id) == "auto_fixed"
     assert _read_status(recon_env, f_b.id) == "open"  # untouched
 
 
@@ -256,21 +269,23 @@ def test_simulated_regression_two_container_scenario(recon_env: Path) -> None:
 
     # Scan 2: everything still present.
     all_ids = {container_a.id, container_b.id, container_c.id}
-    regressed, auto_closed = hub.reconcile_scan("homelab", scanned_ids=all_ids)
+    regressed, auto_closed, _ = hub.reconcile_scan("homelab", scanned_ids=all_ids)
 
     assert len(regressed) == 1 and regressed[0].cve_id == "CVE-A"
-    assert auto_closed == []  # snoozed + accepted don't auto-close
+    assert (
+        auto_closed == []
+    )  # snoozed + accepted + present → stay; only absent triggers BC-086 auto-close
     assert _read_status(recon_env, container_a.id) == "regressed"
     assert _read_status(recon_env, container_b.id) == "snoozed"
     assert _read_status(recon_env, container_c.id) == "accepted"
 
     # Scan 3: operator re-fixed A properly; B still snoozed; C still accepted.
     scan3_ids = {container_b.id, container_c.id}
-    regressed, auto_closed = hub.reconcile_scan("homelab", scanned_ids=scan3_ids)
+    regressed, auto_closed, _ = hub.reconcile_scan("homelab", scanned_ids=scan3_ids)
 
     assert len(auto_closed) == 1 and auto_closed[0].cve_id == "CVE-A"
     assert regressed == []
-    assert _read_status(recon_env, container_a.id) == "fixed_verified"
+    assert _read_status(recon_env, container_a.id) == "auto_fixed"
     assert _read_status(recon_env, container_b.id) == "snoozed"
     assert _read_status(recon_env, container_c.id) == "accepted"
 

@@ -113,7 +113,7 @@ non-open rows never fire reminders.
 | /healthz executor label does not drive degraded | integration | `test_BC_066_manual_executor.py::test_healthz_executor_not_counted_as_check` | ✓ |
 | Unknown executor name falls back to manual | integration | `test_BC_066_manual_executor.py::test_unknown_executor_falls_back_to_manual` | ✓ |
 | Fresh v4 DB has last_claim_ts column | integration | `test_BC_066_manual_executor.py::test_fresh_db_v4_has_last_claim_ts_column` | ✓ |
-| Schema v3 → v4 migration adds last_claim_ts | integration | `test_BC_066_manual_executor.py::test_schema_v3_to_v4_migration` | ✓ |
+| Schema v3 → v4 migration adds last_claim_ts | integration | `test_BC_066_manual_executor.py::test_schema_v3_to_latest_migration` | ✓ |
 | _record_manual_claim writes timestamp | integration | `test_BC_066_manual_executor.py::test_record_manual_claim_writes_timestamp` | ✓ |
 | _record_manual_claim tolerant of missing column | integration | `test_BC_066_manual_executor.py::test_record_manual_claim_tolerant_of_missing_column` | ✓ |
 | Reminder sweep fires on overdue claim + audits + bumps claim_ts | integration | `test_BC_066_manual_executor.py::test_sweep_fires_on_overdue_claim` | ✓ |
@@ -122,7 +122,7 @@ non-open rows never fire reminders.
 | Reminder sweep skips rows without a claim | integration | `test_BC_066_manual_executor.py::test_sweep_skips_rows_without_claim` | ✓ |
 | Reminder sweep bumps last_notified_ts (dedup w/ BC-035) | integration | `test_BC_066_manual_executor.py::test_sweep_also_bumps_last_notified_ts` | ✓ |
 | MANUAL_REMINDER_INTERVAL_S=0 disables sweep | integration | `test_BC_066_manual_executor.py::test_interval_zero_disables_reminders` | ✓ |
-| EXPECTED_SCHEMA_VERSION == 4 | integration | `test_BC_066_manual_executor.py::test_expected_schema_version_is_4` | ✓ |
+| EXPECTED_SCHEMA_VERSION == 4 | integration | `test_BC_066_manual_executor.py::test_expected_schema_version_is_5` | ✓ |
 | CAPs registered | verify-traceability | `docs/CAPABILITIES.md` | ✓ |
 | `make check` + `make check-full` green | multi-gate | logs | ✓ |
 

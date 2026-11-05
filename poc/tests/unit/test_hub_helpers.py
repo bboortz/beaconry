@@ -646,7 +646,15 @@ async def test_receive_scan_empty_sbom_list(
         headers: dict[str, str] = {}
 
     result = await hub.receive_scan({"host": "h", "sboms": []}, _FakeRequest())  # type: ignore[arg-type]
-    assert result == {"status": "ok", "findings": 0, "regressed": 0, "auto_closed": 0}
+    # BC-086: response payload renamed auto_closed → auto_fixed and added
+    # regressed_from_auto_fix. Empty-scan happy path: all zeros.
+    assert result == {
+        "status": "ok",
+        "findings": 0,
+        "regressed": 0,
+        "auto_fixed": 0,
+        "regressed_from_auto_fix": 0,
+    }
 
 
 def test_set_status_updates_the_row() -> None:

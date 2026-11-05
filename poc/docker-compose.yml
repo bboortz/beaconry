@@ -32,6 +32,9 @@ services:
       # BC-031: scan reconciliation (fix-is-not-forget). Default on; set to 0
       # to disable the long-term diff for privacy/surveillance-conscious setups.
       - BEACONRY_RECONCILE_ENABLED=${BEACONRY_RECONCILE_ENABLED:-1}
+      # BC-086: consecutive absent scans before an open/snoozed/accepted/regressed
+      # finding flips to `auto_fixed`. Default 3; set to 1 to reproduce pre-BC-086 behaviour.
+      - BEACONRY_AUTO_FIX_THRESHOLD=${BEACONRY_AUTO_FIX_THRESHOLD:-3}
       # BC-030: internet-facing detection. Default on; set to 0 to force all
       # findings to Tier 2 regardless of container port publication.
       - BEACONRY_INTERNET_FACING_DETECTION_ENABLED=${BEACONRY_INTERNET_FACING_DETECTION_ENABLED:-1}

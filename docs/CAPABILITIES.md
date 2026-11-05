@@ -1674,6 +1674,43 @@ Enforcement: `poc/scripts/verify_traceability.py` runs as part of `make check`. 
 - **verified by:**
   - `poc/tests/integration/test_BC_083_forge_image.py`
 
+### CAP-T176: Counter-based auto-fix; snoozed/accepted/open all eligible
+- **type:** technical
+- **status:** active
+- **origin:** BC-086 — observed symptom: `python:3.11-slim-bookworm · libc-bin` finding on hetzner-staging stayed `snoozed` indefinitely after the image was ssh-removed and scout re-scanned. Audit of `hub.py` reconcile SQL (`WHERE status IN ('open', 'fixed', 'fixed_verified', 'regressed')`) found snoozed + accepted deliberately excluded. Gap was real and non-obvious.
+- **description:** `reconcile_scan()` SQL widened to also pull `snoozed`, `accepted`, and `auto_fixed` rows. Two new columns on the `findings` table: `absent_count INTEGER DEFAULT 0` (increments per scan where this finding is absent, resets to 0 on `bump_last_seen` when the finding reappears) and `auto_fixed_ts INTEGER DEFAULT 0` (records when the counter-triggered close happened). Schema version bumps 4 → 5. New `auto_fixed` status is distinct from `fixed_verified` — the former means "system inferred mitigation from scan absence", the latter means "operator pressed [Fix now] and re-scan confirmed clean". `make findings` + `/healthz` surface both; `make audit EVENT=finding_auto_fixed` lists the history. Transitions: `open|regressed|snoozed|accepted + absent AND absent_count ≥ AUTO_FIX_THRESHOLD → auto_fixed` (silent, audit `finding_auto_fixed`); `auto_fixed + present → regressed` (loud, audit `regressed_from_auto_fix`, distinct Telegram body via CAP-T178); `fixed|fixed_verified + present → regressed` (unchanged BC-031 path).
+- **supports:** CAP-B023
+- **verified by:**
+  - `poc/tests/integration/test_BC_086_auto_fix.py`
+  - `poc/tests/integration/test_BC_031_scan_reconciliation.py`
+
+### CAP-T177: `BEACONRY_AUTO_FIX_THRESHOLD` configurable (default 3)
+- **type:** technical
+- **status:** active
+- **origin:** BC-086 — immediate auto-close on first absence (pre-BC-086 BC-031 behaviour) is too aggressive: a single glitchy scan or scout restart can silently resolve a long-lived finding. Counter + threshold adds a conservatism knob.
+- **description:** `BEACONRY_AUTO_FIX_THRESHOLD` env var, read at hub boot into a module-level `AUTO_FIX_THRESHOLD` constant. Minimum `1` (reproduces pre-BC-086 behaviour), default `3` (one glitchy scan does not auto-close). Surfaced in `/healthz` under `checks.auto_fix_threshold` so `make status` can show the configured value without the operator reading env. Compose default propagated via `docker-compose.yml` with the usual `:-3` fallback.
+- **supports:** CAP-B023
+- **verified by:**
+  - `poc/tests/integration/test_BC_086_auto_fix.py`
+
+### CAP-T178: Auto-fix regression — distinct 🔥 AUTO-FIX REGRESSED path
+- **type:** technical
+- **status:** active
+- **origin:** BC-086 — when an `auto_fixed` finding reappears, the operator needs to know whether the system's inference was wrong OR whether a real regression happened. Collapsing it into BC-031's generic `🔥 FIX REGRESSED` message would hide the auto-fix provenance.
+- **description:** `reconcile_scan()` returns three lists: `regressed_from_fix` (BC-031 original — operator pressed [Fix now], then CVE came back), `auto_fixed_closes` (silent), and `regressed_from_auto_fix` (BC-086 new). The third routes through a dedicated `notify_auto_fix_regression()` async notifier + `format_auto_fix_regression()` message body that leads with "🔥 AUTO-FIX REGRESSED" and explains the auto-fix was less authoritative than an operator fix. Audit event name is `regressed_from_auto_fix` so `make audit` can filter the two regression classes separately.
+- **supports:** CAP-B023
+- **verified by:**
+  - `poc/tests/integration/test_BC_086_auto_fix.py`
+
+### CAP-T179: Every notification includes "Last seen: X ago"
+- **type:** technical
+- **status:** active
+- **origin:** BC-086 — operator seeing a Critical Telegram alert can't tell at a glance whether the CVE is live-right-now (just-scanned) or long-standing (last seen days ago, now part of the background noise). Adding the timing context is the cheap, universal fix.
+- **description:** New helper `format_last_seen(last_seen_ts, now_ts) -> str` returns one of `""` (never seen), `Last seen: just now` (<30s), `Last seen: Nm ago` (<1h), `Last seen: Nh ago` (<24h), or `Last seen: Nd ago`. All four notification bodies (`format_notification`, `format_heartbeat`, `format_regression`, `format_auto_fix_regression`) gained an optional `last_seen_ts` keyword argument that, when passed, injects the line into the body. Backward-compat: not passing it = no line, so pre-BC-086 callers continue to work.
+- **supports:** CAP-B023
+- **verified by:**
+  - `poc/tests/integration/test_BC_086_auto_fix.py`
+
 ### CAP-T171: `make verify-base-images` — standing anonymous-pull preflight
 - **type:** technical
 - **status:** active

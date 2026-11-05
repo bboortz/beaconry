@@ -22,6 +22,8 @@ services:
       - BEACONRY_HEARTBEAT_INTERVAL_S=86400
       - BEACONRY_HEARTBEAT_LIVENESS_WINDOW_S=604800
       - BEACONRY_RECONCILE_ENABLED=1
+      # BC-086: scenarios assume single-cycle round-trip (inject → inject-empty).
+      - BEACONRY_AUTO_FIX_THRESHOLD=1
       - BEACONRY_INTERNET_FACING_DETECTION_ENABLED=1
       # No Telegram — the mock dial above short-circuits all adapters.
       - TELEGRAM_BOT_TOKEN=

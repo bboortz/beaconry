@@ -68,8 +68,8 @@ New column `last_fixed_ts INTEGER DEFAULT 0`. **Legacy fixed/fixed_verified rows
 | Scenario 1 — Manual fix absent from scan auto-closes to fixed_verified | integration test | `test_BC_031_scan_reconciliation.py::test_open_finding_absent_from_scan_auto_closes` | ✓ |
 | Scenario 2 — fixed finding returns → regressed + loud alarm | integration test | `test_BC_031_scan_reconciliation.py::test_fixed_finding_reappears_triggers_regression` | ✓ |
 | fixed_verified also triggers regression | integration test | `test_BC_031_scan_reconciliation.py::test_fixed_verified_reappears_also_triggers_regression` | ✓ |
-| Scenario 4 — snoozed untouched | integration test | `test_BC_031_scan_reconciliation.py::test_snoozed_finding_untouched_by_reconciliation` | ✓ |
-| Scenario 5 — accepted untouched | integration test | `test_BC_031_scan_reconciliation.py::test_accepted_finding_untouched` | ✓ |
+| Scenario 4 — snoozed untouched | integration test | `test_BC_031_scan_reconciliation.py::test_snoozed_finding_still_in_scan_is_untouched` | ✓ |
+| Scenario 5 — accepted untouched | integration test | `test_BC_031_scan_reconciliation.py::test_accepted_finding_still_in_scan_is_untouched` | ✓ |
 | Scenario 6 — regressed → re-fix held → fixed_verified | integration test | `test_BC_031_scan_reconciliation.py::test_regressed_absent_from_scan_auto_closes_to_fixed_verified` | ✓ |
 | Config opt-out works | integration test | `test_BC_031_scan_reconciliation.py::test_reconcile_disabled_is_a_noop` | ✓ |
 | Host isolation (multi-host operators) | integration test | `test_BC_031_scan_reconciliation.py::test_reconcile_scoped_to_host` | ✓ |

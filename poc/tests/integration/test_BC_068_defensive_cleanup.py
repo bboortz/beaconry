@@ -40,9 +40,11 @@ def test_reconcile_scan_closes_connection_on_happy_path(hub_env) -> None:
     """Baseline: happy path doesn't leak FDs."""
     hub = hub_env["hub"]
     # Empty host — no rows → no UPDATEs → closes normally.
-    regressed, auto_closed = hub.reconcile_scan("empty-host", set())
+    # BC-086: 3-tuple return (regressed, auto_fixed, regressed_from_auto_fix).
+    regressed, auto_fixed, regressed_from_auto_fix = hub.reconcile_scan("empty-host", set())
     assert regressed == []
-    assert auto_closed == []
+    assert auto_fixed == []
+    assert regressed_from_auto_fix == []
 
 
 def test_reconcile_scan_closes_connection_on_update_error(

@@ -4,6 +4,55 @@ All notable changes to beaconry are recorded here. The format is based
 on [Keep a Changelog](https://keepachangelog.com/), and this project
 follows [Semantic Versioning](https://semver.org/).
 
+## [v0.11.0] — 2026-11-05
+
+### ⚠ Breaking behavior changes (BC-086)
+
+- **Status enum gains `auto_fixed`**. Previously `open|regressed +
+  absent` flipped to `fixed_verified`; it now flips to `auto_fixed`
+  so operator can distinguish "system-inferred mitigation" from
+  "operator-triggered fix + re-scan confirmed clean". Any external
+  dashboard parsing `beaconry metrics` / `make findings` output needs
+  to handle the new value.
+- **Reconcile cadence is counter-based.** Pre-BC-086 reconcile closed
+  on first missing scan; BC-086 requires `BEACONRY_AUTO_FIX_THRESHOLD`
+  consecutive misses (default 3 — operator can set `=1` to reproduce
+  old cadence). Transient scan glitches no longer silently resolve
+  long-lived findings.
+- **Schema version 4 → 5** via two new columns on `findings`:
+  `absent_count INT DEFAULT 0`, `auto_fixed_ts INT DEFAULT 0`.
+  ALTER TABLE migration is backward-compat on existing DBs.
+- **Audit event `auto_closed` renamed to `finding_auto_fixed`**.
+  Pre-existing audit log entries are preserved; new events use the
+  BC-086 name. `make audit EVENT=finding_auto_fixed` surfaces them.
+
+### Added
+- **hub,notify:** BC-086 covers `snoozed` and `accepted` findings in
+  reconcile. A snoozed finding whose image is removed now auto-closes
+  after the threshold; previously it stayed snoozed forever. Closes
+  the gap observed with `python:3.11-slim-bookworm · libc-bin` on
+  hetzner-staging: operator removed the image, re-scanned, but the
+  finding never cleared.
+- **hub,notify:** Distinct `🔥 AUTO-FIX REGRESSED` Telegram alert +
+  `regressed_from_auto_fix` audit event. If an auto-closed finding
+  reappears in a later scan, the operator sees it's the system's
+  inference (not an operator fix) that was overturned. Different
+  root-cause investigation path.
+- **hub,notify:** Every finding notification (new alert, heartbeat
+  reminder, regression, auto-fix regression) now carries a
+  `Last seen: X ago` line. Operator can tell at a glance whether the
+  CVE was observed seconds ago, hours ago, or days ago.
+- **hub:** `BEACONRY_AUTO_FIX_THRESHOLD` env var (default `3`,
+  minimum `1`). Documented in VARIABLES.md. Surfaced in `/healthz`
+  under `checks.auto_fix_threshold` so `make status` shows the
+  configured value.
+
+### Changed
+- **hub:** `reconcile_scan(host, scanned_ids)` return signature
+  changed from `(regressed, auto_closed)` 2-tuple to
+  `(regressed, auto_fixed, regressed_from_auto_fix)` 3-tuple.
+  Only in-process callers (pre-BC-086 external users: none).
+
 ## [v0.10.1] — 2026-11-04
 
 ### Removed

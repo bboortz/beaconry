@@ -1,4 +1,10 @@
-"""s03 — BC-031 regression alarm when a fixed CVE reappears."""
+"""s03 — BC-086 regression alarm when an auto-fixed CVE reappears.
+
+Previously tested BC-031's fixed_verified → regressed path. BC-086
+changed the auto-close status + emitted a distinct regression audit
+event (regressed_from_auto_fix). Scenario now exercises that new
+path end-to-end.
+"""
 
 from __future__ import annotations
 
@@ -10,15 +16,17 @@ from ._fixtures import cand
 class RegressionScenario(Scenario):
     order = 3
     name = "s03_regression"
-    description = "Fixed CVE reappears → status=regressed + 🔥 regressed audit event"
+    description = (
+        "Auto-fixed CVE reappears → status=regressed + 🔥 regressed_from_auto_fix audit event"
+    )
 
     def run(self, ctx: ScenarioContext) -> None:
         payload = cand(cve_id="CVE-S03", cvss=9.5)
-        # Open → fix (empty scan) → reappear.
+        # Open → auto_fix (empty scan, threshold=1 in harness) → reappear.
         ctx.inject_scan([payload])
         ctx.inject_scan([])
-        ctx.assert_status("CVE-S03", "fixed_verified")
+        ctx.assert_status("CVE-S03", "auto_fixed")
 
         ctx.inject_scan([payload])
         ctx.assert_status("CVE-S03", "regressed")
-        ctx.assert_audit_fired("regressed", cve_id="CVE-S03")
+        ctx.assert_audit_fired("regressed_from_auto_fix", cve_id="CVE-S03")

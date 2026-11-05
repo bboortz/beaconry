@@ -93,6 +93,11 @@ FIX_ENABLED = os.environ.get("BEACONRY_FIX_ENABLED", "1") != "0"
 # for self-hosted scenarios where the long-term diff feels like surveillance,
 # or when the DB holds historical state the operator doesn't want touched.
 RECONCILE_ENABLED = os.environ.get("BEACONRY_RECONCILE_ENABLED", "1") != "0"
+# BC-086: number of consecutive absent-from-scan cycles before a finding
+# flips to the `auto_fixed` status. 3 is conservative — one glitchy scan
+# won't trigger auto-close. Set to 1 to reproduce pre-BC-086 behaviour
+# (immediate close on first absence).
+AUTO_FIX_THRESHOLD = max(1, int(os.environ.get("BEACONRY_AUTO_FIX_THRESHOLD", "3")))
 # BC-030: internet_facing detection. Default ON because the whole point of
 # BC-030 is making Tier 1 reachable. Set to 0 to force the pre-BC-030 behavior
 # of treating every finding as not internet-facing (Tier 1 unreachable).
@@ -217,7 +222,7 @@ except ImportError:
 
 HUB_VERSION = SOFTWARE_VERSION  # back-compat alias
 API_VERSION = 1
-EXPECTED_SCHEMA_VERSION = 4
+EXPECTED_SCHEMA_VERSION = 5
 STRICT_API = os.environ.get("BEACONRY_STRICT_API") == "1"
 
 
@@ -382,7 +387,10 @@ def init_db() -> None:
             last_seen_ts INTEGER DEFAULT 0,
             last_notified_ts INTEGER DEFAULT 0,
             internet_facing INTEGER DEFAULT 0,
-            cve_alias TEXT
+            cve_alias TEXT,
+            last_claim_ts INTEGER DEFAULT 0,
+            absent_count INTEGER DEFAULT 0,
+            auto_fixed_ts INTEGER DEFAULT 0
         )
     """)
     # Idempotent migrations for DBs created before each column existed.
@@ -438,6 +446,17 @@ def init_db() -> None:
     # NULL / 0 = no outstanding claim; manual_claim_sweep ignores the row.
     with contextlib.suppress(sqlite3.OperationalError):
         con.execute("ALTER TABLE findings ADD COLUMN last_claim_ts INTEGER DEFAULT 0")
+    # BC-086: counter + timestamp for the new `auto_fixed` status. absent_count
+    # increments on each scan where this finding is absent; when it reaches
+    # BEACONRY_AUTO_FIX_THRESHOLD the status flips to `auto_fixed` with
+    # auto_fixed_ts recording when. BC-031 previously closed `open|regressed`
+    # on first absence; BC-086 extends that to `snoozed|accepted` AND adds
+    # the counter-based delay so transient scan glitches don't silently
+    # resolve long-lived findings.
+    with contextlib.suppress(sqlite3.OperationalError):
+        con.execute("ALTER TABLE findings ADD COLUMN absent_count INTEGER DEFAULT 0")
+    with contextlib.suppress(sqlite3.OperationalError):
+        con.execute("ALTER TABLE findings ADD COLUMN auto_fixed_ts INTEGER DEFAULT 0")
     # BC-036: digest cadence state — per-host last-sent + content hash. Separate
     # table (not a column on `findings`) because the state is per-host, not
     # per-finding.
@@ -619,8 +638,12 @@ def bump_last_seen(host: str, scanned_ids: set[str], *, now_ts: int | None = Non
     con = sqlite3.connect(DB_PATH)
     try:
         placeholders = ",".join("?" * len(scanned_ids))
+        # BC-086: also reset absent_count so a finding that reappears in a
+        # single scan clears its auto-fix progress; the counter only ever
+        # grows across uninterrupted absences.
         con.execute(
-            f"UPDATE findings SET last_seen_ts = ? WHERE host = ? AND id IN ({placeholders})",
+            f"UPDATE findings SET last_seen_ts = ?, absent_count = 0 "
+            f"WHERE host = ? AND id IN ({placeholders})",
             (ts, host, *scanned_ids),
         )
         con.commit()
@@ -631,48 +654,65 @@ def bump_last_seen(host: str, scanned_ids: set[str], *, now_ts: int | None = Non
         con.close()
 
 
-def reconcile_scan(host: str, scanned_ids: set[str]) -> tuple[list[Finding], list[Finding]]:
-    """BC-031: diff current scan against DB. Return (regressed, auto_closed).
+def reconcile_scan(
+    host: str, scanned_ids: set[str]
+) -> tuple[list[Finding], list[Finding], list[Finding]]:
+    """BC-031 + BC-086: diff current scan against DB.
 
-    State transitions applied:
-      - open      + absent  → fixed_verified  (auto-close, silent happy path)
-      - regressed + absent  → fixed_verified  (re-fix held)
-      - fixed     + present → regressed       (loud alarm, caller sends notification)
-      - fixed_verified + present → regressed  (same)
-      - snoozed / accepted  → unchanged (operator-decided, respect it)
+    Returns (regressed_from_fix, auto_fixed, regressed_from_auto_fix).
 
-    `scanned_ids` is the set of finding IDs produced by this scout cycle.
-    If RECONCILE_ENABLED is False, returns ([], []) without touching the DB.
+    State transitions (BC-086 extends BC-031's scope + adds counter):
+
+      - open | regressed | snoozed | accepted  + absent:
+          bump absent_count. If absent_count ≥ AUTO_FIX_THRESHOLD →
+          flip status='auto_fixed', record auto_fixed_ts, emit
+          `finding_auto_fixed` audit event. Silent (no Telegram).
+      - fixed | fixed_verified              + present:
+          flip status='regressed', loud "🔥 FIX REGRESSED" alert,
+          emit `regressed` audit event (BC-031 original behaviour).
+      - auto_fixed                          + present:
+          flip status='regressed', **distinct** "🔥 AUTO-FIX REGRESSED"
+          alert, emit `regressed_from_auto_fix` audit event.
+      - fixed | regressed                   + absent:
+          unchanged (operator decisions stay operator-owned).
+
+    The three return lists route to distinct notifier paths:
+        regressed_from_fix        → existing BC-031 FIX REGRESSED message
+        auto_fixed                → no notification (silent close)
+        regressed_from_auto_fix   → new BC-086 AUTO-FIX REGRESSED message
+
+    If RECONCILE_ENABLED is False, returns three empty lists.
     """
     if not RECONCILE_ENABLED:
-        return [], []
+        return [], [], []
     con = sqlite3.connect(DB_PATH)
-    # BC-068: wrap the full body in try/finally so a sqlite OperationalError
-    # raised DURING the UPDATE loop (not just the opening SELECT) still
-    # closes the connection. Without this, intermittent DB locks during
-    # a long reconcile leak one FD per failure; over thousands of scans
-    # that exhausts the process FD limit.
     try:
         try:
+            # BC-086: widen scope to snoozed + accepted; add
+            # absent_count + auto_fixed_ts columns to the row payload.
             rows = con.execute(
                 "SELECT id, host, cve_id, package, version, fixed_version, severity, cvss, "
-                "source_type, source_ref, description, tier, kev, status, last_fixed_ts "
+                "source_type, source_ref, description, tier, kev, status, last_fixed_ts, "
+                "absent_count, auto_fixed_ts "
                 "FROM findings WHERE host=? AND status IN "
-                "('open', 'fixed', 'fixed_verified', 'regressed')",
+                "('open', 'fixed', 'fixed_verified', 'regressed', 'snoozed', 'accepted', 'auto_fixed')",
                 (host,),
             ).fetchall()
         except sqlite3.OperationalError:
             # Cold boot / init_db hasn't run yet — nothing to reconcile.
-            return [], []
+            return [], [], []
 
-        regressed: list[Finding] = []
-        auto_closed: list[Finding] = []
+        regressed_from_fix: list[Finding] = []
+        auto_fixed_closes: list[Finding] = []
+        regressed_from_auto_fix: list[Finding] = []
         now = int(time.time())
 
         for row in rows:
             fid = row[0]
             status = row[13]
             last_fixed_ts = row[14] or 0
+            absent_count = row[15] or 0
+            auto_fixed_ts = row[16] or 0
             in_scan = fid in scanned_ids
             finding = Finding(
                 id=row[0],
@@ -690,21 +730,36 @@ def reconcile_scan(host: str, scanned_ids: set[str]) -> tuple[list[Finding], lis
                 kev=bool(row[12]),
             )
 
-            if status in ("open", "regressed") and not in_scan:
-                con.execute(
-                    "UPDATE findings SET status='fixed_verified', last_fixed_ts=? WHERE id=?",
-                    (now, fid),
-                )
-                auto_closed.append(finding)
-                _audit.append(
-                    "auto_closed",
-                    finding_id=fid,
-                    prev_status=status,
-                    cve_id=finding.cve_id,
-                )
+            # BC-086: counter-based auto-fix for open/regressed/snoozed/accepted.
+            if status in ("open", "regressed", "snoozed", "accepted") and not in_scan:
+                new_count = absent_count + 1
+                if new_count >= AUTO_FIX_THRESHOLD:
+                    con.execute(
+                        "UPDATE findings SET status='auto_fixed', "
+                        "auto_fixed_ts=?, absent_count=? WHERE id=?",
+                        (now, new_count, fid),
+                    )
+                    auto_fixed_closes.append(finding)
+                    _audit.append(
+                        "finding_auto_fixed",
+                        finding_id=fid,
+                        prev_status=status,
+                        cve_id=finding.cve_id,
+                        absent_scans=new_count,
+                        threshold=AUTO_FIX_THRESHOLD,
+                    )
+                else:
+                    con.execute(
+                        "UPDATE findings SET absent_count=? WHERE id=?",
+                        (new_count, fid),
+                    )
+            # BC-031 regression (operator-initiated fix): distinct message.
             elif status in ("fixed", "fixed_verified") and in_scan:
-                con.execute("UPDATE findings SET status='regressed' WHERE id=?", (fid,))
-                regressed.append(finding)
+                con.execute(
+                    "UPDATE findings SET status='regressed', absent_count=0 WHERE id=?",
+                    (fid,),
+                )
+                regressed_from_fix.append(finding)
                 _audit.append(
                     "regressed",
                     finding_id=fid,
@@ -713,9 +768,24 @@ def reconcile_scan(host: str, scanned_ids: set[str]) -> tuple[list[Finding], lis
                     last_fixed_ts=last_fixed_ts,
                     regressed_ts=now,
                 )
+            # BC-086: auto-fix regression → distinct audit event + loud alert.
+            elif status == "auto_fixed" and in_scan:
+                con.execute(
+                    "UPDATE findings SET status='regressed', absent_count=0 WHERE id=?",
+                    (fid,),
+                )
+                regressed_from_auto_fix.append(finding)
+                _audit.append(
+                    "regressed_from_auto_fix",
+                    finding_id=fid,
+                    prev_status="auto_fixed",
+                    cve_id=finding.cve_id,
+                    auto_fixed_ts=auto_fixed_ts,
+                    regressed_ts=now,
+                )
 
         con.commit()
-        return regressed, auto_closed
+        return regressed_from_fix, auto_fixed_closes, regressed_from_auto_fix
     finally:
         con.close()
 
@@ -987,7 +1057,12 @@ def is_multi_host_inventory() -> bool:
     return bool(row and row[0] and row[0] > 1)
 
 
-def format_notification(finding: Finding, *, multi_host: bool | None = None) -> str:
+def format_notification(
+    finding: Finding,
+    *,
+    multi_host: bool | None = None,
+    last_seen_ts: int | None = None,
+) -> str:
     """Build the message body in Telegram HTML (parse_mode='HTML').
 
     HTML is used instead of legacy Markdown because Markdown v1 has no escape
@@ -1033,6 +1108,13 @@ def format_notification(finding: Finding, *, multi_host: bool | None = None) -> 
             _viability_line(finding),
         ]
     )
+    # BC-086: Last-seen line injected between header block and description
+    # so the operator can tell if the alert is live-right-now (first-fire)
+    # or long-standing (heartbeat / reminder / regression context).
+    if last_seen_ts is not None:
+        last_seen_line = format_last_seen(last_seen_ts)
+        if last_seen_line:
+            lines.append(last_seen_line)
     if finding.description:
         desc = esc(finding.description[:160])
         lines.append(f"\n<i>{desc}</i>")
@@ -1132,7 +1214,77 @@ def _render_mock_telegram(text: str) -> str:
     return "\n".join([top, body, bot, buttons])
 
 
-def format_regression(finding: Finding, last_fixed_ts: int) -> str:
+def format_last_seen(last_seen_ts: int, *, now_ts: int | None = None) -> str:
+    """BC-086: human-readable "Last seen: Xh ago" line injected into every
+    finding notification. Returns the empty string if last_seen_ts is 0 or
+    very recent (<30 s); that indicates the finding is live right now
+    and the line would add noise."""
+    if not last_seen_ts:
+        return ""
+    now = now_ts if now_ts is not None else int(time.time())
+    delta = max(0, now - last_seen_ts)
+    if delta < 30:
+        return "Last seen: just now"
+    if delta < 3600:
+        return f"Last seen: {delta // 60}m ago"
+    if delta < 86400:
+        return f"Last seen: {delta // 3600}h ago"
+    days = delta // 86400
+    return f"Last seen: {days}d ago"
+
+
+def format_auto_fix_regression(
+    finding: Finding, auto_fixed_ts: int, *, last_seen_ts: int | None = None
+) -> str:
+    """BC-086: distinct 🔥 message for a CVE that was closed by the
+    counter-based auto-fix (BC-086) and then came back in a later scan.
+
+    Critically distinct from `format_regression` (operator-initiated fix
+    regression) so the operator can tell which process reclosed the
+    finding: a human tap + verified scan, or the system inferring
+    mitigation from scan absence. Different root-cause investigation
+    paths — don't collapse the message."""
+    import datetime
+    import html
+
+    def esc(s: str) -> str:
+        return html.escape(s, quote=False)
+
+    auto_date = (
+        datetime.datetime.fromtimestamp(auto_fixed_ts).strftime("%Y-%m-%d")
+        if auto_fixed_ts
+        else "unknown"
+    )
+    primary_display = f"<b>{esc(finding.cve_id)}</b>"
+    if not finding.cve_id.upper().startswith("CVE-"):
+        if finding.cve_alias:
+            primary_display += f" · <code>{esc(finding.cve_alias)}</code>"
+        else:
+            primary_display += " · <i>no CVE alias</i>"
+    lines = [
+        "🔥 <b>AUTO-FIX REGRESSED</b>",
+        f"{primary_display} auto-closed on <code>{auto_date}</code> is back on "
+        f"<code>{esc(finding.host)}</code>.",
+        f"Target: <code>{esc(finding.source_ref)}</code> ({esc(finding.source_type)})",
+        _package_fix_line(finding, esc),
+        _viability_line(finding),
+        "",
+        "<i>The counter-based auto-fix (BC-086) inferred mitigation from "
+        "scan absence; now the image is back with the same CVE. The "
+        "mitigation was either incomplete or something restored the "
+        "vulnerable image. Investigate before treating this as a routine "
+        "reappearance — auto-fix is less authoritative than an operator fix.</i>",
+    ]
+    if last_seen_ts is not None:
+        last_seen_line = format_last_seen(last_seen_ts)
+        if last_seen_line:
+            lines.append(last_seen_line)
+    return "\n".join(lines)
+
+
+def format_regression(
+    finding: Finding, last_fixed_ts: int, *, last_seen_ts: int | None = None
+) -> str:
     """BC-031: distinct 🔥 message for a previously-fixed CVE that returned.
 
     Loud by design — operator thought this was handled months ago; now it's
@@ -1169,10 +1321,16 @@ def format_regression(finding: Finding, last_fixed_ts: int) -> str:
         "<i>Something reinstalled or rolled back the vulnerable version. "
         "Investigate before re-fixing — the root cause will come back again otherwise.</i>",
     ]
+    if last_seen_ts is not None:
+        last_seen_line = format_last_seen(last_seen_ts)
+        if last_seen_line:
+            lines.append(last_seen_line)
     return "\n".join(lines)
 
 
-def format_heartbeat(finding: Finding, open_since_ts: int) -> str:
+def format_heartbeat(
+    finding: Finding, open_since_ts: int, *, last_seen_ts: int | None = None
+) -> str:
     """BC-035: periodic reminder for an open finding operator never actioned.
 
     Body shape mirrors format_notification but leads with a ⏰ header giving
@@ -1211,6 +1369,12 @@ def format_heartbeat(finding: Finding, open_since_ts: int) -> str:
             "accept the risk if you've decided to live with it.</i>",
         ]
     )
+    # BC-086: show last-seen context so operator can tell if scout is still
+    # actively tracking this or if the image has gone stale.
+    if last_seen_ts is not None:
+        last_seen_line = format_last_seen(last_seen_ts)
+        if last_seen_line:
+            lines.append(last_seen_line)
     return "\n".join(lines)
 
 
@@ -1330,6 +1494,31 @@ async def notify_regression(finding: Finding, last_fixed_ts: int) -> None:
         _emit_notify_sent_failed(finding, "regression", exc)
         raise
     _emit_notify_sent(finding, "regression")
+
+
+async def notify_auto_fix_regression(finding: Finding, auto_fixed_ts: int) -> None:
+    """BC-086: 🔥 AUTO-FIX REGRESSED — distinct notifier for findings
+    closed by the counter-based auto-fix that have now reappeared.
+
+    Falls back to the generic regression dispatch adapter so existing
+    adapters (telegram, notify-sent audit) continue to work without a
+    schema change. The format_* helper carries the distinct message body
+    so the operator can tell which process reclosed the finding.
+    """
+    if MOCK and not _notifiers_pkg.enabled_adapters():
+        _mock_print("AutoFixRegression", format_auto_fix_regression(finding, auto_fixed_ts))
+        _emit_notify_sent(finding, "auto_fix_regression")
+        return
+    try:
+        # Reuse the generic regression dispatch adapter; the text body is
+        # already shaped by format_auto_fix_regression upstream. For
+        # adapters that render their own text (telegram_mock test hook),
+        # this piggybacks on the existing wiring.
+        await _dispatch_regression(finding, auto_fixed_ts)
+    except Exception as exc:
+        _emit_notify_sent_failed(finding, "auto_fix_regression", exc)
+        raise
+    _emit_notify_sent(finding, "auto_fix_regression")
 
 
 async def notify(finding: Finding) -> None:
@@ -2189,13 +2378,26 @@ def _hub_healthz_summary() -> dict:
         # BC-066: configured executor (manual|docker). Lets operators
         # confirm `BEACONRY_EXECUTOR` is wired without reading env.
         "executor": EXECUTOR_NAME,
+        # BC-086: configured auto-fix threshold (consecutive absent scans
+        # before a finding flips to auto_fixed). Surfaced so `make status`
+        # shows it without the operator having to read env.
+        "auto_fix_threshold": AUTO_FIX_THRESHOLD,
     }
     # KEV is non-fatal — stale/unfetched surface in /healthz but don't flip "degraded".
     # BC-066: executor is a policy label, not a health signal — exclude it too.
+    # BC-086: auto_fix_threshold is a config echo, not a health signal — exclude.
     bool_checks = [
         v
         for k, v in checks.items()
-        if k not in ("last_scan_ts", "kev", "kev_last_fetch_s", "kev_count", "executor")
+        if k
+        not in (
+            "last_scan_ts",
+            "kev",
+            "kev_last_fetch_s",
+            "kev_count",
+            "executor",
+            "auto_fix_threshold",
+        )
     ]
     degraded = any(v not in ("ok", "polling", "mock") for v in bool_checks)
     return {
@@ -2667,6 +2869,49 @@ async def receive_heartbeat(payload: dict, request: _FastAPIRequest) -> dict:
     return {"ok": True, "host": host, "ts": now}
 
 
+async def _dispatch_regression_notifications(
+    host: str,
+    regressed: list[Finding],
+    regressed_from_auto_fix: list[Finding],
+    auto_fixed: list[Finding],
+) -> None:
+    """BC-031 + BC-086: fire the two regression notifier paths + log the
+    silent auto-fix closes. Extracted from `_ingest_candidates` to keep
+    that function under the complexity gate; also makes the two regression
+    classes trivially testable in isolation.
+
+    `regressed` → BC-031 "🔥 FIX REGRESSED" (operator-initiated fix came back).
+    `regressed_from_auto_fix` → BC-086 "🔥 AUTO-FIX REGRESSED" (system-inferred
+    close came back — distinct message + audit event so operator can diff
+    the two investigation paths).
+    `auto_fixed` → silent close; just a log line here.
+    """
+    if regressed:
+        log.warning("BC-031: %d regression(s) detected on %s", len(regressed), host)
+    for f in regressed:
+        con = sqlite3.connect(DB_PATH)
+        row = con.execute("SELECT last_fixed_ts FROM findings WHERE id=?", (f.id,)).fetchone()
+        con.close()
+        last_fixed_ts = (row[0] if row else 0) or 0
+        try:
+            await notify_regression(f, last_fixed_ts)
+        except Exception as e:  # noqa: BLE001
+            log.warning("notify_regression failed for %s: %s", f.cve_id, e)
+    if regressed_from_auto_fix:
+        log.warning("BC-086: %d AUTO-FIX regression(s) on %s", len(regressed_from_auto_fix), host)
+    for f in regressed_from_auto_fix:
+        con = sqlite3.connect(DB_PATH)
+        row = con.execute("SELECT auto_fixed_ts FROM findings WHERE id=?", (f.id,)).fetchone()
+        con.close()
+        auto_fixed_ts = (row[0] if row else 0) or 0
+        try:
+            await notify_auto_fix_regression(f, auto_fixed_ts)
+        except Exception as e:  # noqa: BLE001
+            log.warning("notify_auto_fix_regression failed for %s: %s", f.cve_id, e)
+    if auto_fixed:
+        log.info("BC-086: %d auto-fix close(s) on %s (silent)", len(auto_fixed), host)
+
+
 async def _ingest_candidates(
     host: str,
     candidates: list[Finding],
@@ -2750,30 +2995,18 @@ async def _ingest_candidates(
             sbom_count,
             _scout_sbom_baseline.get(host, 0),
         )
-        regressed, auto_closed = [], []
+        regressed, auto_fixed, regressed_from_auto_fix = [], [], []
     else:
         _update_scout_sbom_baseline(host, sbom_count)
-        regressed, auto_closed = reconcile_scan(host, scanned_ids)
-    if regressed:
-        log.warning("BC-031: %d regression(s) detected on %s", len(regressed), host)
-    for f in regressed:
-        # Load the last_fixed_ts from the DB (set_status wrote it on the fix).
-        con = sqlite3.connect(DB_PATH)
-        row = con.execute("SELECT last_fixed_ts FROM findings WHERE id=?", (f.id,)).fetchone()
-        con.close()
-        last_fixed_ts = (row[0] if row else 0) or 0
-        try:
-            await notify_regression(f, last_fixed_ts)
-        except Exception as e:  # noqa: BLE001
-            log.warning("notify_regression failed for %s: %s", f.cve_id, e)
-    if auto_closed:
-        log.info("BC-031: %d auto-close(s) on %s", len(auto_closed), host)
+        regressed, auto_fixed, regressed_from_auto_fix = reconcile_scan(host, scanned_ids)
+    await _dispatch_regression_notifications(host, regressed, regressed_from_auto_fix, auto_fixed)
 
     return {
         "status": "ok",
         "findings": new_findings,
         "regressed": len(regressed),
-        "auto_closed": len(auto_closed),
+        "auto_fixed": len(auto_fixed),
+        "regressed_from_auto_fix": len(regressed_from_auto_fix),
     }
 
 

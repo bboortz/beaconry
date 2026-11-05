@@ -156,8 +156,9 @@ def test_healthz_executor_not_counted_as_check(hub_env) -> None:
 # ── CAP-T139: schema v4 ─────────────────────────────────────────────────────
 
 
-def test_expected_schema_version_is_4(hub_env) -> None:
-    assert hub_env["hub"].EXPECTED_SCHEMA_VERSION == 4
+def test_expected_schema_version_is_5(hub_env) -> None:
+    # BC-086 bumped schema 4 → 5 (added absent_count, auto_fixed_ts).
+    assert hub_env["hub"].EXPECTED_SCHEMA_VERSION == 5
 
 
 def test_fresh_db_v4_has_last_claim_ts_column(hub_env) -> None:
@@ -167,8 +168,9 @@ def test_fresh_db_v4_has_last_claim_ts_column(hub_env) -> None:
     assert "last_claim_ts" in cols
 
 
-def test_schema_v3_to_v4_migration(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """CAP-T139: v3 DB (BC-063 shape) migrates up and preserves findings."""
+def test_schema_v3_to_latest_migration(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> None:
+    """CAP-T139 (+ BC-086): v3 DB migrates up past v4 (BC-066 last_claim_ts)
+    and v5 (BC-086 absent_count + auto_fixed_ts), preserving findings."""
     data_dir = tmp_path / "data"
     data_dir.mkdir()
     db_path = data_dir / "beaconry.db"
@@ -206,8 +208,11 @@ def test_schema_v3_to_v4_migration(tmp_path: Path, monkeypatch: pytest.MonkeyPat
     (ver,) = con.execute("PRAGMA user_version").fetchone()
     (row,) = con.execute("SELECT last_claim_ts FROM findings WHERE id='legacy'").fetchall()
     con.close()
-    assert ver == 4
+    assert ver == 5
     assert "last_claim_ts" in cols
+    # BC-086 columns appear too since migration runs through v5.
+    assert "absent_count" in cols
+    assert "auto_fixed_ts" in cols
     assert row[0] in (0, None)
     importlib.reload(hub)
 

@@ -29,6 +29,11 @@ def hub_env(tmp_path: Path, monkeypatch: pytest.MonkeyPatch) -> Iterator[dict]:
     # Match the scenarios compose.yml defaults so s08 interval math is predictable.
     monkeypatch.setenv("BEACONRY_HEARTBEAT_INTERVAL_S", "86400")
     monkeypatch.setenv("BEACONRY_DIGEST_INTERVAL_S", "86400")
+    # BC-086: scenarios were written against BC-031's single-cycle round-trip
+    # (inject → inject-empty → assert fixed_verified). Setting threshold=1
+    # preserves that cadence; the status enum change (fixed_verified →
+    # auto_fixed) is reflected in each scenario.
+    monkeypatch.setenv("BEACONRY_AUTO_FIX_THRESHOLD", "1")
 
     import hub
 
