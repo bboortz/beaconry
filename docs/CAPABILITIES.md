@@ -1756,6 +1756,24 @@ Enforcement: `poc/scripts/verify_traceability.py` runs as part of `make check`. 
 - **verified by:**
   - `poc/tests/integration/test_BC_089_snooze_expiry.py`
 
+### CAP-T185: `notify_auto_fix_regression` dispatches through `send_auto_fix_regression`
+- **type:** technical
+- **status:** active
+- **origin:** BC-090 — BC-086's CAP-T178 required a distinct `🔥 AUTO-FIX REGRESSED` body. The format helper exists and is unit-tested, but pre-BC-090 the real Telegram path called `_dispatch_regression` → `TelegramAdapter.send_regression` → `format_regression` (the generic BC-031 body). The distinct body was dead code on the hot path — only the MOCK/no-adapter branch ever used it.
+- **description:** `NotificationAdapter.send_auto_fix_regression(finding, auto_fixed_ts, last_seen_ts)` added with a default no-op (mirrors BC-089's `send_snooze_expired` pattern — out-of-tree adapters stay back-compat). `TelegramAdapter.send_auto_fix_regression` overrides with the real body (`format_auto_fix_regression`) and the regression keyboard (Fix / Accept, no Snooze). `notifiers.notify_auto_fix_regression` dispatcher exported from the package. Hub's `notify_auto_fix_regression` now routes through this new dispatcher instead of falling through to `_dispatch_regression`. Audit remains `notify_sent kind=auto_fix_regression`.
+- **supports:** CAP-T178, CAP-B023
+- **verified by:**
+  - `poc/tests/integration/test_BC_090_auto_fix_regression_body.py`
+
+### CAP-T186: `BEACONRY_AUTO_FIX_REGRESSION_NOTIFY_ENABLED` per-kind silence knob
+- **type:** technical
+- **status:** active
+- **origin:** BC-090 — some operators accept BC-086's silent auto-close policy but want to suppress the loud bounce-back ping (a snoozed-indefinitely version of CAP-T178). Adding a per-kind env matches the `BEACONRY_SNOOZE_NOTIFY_ON_EXPIRE` pattern from BC-089.
+- **description:** Default `1` (loud, matches CAP-T178 expectation). `0` → status still flips to `regressed_from_auto_fix`, audit `regressed_from_auto_fix` still fires, a `notify_suppressed` audit event records the deliberate silence (with `reason=BEACONRY_AUTO_FIX_REGRESSION_NOTIFY_ENABLED=0`). No Telegram ping. Separate axis from per-adapter `BEACONRY_NOTIFIER_<NAME>_ENABLED` and per-snooze-kind `BEACONRY_SNOOZE_NOTIFY_ON_EXPIRE`.
+- **supports:** CAP-T185
+- **verified by:**
+  - `poc/tests/integration/test_BC_090_auto_fix_regression_body.py`
+
 ### CAP-T171: `make verify-base-images` — standing anonymous-pull preflight
 - **type:** technical
 - **status:** active

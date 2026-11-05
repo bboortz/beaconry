@@ -84,10 +84,21 @@ async def notify_snooze_expired(finding: Finding) -> None:
     await _dispatch("send_snooze_expired", finding)
 
 
+async def notify_auto_fix_regression(
+    finding: Finding, auto_fixed_ts: int, last_seen_ts: int | None = None
+) -> None:
+    """BC-090: dispatch the distinct auto-fix regression body. Pre-BC-090
+    hub reused `notify_regression` which rendered format_regression, not
+    format_auto_fix_regression (dead code on Telegram path). This closes
+    the CAP-T178 gap."""
+    await _dispatch("send_auto_fix_regression", finding, auto_fixed_ts, last_seen_ts)
+
+
 __all__ = [
     "NotificationAdapter",
     "TelegramAdapter",
     "enabled_adapters",
+    "notify_auto_fix_regression",
     "notify_digest",
     "notify_finding",
     "notify_heartbeat",
