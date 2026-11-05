@@ -51,3 +51,13 @@ class NotificationAdapter(ABC):
     @abstractmethod
     async def send_digest(self, suppressed: list[Finding]) -> None:
         """BC-004 digest for findings suppressed by the per-run cap."""
+
+    # BC-089: distinct snooze-expired path. Default implementation no-ops so
+    # existing stub adapters (test fixtures) don't break; override to opt in.
+    async def send_snooze_expired(self, finding: Finding) -> None:  # noqa: B027
+        """BC-089 snooze expiry — '⏰ Snooze expired, back on your radar'.
+
+        Default no-op (not `@abstractmethod`) so existing out-of-tree
+        adapters keep booting; TelegramAdapter overrides with the real
+        body + keyboard.
+        """

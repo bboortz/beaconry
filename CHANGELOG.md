@@ -4,6 +4,42 @@ All notable changes to beaconry are recorded here. The format is based
 on [Keep a Changelog](https://keepachangelog.com/), and this project
 follows [Semantic Versioning](https://semver.org/).
 
+## [v0.13.0] — 2026-11-05
+
+### Fixed (BC-089)
+
+- **snooze:** the `[⏰ Snooze 4h]` button now actually snoozes for 4
+  hours. Pre-BC-089 the hour count was parsed from the callback_data
+  and printed in the operator reply but never stored — "4h" meant
+  "indefinitely". New schema column `snooze_until_ts` + periodic sweep
+  (every `BEACONRY_SNOOZE_SWEEP_INTERVAL_S`, default 60s) flips
+  `snoozed → open` at expiry and fires a distinct `⏰ Snooze expired`
+  notification unless `BEACONRY_SNOOZE_NOTIFY_ON_EXPIRE=0`. CAP-T183.
+- **snooze:** inline keyboard now renders one button per entry in
+  `BEACONRY_SNOOZE_DEFAULT_HOURS` (default `1,4,24,168` →
+  `[⏰ 1h] [⏰ 4h] [⏰ 1d] [⏰ 1w]`). Operator can collapse to a
+  single button (`BEACONRY_SNOOZE_DEFAULT_HOURS=4`) or add arbitrary
+  durations. CAP-T184.
+
+### ⚠ Breaking behaviour (operator-visible)
+
+- **New snoozes WILL re-open at expiry.** Before: snooze = silence
+  forever. After: snooze = defer by N hours. Operators who depended
+  on indefinite silence should use `[✅ Accept risk]` instead, or
+  set `BEACONRY_SNOOZE_NOTIFY_ON_EXPIRE=0` for silent re-open
+  (the audit event still fires, so expiry is observable without the
+  Telegram ping).
+- **Legacy snoozes (pre-v0.13.0) stay indefinite.** Rows with
+  `snooze_until_ts=0` (the schema default for legacy rows) are
+  filtered out of the sweep (`WHERE snooze_until_ts > 0`). Pre-BC-089
+  state is preserved across upgrade — no surprise re-opens.
+
+### Schema
+
+- v5 → **v6**. `ALTER TABLE findings ADD COLUMN snooze_until_ts
+  INTEGER DEFAULT 0`. Idempotent (sqlite silently ignores if column
+  exists). `EXPECTED_SCHEMA_VERSION` bumped to `6`.
+
 ## [v0.12.1] — 2026-11-05
 
 ### Documentation (BC-088)

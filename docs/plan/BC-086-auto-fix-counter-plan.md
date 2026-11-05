@@ -142,7 +142,7 @@ via audit log + `make findings` is enough.
 | Scenario / goal | Evidence | Pointer | Status |
 |---|---|---|---|
 | New schema columns present | unit | `test_BC_086_auto_fix.py::test_schema_has_absent_count_and_auto_fix_columns` | ✓ |
-| Schema version bumped to 5 | unit | `test_BC_086_auto_fix.py::test_schema_version_is_5` | ✓ |
+| Schema version bumped (5 at BC-086 ship, now 6 after BC-089) | unit | `test_BC_086_auto_fix.py::test_schema_version_is_6` | ✓ |
 | Threshold env var read, defaults to 3 | unit | `test_BC_086_auto_fix.py::test_auto_fix_threshold_default_is_3` | ✓ |
 | Open finding: counter increments on absent | unit | `test_BC_086_auto_fix.py::test_counter_increments_when_open_absent` | ✓ |
 | Open finding: auto_fixed at threshold | unit | `test_BC_086_auto_fix.py::test_open_flips_to_auto_fixed_at_threshold` | ✓ |

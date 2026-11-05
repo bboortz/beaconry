@@ -115,10 +115,15 @@ def test_fix_button_has_cve(hub_env) -> None:
 
 
 def test_snooze_button_has_cve_after_hours(hub_env) -> None:
-    """CAP-T118: Snooze button is `snooze:<id>:4:CVE-…` (CVE after hours)."""
+    """CAP-T118: Snooze button is `snooze:<id>:<hours>:CVE-…` (CVE after hours).
+
+    BC-089: keyboard now has multiple snooze buttons (one per hour in
+    `BEACONRY_SNOOZE_DEFAULT_HOURS`). Picking the 4h variant for the
+    callback-shape assertion since `4` is always in the default list.
+    """
     hub = hub_env["hub"]
     cbs = _unwrap_cb(hub._kb_finding(_finding(hub)))
-    snooze = next(c for c in cbs if c.startswith("snooze:"))
+    snooze = next(c for c in cbs if c.startswith("snooze:") and c.split(":")[2] == "4")
     parts = snooze.split(":")
     assert parts[0] == "snooze"
     assert parts[1] == "f0b442fb8acffb61"

@@ -76,6 +76,14 @@ async def notify_digest(suppressed: list[Finding]) -> None:
     await _dispatch("send_digest", suppressed)
 
 
+async def notify_snooze_expired(finding: Finding) -> None:
+    """BC-089: dispatch the distinct snooze-expired body to every enabled
+    adapter. Any adapter that doesn't override `send_snooze_expired`
+    inherits the base no-op, so BC-089 doesn't force a schema change on
+    out-of-tree adapters."""
+    await _dispatch("send_snooze_expired", finding)
+
+
 __all__ = [
     "NotificationAdapter",
     "TelegramAdapter",
@@ -84,6 +92,7 @@ __all__ = [
     "notify_finding",
     "notify_heartbeat",
     "notify_regression",
+    "notify_snooze_expired",
     "register",
     "reset_registry_for_tests",
 ]

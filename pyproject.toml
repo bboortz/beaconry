@@ -3,7 +3,7 @@ name = "beaconry"
 # BC-062: VERSION file is the single source of truth; this literal is only
 # a build-time placeholder (setuptools-dynamic would rebuild on every bump,
 # which is more friction than value). verify-version-sync lint catches drift.
-version = "0.12.1"
+version = "0.13.0"
 description = "CVE scanning + auto-remediation for self-hosted operators"
 # BC-078: distroless runtime image ships Python 3.11 (debian-12 default).
 # Local dev + CI can still use 3.12; the floor just permits the runtime.
