@@ -38,6 +38,7 @@ try:
     import waterfall as _waterfall
     from beaconry_health import build_router, check_binary, check_db, check_dir_populated
     from notifiers import TelegramAdapter
+    from notifiers import notify_auto_fix_regression as _dispatch_auto_fix_regression
     from notifiers import notify_digest as _dispatch_digest
     from notifiers import notify_finding as _dispatch_finding
     from notifiers import notify_heartbeat as _dispatch_heartbeat
@@ -53,6 +54,9 @@ except ImportError:
     from poc.hub import urgency as _urgency
     from poc.hub import waterfall as _waterfall
     from poc.hub.notifiers import TelegramAdapter
+    from poc.hub.notifiers import (
+        notify_auto_fix_regression as _dispatch_auto_fix_regression,
+    )
     from poc.hub.notifiers import notify_digest as _dispatch_digest
     from poc.hub.notifiers import notify_finding as _dispatch_finding
     from poc.hub.notifiers import notify_heartbeat as _dispatch_heartbeat
@@ -149,6 +153,14 @@ def _parse_snooze_hours(raw: str) -> list[int]:
 SNOOZE_DEFAULT_HOURS = _parse_snooze_hours(os.environ.get("BEACONRY_SNOOZE_DEFAULT_HOURS", ""))
 SNOOZE_SWEEP_INTERVAL_S = max(5, int(os.environ.get("BEACONRY_SNOOZE_SWEEP_INTERVAL_S") or "60"))
 SNOOZE_NOTIFY_ON_EXPIRE = os.environ.get("BEACONRY_SNOOZE_NOTIFY_ON_EXPIRE", "1") != "0"
+# BC-090: operator can opt out of the distinct auto-fix regression Telegram
+# ping while keeping the audit trail. Rare escape hatch for operators who
+# accept the BC-086 silent-close policy and don't want a loud alert on the
+# bounce-back. Default on (loud). Separate from per-adapter
+# BEACONRY_NOTIFIER_<NAME>_ENABLED and the per-snooze-kind BC-089 toggle.
+AUTO_FIX_REGRESSION_NOTIFY_ENABLED = (
+    os.environ.get("BEACONRY_AUTO_FIX_REGRESSION_NOTIFY_ENABLED", "1") != "0"
+)
 # BC-030: internet_facing detection. Default ON because the whole point of
 # BC-030 is making Tier 1 reachable. Set to 0 to force the pre-BC-030 behavior
 # of treating every finding as not internet-facing (Tier 1 unreachable).
@@ -1652,15 +1664,32 @@ async def notify_regression(finding: Finding, last_fixed_ts: int) -> None:
 
 
 async def notify_auto_fix_regression(finding: Finding, auto_fixed_ts: int) -> None:
-    """BC-086: 🔥 AUTO-FIX REGRESSED — distinct notifier for findings
-    closed by the counter-based auto-fix that have now reappeared.
+    """BC-086 (CAP-T178): 🔥 AUTO-FIX REGRESSED — distinct notifier for
+    findings closed by the counter-based auto-fix that have now reappeared.
 
-    Falls back to the generic regression dispatch adapter so existing
-    adapters (telegram, notify-sent audit) continue to work without a
-    schema change. The format_* helper carries the distinct message body
-    so the operator can tell which process reclosed the finding.
+    BC-090: now dispatches through `send_auto_fix_regression` (not
+    `send_regression`) so the real Telegram body renders
+    `format_auto_fix_regression`. Pre-BC-090 the MOCK path showed the
+    distinct body but the live Telegram path fell through to
+    `format_regression` — dead code on the hot path.
+
+    Opt-out: `BEACONRY_AUTO_FIX_REGRESSION_NOTIFY_ENABLED=0` suppresses
+    the Telegram ping (status flip + `regressed_from_auto_fix` audit
+    still fire). Separate from per-adapter and per-snooze-kind toggles.
     """
     last_seen_ts = _load_last_seen(finding.id)
+    if not AUTO_FIX_REGRESSION_NOTIFY_ENABLED:
+        # Operator opted out; audit still records the suppression so
+        # the regression isn't silently dropped from the record.
+        _audit.append(
+            "notify_suppressed",
+            finding_id=finding.id,
+            cve_id=finding.cve_id,
+            host=finding.host,
+            kind="auto_fix_regression",
+            reason="BEACONRY_AUTO_FIX_REGRESSION_NOTIFY_ENABLED=0",
+        )
+        return
     if MOCK and not _notifiers_pkg.enabled_adapters():
         _mock_print(
             "AutoFixRegression",
@@ -1669,11 +1698,7 @@ async def notify_auto_fix_regression(finding: Finding, auto_fixed_ts: int) -> No
         _emit_notify_sent(finding, "auto_fix_regression")
         return
     try:
-        # Reuse the generic regression dispatch adapter; the text body is
-        # already shaped by format_auto_fix_regression upstream. For
-        # adapters that render their own text (telegram_mock test hook),
-        # this piggybacks on the existing wiring.
-        await _dispatch_regression(finding, auto_fixed_ts, last_seen_ts)
+        await _dispatch_auto_fix_regression(finding, auto_fixed_ts, last_seen_ts)
     except Exception as exc:
         _emit_notify_sent_failed(finding, "auto_fix_regression", exc)
         raise
@@ -2097,6 +2122,7 @@ async def lifespan(
                 "heartbeat": format_heartbeat,
                 "digest": format_digest_body,
                 "snooze_expired": format_snooze_expired,
+                "auto_fix_regression": format_auto_fix_regression,
             },
             keyboard_builders={
                 "finding": _kb_finding,

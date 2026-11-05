@@ -61,3 +61,13 @@ class NotificationAdapter(ABC):
         adapters keep booting; TelegramAdapter overrides with the real
         body + keyboard.
         """
+
+    # BC-090: distinct auto-fix regression path. Default implementation no-ops
+    # so existing stub adapters (test fixtures) don't break; override to opt in.
+    # Semantically distinct from send_regression (BC-031): the regression came
+    # from a BC-086 counter-based silent auto-close being wrong, not from an
+    # operator-triggered fix going stale.
+    async def send_auto_fix_regression(  # noqa: B027
+        self, finding: Finding, auto_fixed_ts: int, last_seen_ts: int | None = None
+    ) -> None:
+        """BC-090 auto-fix regression — '🔥 AUTO-FIX REGRESSED'."""

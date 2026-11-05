@@ -167,9 +167,11 @@ async def test_notify_auto_fix_regression_passes_last_seen(
     _seed_finding(db_env / "beaconry.db", fid, 1800000333)
     f = _finding(fid)
     monkeypatch.setattr(hub, "MOCK", False)
+    monkeypatch.setattr(hub, "AUTO_FIX_REGRESSION_NOTIFY_ENABLED", True)
     dispatch = AsyncMock()
-    # notify_auto_fix_regression reuses _dispatch_regression under the hood.
-    monkeypatch.setattr(hub, "_dispatch_regression", dispatch)
+    # BC-090: notify_auto_fix_regression now dispatches to the distinct
+    # _dispatch_auto_fix_regression (pre-BC-090 fell through to _dispatch_regression).
+    monkeypatch.setattr(hub, "_dispatch_auto_fix_regression", dispatch)
     monkeypatch.setattr(hub._notifiers_pkg, "enabled_adapters", lambda: [object()])
     await hub.notify_auto_fix_regression(f, auto_fixed_ts=1799800000)
     dispatch.assert_awaited_once_with(f, 1799800000, 1800000333)

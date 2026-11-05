@@ -92,3 +92,13 @@ class TelegramAdapter(NotificationAdapter):
         text = self._fmt["snooze_expired"](finding)
         kb = self._kb["finding"](finding)
         await self._send(text, reply_markup=kb)
+
+    async def send_auto_fix_regression(
+        self, finding: Finding, auto_fixed_ts: int, last_seen_ts: int | None = None
+    ) -> None:
+        """BC-090: dedicated path — renders format_auto_fix_regression
+        (not format_regression). Keyboard is the regression keyboard
+        (Fix / Accept, no Snooze — a regression deserves attention)."""
+        text = self._fmt["auto_fix_regression"](finding, auto_fixed_ts, last_seen_ts=last_seen_ts)
+        kb = self._kb["regression"](finding)
+        await self._send(text, reply_markup=kb)
