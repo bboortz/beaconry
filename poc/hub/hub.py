@@ -646,7 +646,16 @@ def bump_last_seen(host: str, scanned_ids: set[str], *, now_ts: int | None = Non
             f"WHERE host = ? AND id IN ({placeholders})",
             (ts, host, *scanned_ids),
         )
+        affected = con.total_changes
         con.commit()
+        # BC-086 temporary diagnostic: how many DB rows had their counter
+        # reset by this scan. Helps correlate with reconcile's absent list.
+        log.info(
+            "BC-086 bump_last_seen host=%s scanned_ids=%d rows_updated=%d",
+            host,
+            len(scanned_ids),
+            affected,
+        )
     except sqlite3.OperationalError:
         # Cold boot / init_db hasn't run — nothing to update.
         pass
@@ -685,6 +694,15 @@ def reconcile_scan(
     """
     if not RECONCILE_ENABLED:
         return [], [], []
+    # BC-086 temporary diagnostic: log entry so we can watch counter
+    # progression on real scans. Will be downgraded to log.debug (or removed)
+    # once the counter puzzle from BC-086 ship-verification is understood.
+    log.info(
+        "BC-086 reconcile ENTER host=%s scanned_ids_count=%d threshold=%d",
+        host,
+        len(scanned_ids),
+        AUTO_FIX_THRESHOLD,
+    )
     con = sqlite3.connect(DB_PATH)
     try:
         try:
@@ -728,6 +746,16 @@ def reconcile_scan(
                 description=row[10] or "",
                 tier=row[11],
                 kev=bool(row[12]),
+            )
+
+            # BC-086 temporary diagnostic: per-finding decision log so we
+            # can prove what the reconcile loop does on real scans.
+            log.info(
+                "BC-086 reconcile fid=%s status=%s absent_count=%d in_scan=%s",
+                fid,
+                status,
+                absent_count,
+                in_scan,
             )
 
             # BC-086: counter-based auto-fix for open/regressed/snoozed/accepted.
@@ -2451,10 +2479,20 @@ def dedup_and_cap(findings: list[Finding], cap: int) -> tuple[list[Finding], lis
 
 def format_digest_body(suppressed: list[Finding]) -> str:
     """BC-022 digest render — one HTML blob summarising cap-suppressed findings.
-    Pure render; sending is the adapter's job."""
+    Pure render; sending is the adapter's job.
+
+    BC-086 post-ship: each bullet carries the source_ref (image/target) so
+    the operator can tell which service the CVE belongs to without
+    cross-referencing. The host header matches format_notification's style
+    for visual consistency.
+    """
     import html
 
-    lines = [f"📋 <b>{len(suppressed)} additional finding(s) suppressed this run</b>"]
+    host = suppressed[0].host if suppressed else ""
+    lines: list[str] = []
+    if host:
+        lines.append(f"🖥️ <code>{html.escape(host)}</code>")
+    lines.append(f"📋 <b>{len(suppressed)} additional finding(s) suppressed this run</b>")
     kev_count = sum(1 for f in suppressed if f.kev)
     if kev_count:
         lines.append(
@@ -2463,9 +2501,12 @@ def format_digest_body(suppressed: list[Finding]) -> str:
         )
     for f in suppressed[:10]:
         prefix = "🚨 " if f.kev else ""
+        # Truncate source_ref if very long to keep the bullet readable.
+        src = f.source_ref if len(f.source_ref) <= 40 else f.source_ref[:37] + "…"
         lines.append(
             f"• {prefix}<code>{html.escape(f.cve_id)}</code> {f.severity} "
-            f"CVSS {f.cvss:.1f} — <code>{html.escape(f.package)}</code>"
+            f"CVSS {f.cvss:.1f} — <code>{html.escape(f.package)}</code> "
+            f"on <code>{html.escape(src)}</code>"
         )
     if len(suppressed) > 10:
         lines.append(f"… and {len(suppressed) - 10} more")

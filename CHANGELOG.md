@@ -4,6 +4,32 @@ All notable changes to beaconry are recorded here. The format is based
 on [Keep a Changelog](https://keepachangelog.com/), and this project
 follows [Semantic Versioning](https://semver.org/).
 
+## [v0.11.1] — 2026-11-05
+
+### Fixed
+- **scripts:** `make findings STATUS=auto_fixed` now works. The CLI's
+  argparse choices list was not updated when BC-086 added the
+  `auto_fixed` status; operator saw "invalid choice: 'auto_fixed'".
+  Caught during BC-086 ship-verification on the live stack.
+
+### Changed
+- **notify:** digest body now shows the host as a header line AND the
+  source_ref (image/target) per bullet. Operator can tell which
+  service each suppressed finding belongs to without cross-referencing
+  `make findings`. Source refs > 40 chars get truncated with "…" to
+  keep bullets readable.
+
+### Added (temporary diagnostic)
+- **hub:** `reconcile_scan` + `bump_last_seen` emit INFO-level logs
+  during BC-086 ship-verification so we can watch counter progression
+  in production. During the v0.11.0 roll-out we observed 11 findings
+  stuck at `absent_count=2` after 3 post-upgrade scans (expected 3)
+  — manual probe correctly flipped them to `auto_fixed`, so the
+  counter logic itself is sound. Logging left in place to prove (or
+  disprove) that natural scans increment correctly on every pass.
+  Removal (downgrade to `log.debug`) follows once the puzzle is
+  understood.
+
 ## [v0.11.0] — 2026-11-05
 
 ### ⚠ Breaking behavior changes (BC-086)

@@ -47,7 +47,7 @@ help:
 	@: # BC-044 BEGIN OPERATOR_CLI_TARGETS — authoritative list the live-smoke harness autodetects.
 	@echo "  make status                     one-line-per-service health table (BC-013)"
 	@echo "  make findings                   read-only CLI view of findings DB"
-	@echo "                                  STATUS=regressed|open|verification_failed|snoozed|accepted|fixed|fixed_verified"
+	@echo "                                  STATUS=regressed|open|verification_failed|snoozed|accepted|fixed|fixed_verified|auto_fixed"
 	@echo "                                  HOST=<label>  filter to a single scout's findings (BC-057)"
 	@echo "                                  BEACONRY_FINDINGS_LOCAL=1 forces local .beaconry-cache DB over compose volume"
 	@echo "  make audit                      operator CLI view of /data/audit.log (BC-042)"

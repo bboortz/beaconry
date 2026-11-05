@@ -17,6 +17,9 @@ from pathlib import Path
 
 # BC-011: added fixed_verified + verification_failed. Order defines sort rank —
 # unresolved first, then intermediate, then terminal states grouped together.
+# BC-086: added auto_fixed (system-inferred close via counter-based reconcile).
+# Ranked near fixed_verified because both are terminal "closed" states, but
+# ordered after fixed_verified since fixed_verified is operator-authorized.
 STATUS_ORDER = (
     "regressed",  # BC-031: highest urgency — a previously-fixed CVE is back
     "open",
@@ -25,6 +28,7 @@ STATUS_ORDER = (
     "accepted",
     "fixed",
     "fixed_verified",
+    "auto_fixed",  # BC-086
 )
 STATUS_RANK = {s: i for i, s in enumerate(STATUS_ORDER)}
 
