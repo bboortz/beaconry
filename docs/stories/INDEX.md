@@ -85,4 +85,5 @@ Lifecycle: `draft → ready → in-progress → shipped`. Status matches each st
 | BC-090 | Auto-fix regression body actually reaches Telegram                       | shipped     | — (merged to dev)                   |
 | BC-091 | KEV fetch User-Agent fix — CISA 403 escape                               | shipped     | — (merged to dev)                   |
 | BC-092 | Canary ring — production fixes gated on staging precedent                | shipped     | — (merged to dev)                   |
-| BC-093 | Rescan triggers — daily + docker events + pacman hook                    | in-progress | feat/BC-093-rescan-hooks            |
+| BC-093 | Rescan triggers — daily + docker events + pacman hook                    | shipped     | — (merged to dev)                   |
+| BC-094 | Homelab consumes forge-signed ghcr images for beaconry                   | in-progress | feat/BC-094-signed-ghcr-images      |

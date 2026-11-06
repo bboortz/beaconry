@@ -4,6 +4,49 @@ All notable changes to beaconry are recorded here. The format is based
 on [Keep a Changelog](https://keepachangelog.com/), and this project
 follows [Semantic Versioning](https://semver.org/).
 
+## [v0.16.2] — 2026-11-06
+
+### Added (BC-094)
+
+- **compose overrides**: new opt-in files
+  `poc/docker-compose.hub-ghcr.yml` + `poc/docker-compose.scout-
+  ghcr.yml`. Each defines a single service with
+  `image: ghcr.io/bboortz/beaconry-{hub,scout}:${BEACONRY_IMAGE_
+  TAG:-latest}`. Lets homelab `docker compose pull && up -d`
+  the forge-signed artifact without touching the base compose or
+  the 19+ downstream refs to `beaconry-{hub,scout}:latest`
+  (cleanup.py, dogfood_scan.py, demo.sh, cold-start/test
+  stacks). CAP-T194.
+- **env**: `BEACONRY_IMAGE_TAG` (default `latest`). Documented in
+  `docs/VARIABLES.md` + `poc/.env.example`. Compose-substituted
+  only; no Python module reads it. CAP-T195.
+- **lint**: `verify_variables_documented.py` gains a
+  `DEPLOY_ONLY_ALLOWLIST` category so compose-substituted vars
+  skip the orphan check.
+
+### No runtime change
+
+Local dev's `make demo` / `make live-rebuild` / `make
+test-scenarios` unchanged — still build locally, still tag as
+`beaconry-{hub,scout}:latest`. Override files are opt-in via
+`docker compose -f` chain.
+
+### Follow-up (homelab repo, not shipped here)
+
+- `bb-claw/homelab:feat/beaconry-deploy` needs a sibling
+  `ansible/tasks/docker-compose-pull-deploy.yml` that replaces
+  `docker compose build --pull` with `docker compose pull` +
+  cosign verify against forge's keyless-OIDC identity
+  (`https://github.com/bboortz/forge/.github/workflows/build.yml@refs/heads/main`).
+- Both `beaconry_hub` + `beaconry_scout` roles swap include
+  target to the new task and add the `-f docker-compose.*-ghcr.yml`
+  flag.
+- Systemd unit templates for beaconry-{hub,scout} swap
+  `ExecStartPre=docker compose build` → `ExecStartPre=docker
+  compose pull`.
+- Cosign binary installed as a prerequisite (common `docker`
+  role is the obvious home).
+
 ## [v0.16.1] — 2026-11-05
 
 ### Documentation

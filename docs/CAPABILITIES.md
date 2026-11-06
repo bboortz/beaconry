@@ -1801,6 +1801,24 @@ Enforcement: `poc/scripts/verify_traceability.py` runs as part of `make check`. 
 - **verified by:**
   - `poc/tests/integration/test_BC_093_rescan_hooks.py`
 
+### CAP-T194: ghcr image override compose files (`docker-compose.{hub,scout}-ghcr.yml`)
+- **type:** technical
+- **status:** active
+- **origin:** BC-094 — forge (bboortz/forge) builds and cosign-signs `ghcr.io/bboortz/beaconry-{hub,scout}` keyless-OIDC, but homelab's ansible `docker-compose-deploy.yml` task runs `docker compose build --pull` locally instead of consuming the signed artifact. Changing the base `docker-compose.yml` image ref would ripple through 19+ downstream scripts (cleanup.py, dogfood_scan.py, demo.sh, scenarios/cold-start/test compose files) that refer to `beaconry-{hub,scout}:latest` by that unqualified name.
+- **description:** Two tiny opt-in override files under `poc/`. Each defines exactly ONE service with a single `image:` key pointing at `ghcr.io/bboortz/beaconry-{hub,scout}:${BEACONRY_IMAGE_TAG:-latest}`. Homelab deploys chain them on `docker compose -f`; local dev ignores them and continues to use the base compose's `image: beaconry-hub:latest` + `build: ./hub`. Separate per-service files prevent dangling-service injection when the base is scout-only. No `build:` key in the overrides — homelab's preceding `docker compose pull` guarantees the image is present before `up -d`.
+- **supports:** CAP-B023
+- **verified by:**
+  - `poc/tests/unit/test_BC_094_ghcr_image_overrides.py`
+
+### CAP-T195: `BEACONRY_IMAGE_TAG` env + `DEPLOY_ONLY_ALLOWLIST` lint exemption
+- **type:** technical
+- **status:** active
+- **origin:** BC-094 — operators need to pin the forge image tag for rollback muscle (`BEACONRY_IMAGE_TAG=v0.16.1` on a bad `latest`). The var is substituted by `docker compose` at config time, not read by any Python module, which would otherwise trip `verify_variables_documented.py`'s orphan check.
+- **description:** `BEACONRY_IMAGE_TAG` documented in `docs/VARIABLES.md` + `poc/.env.example` with default `latest`. `verify_variables_documented.py` gains a new `DEPLOY_ONLY_ALLOWLIST` category that excludes compose-substituted vars from the orphan check. The var only matters when one of the `*-ghcr.yml` overrides is on the compose `-f` chain — otherwise unused.
+- **supports:** CAP-T194, CAP-B023
+- **verified by:**
+  - `poc/tests/unit/test_BC_094_ghcr_image_overrides.py`
+
 ### CAP-T193: Pacman post-transaction hook template
 - **type:** technical
 - **status:** active

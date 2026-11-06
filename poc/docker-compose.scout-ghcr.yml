@@ -1,0 +1,27 @@
+# BC-094 — opt-in override: use forge-signed ghcr image for scout.
+#
+# Usage (homelab deploy):
+#   docker compose \
+#     -f docker-compose.scout-only.yml \
+#     -f docker-compose.scout-override.yml \
+#     -f docker-compose.scout-ghcr.yml \
+#     pull
+#   docker compose -f ... up -d
+#
+# Pin a specific release via env:
+#   BEACONRY_IMAGE_TAG=v0.16.1 docker compose ... pull
+#
+# This file intentionally only overrides `image:`; `build:` from the base
+# compose stays, so a `docker compose up -d --build` path still works if
+# the pulled image is missing. In the homelab flow, the preceding
+# `docker compose pull` guarantees the image is present → no local build.
+#
+# Signing: forge signs this image keyless-OIDC. Verify command:
+#   cosign verify \
+#     --certificate-identity 'https://github.com/bboortz/forge/.github/workflows/build.yml@refs/heads/main' \
+#     --certificate-oidc-issuer 'https://token.actions.githubusercontent.com' \
+#     ghcr.io/bboortz/beaconry-scout:${BEACONRY_IMAGE_TAG:-latest}
+
+services:
+  scout:
+    image: ghcr.io/bboortz/beaconry-scout:${BEACONRY_IMAGE_TAG:-latest}
