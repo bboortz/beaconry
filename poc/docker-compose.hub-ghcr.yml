@@ -1,0 +1,23 @@
+# BC-094 — opt-in override: use forge-signed ghcr image for hub.
+#
+# Usage (homelab deploy):
+#   docker compose -f docker-compose.yml -f docker-compose.hub-ghcr.yml pull
+#   docker compose -f docker-compose.yml -f docker-compose.hub-ghcr.yml up -d
+#
+# Pin a specific release via env:
+#   BEACONRY_IMAGE_TAG=v0.16.1 docker compose ... pull
+#
+# This file intentionally only overrides `image:`; `build:` from the base
+# compose stays, so a `docker compose up -d --build` path still works if
+# the pulled image is missing. In the homelab flow, the preceding
+# `docker compose pull` guarantees the image is present → no local build.
+#
+# Signing: forge signs this image keyless-OIDC. Verify command:
+#   cosign verify \
+#     --certificate-identity 'https://github.com/bboortz/forge/.github/workflows/build.yml@refs/heads/main' \
+#     --certificate-oidc-issuer 'https://token.actions.githubusercontent.com' \
+#     ghcr.io/bboortz/beaconry-hub:${BEACONRY_IMAGE_TAG:-latest}
+
+services:
+  hub:
+    image: ghcr.io/bboortz/beaconry-hub:${BEACONRY_IMAGE_TAG:-latest}

@@ -78,6 +78,17 @@ CLI_ONLY_ALLOWLIST: frozenset[str] = frozenset(
     }
 )
 
+# BC-094: vars substituted by `docker compose` at config time (via
+# `${VAR:-default}` in override YAML). No Python module reads them —
+# they'd otherwise be flagged as orphans. Still documented in
+# VARIABLES.md so operators discover the dial through the same path
+# as runtime vars.
+DEPLOY_ONLY_ALLOWLIST: frozenset[str] = frozenset(
+    {
+        "BEACONRY_IMAGE_TAG",  # BC-094 — ghcr image tag for homelab deploy
+    }
+)
+
 # System vars we don't own and don't document (PATH, HOME, TERM, …).
 # Keep tight: anything beaconry-prefixed is documentation-required.
 NON_BEACONRY_IGNORED: frozenset[str] = frozenset(
@@ -405,7 +416,9 @@ def check(
     documented = set(rows.keys())
 
     undocumented = reads - documented
-    orphans = documented - reads
+    # BC-094: compose-substituted vars live in VARIABLES.md but have no
+    # Python reader — exempt them from the orphan check.
+    orphans = documented - reads - DEPLOY_ONLY_ALLOWLIST
 
     violations: list[str] = []
     # Malformed-row check first — a bad row is useful signal regardless of
