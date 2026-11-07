@@ -4,6 +4,34 @@ All notable changes to beaconry are recorded here. The format is based
 on [Keep a Changelog](https://keepachangelog.com/), and this project
 follows [Semantic Versioning](https://semver.org/).
 
+## [v0.16.3] — 2026-11-07
+
+### Changed (BC-095)
+
+- **builder base**: both `poc/{hub,scout}/Dockerfile` builder stages
+  moved from upstream `python:3.13-slim-trixie` to forge-signed
+  `ghcr.io/bboortz/forge-builder-trixie:latest`. Extends BC-083's
+  runtime migration one stage up — the full build chain is now
+  cosign-verifiable against forge's keyless-OIDC identity.
+- **scout builder shrinks**: syft + curl install RUN lines deleted
+  (both already in the forge builder base). Builder prelude becomes
+  zero RUN lines before `WORKDIR /app`.
+- **hub builder consolidates**: syft install deleted; the remaining
+  grype + docker CLI static fetches share a single RUN that
+  temporarily apt-installs curl, runs both fetches, and purges curl
+  before the layer closes.
+- **runtime stage unchanged**: still
+  `ghcr.io/bboortz/python-scratch-trixie:3.13` — scratch-based, no
+  shell/apt, USER 65532. BC-083 stands.
+- CAP-T196 registered. Follow-up BC-096 candidate for SBOM-at-builder
+  pattern (forge's FG-020) tracked in `docs/plan/IDEAS.md`.
+
+### No runtime change
+
+Build-time edits only. Runtime image is byte-equivalent modulo
+transitive apt/pip deps that would have moved anyway between builds.
+HTTP contracts, callback_data, audit events, env vars all unchanged.
+
 ## [v0.16.2] — 2026-11-06
 
 ### Added (BC-094)

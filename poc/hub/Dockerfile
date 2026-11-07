@@ -1,28 +1,33 @@
-# BC-078 → BC-082 → BC-083: multi-stage build with a self-owned forge
-# runtime (no shell, no apt, baked USER 65532 + ENTRYPOINT).
+# BC-078 → BC-082 → BC-083 → BC-095: multi-stage build with a self-owned
+# forge builder AND forge runtime. Both bases are cosign-signed keyless-OIDC
+# by forge/build.yml@main.
 #
 # ── Stage 1: builder ────────────────────────────────────────────────────────
-# python 3.13-slim-trixie — matches the forge runtime's bundled interpreter
-# (python3.13.18) so pip-installed wheels are ABI-compatible.
-FROM python:3.13-slim-trixie AS builder
+# BC-095: forge-builder-trixie ships python 3.13.18 (ABI-matches the runtime),
+# pip, syft, CA certs, tar. Extends BC-083's runtime migration one stage up.
+# Still-missing tooling installed below: curl (build-time only), grype, docker CLI.
+FROM ghcr.io/bboortz/forge-builder-trixie:latest AS builder
 
-RUN apt-get update && apt-get install -y curl && rm -rf /var/lib/apt/lists/*
-
-# syft (post-fix re-verification) + grype (CVE matching).
-RUN curl -sSfL https://raw.githubusercontent.com/anchore/syft/main/install.sh \
-    | sh -s -- -b /usr/local/bin
-RUN curl -sSfL https://raw.githubusercontent.com/anchore/grype/main/install.sh \
-    | sh -s -- -b /usr/local/bin
-
+# BC-095: forge-builder-trixie has no `curl` — apt it in temporarily for the
+# two static fetches below (grype + docker CLI), then purge to keep the
+# builder layer slim. `ca-certificates` + `tar` are already baked in.
+#
 # BC-009: docker CLI so DockerAdapter.execute can run `docker tag`/`docker pull`
 # against the host daemon via the mounted socket. Static binary; pinned.
 # BC-081 (2026-11-03): bumped 27.5.1 → 29.9.2 to pick up Go stdlib ≥1.26.9.
 ARG DOCKER_CLI_VERSION=29.9.2
-RUN curl -fsSL "https://download.docker.com/linux/static/stable/x86_64/docker-${DOCKER_CLI_VERSION}.tgz" \
-    | tar -xz -C /tmp && \
-    mv /tmp/docker/docker /usr/local/bin/docker && \
-    rm -rf /tmp/docker && \
-    docker --version
+RUN apt-get update \
+ && apt-get install -y --no-install-recommends curl \
+ && curl -sSfL https://raw.githubusercontent.com/anchore/grype/main/install.sh \
+      | sh -s -- -b /usr/local/bin \
+ && curl -fsSL "https://download.docker.com/linux/static/stable/x86_64/docker-${DOCKER_CLI_VERSION}.tgz" \
+      | tar -xz -C /tmp \
+ && mv /tmp/docker/docker /usr/local/bin/docker \
+ && rm -rf /tmp/docker \
+ && docker --version \
+ && apt-get purge -y curl \
+ && apt-get autoremove -y \
+ && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 COPY hub/requirements.txt .

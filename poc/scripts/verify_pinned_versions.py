@@ -26,13 +26,20 @@ from pathlib import Path
 # dogfood-grype gate (CAP-T167) will flag the next regression first.
 DOCKER_CLI_MIN = (29, 9, 2)
 
-# BC-078 Python-base contract. Builder Python must match runtime Python
-# or wheels won't load (same major.minor). Accept any 3.11+-slim with
-# {bookworm,trixie} suffix. BC-082 bumped to 3.13-slim-trixie to pick up
-# newer libc/libssl/libexpat and close dogfood-grype findings on the
-# debian12 base.
+# BC-078 → BC-095 Python-base contract. Builder Python must match runtime
+# Python or wheels won't load (same major.minor).
+# Accepted variants:
+#   * upstream `python:3.1X-slim-{bookworm,trixie}` (BC-082 era — kept for
+#     the migration window so a revert-triage path exists)
+#   * `ghcr.io/bboortz/forge-builder-trixie:latest` (BC-095 — forge-signed,
+#     daily-rebuilt; ships python 3.13.18 ABI-matching the scratch runtime)
+# Any other variant must edit this lint too — that's the "conscious choice"
+# gate.
 BUILDER_BASE_RE = re.compile(
-    r"^FROM\s+python:3\.(?P<minor>1[1-9])-slim-(?:bookworm|trixie)\s+AS\s+builder\b",
+    r"^FROM\s+(?:"
+    r"python:3\.(?P<minor>1[1-9])-slim-(?:bookworm|trixie)"
+    r"|ghcr\.io/bboortz/forge-builder-trixie:latest"
+    r")\s+AS\s+builder\b",
     re.MULTILINE,
 )
 
@@ -77,9 +84,11 @@ def check_dockerfile(path: Path, *, expect_docker_cli: bool) -> list[str]:
     # 1. Builder base
     if not BUILDER_BASE_RE.search(text):
         violations.append(
-            f"{path}: builder stage must FROM python:3.1X-slim-bookworm "
-            f"(or -trixie) AS builder. BC-078 pinned the builder to python 3.11+ "
-            f"so wheels ABI-match the distroless runtime; a drift here produces "
+            f"{path}: builder stage must FROM one of the accepted bases "
+            f"(BC-078/BC-082: `python:3.1X-slim-{{bookworm,trixie}}`, or "
+            f"BC-095: `ghcr.io/bboortz/forge-builder-trixie:latest`) "
+            f"AS builder. All accepted variants ship python 3.11+ so wheels "
+            f"ABI-match the scratch runtime; a drift here produces "
             f"ImportError on container start."
         )
 
