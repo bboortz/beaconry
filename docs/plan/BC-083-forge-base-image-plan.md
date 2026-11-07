@@ -86,8 +86,8 @@ Accept both the forge tag (primary) and distroless debian12/13
 RUNTIME_IMAGE_PREFERRED = "ghcr.io/bboortz/python-scratch-trixie:3.13"
 RUNTIME_IMAGE_RE = re.compile(
     r"^FROM\s+(?:"
-    r"ghcr\.io/bboortz/python-scratch-trixie:3\.13"       # BC-083 primary
-    r"|gcr\.io/distroless/python3-debian1[23]:nonroot"    # BC-078/BC-082 fallback
+    r"ghcr\.io/bboortz/python-scratch-trixie:3\.13"  # BC-083 primary
+    r"|gcr\.io/distroless/python3-debian1[23]:nonroot"  # BC-078/BC-082 fallback
     r")\s+AS\s+runtime\b",
     re.MULTILINE,
 )

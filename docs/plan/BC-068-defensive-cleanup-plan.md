@@ -30,10 +30,7 @@ If grype returns `fix.versions: [""]`, we get `fix_versions=[""]`
 
 **Fix:** List-comprehension strips blanks:
 ```python
-fix_versions = [
-    v.strip() for v in (vuln.get("fix", {}).get("versions") or [])
-    if v and v.strip()
-]
+fix_versions = [v.strip() for v in (vuln.get("fix", {}).get("versions") or []) if v and v.strip()]
 ```
 Legitimate "no fix" cases → `[]` → falls through to `"not available"`.
 

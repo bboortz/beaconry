@@ -56,12 +56,12 @@ went wrong" set:
 
 ```python
 _ERROR_EVENTS = {
-    "notify_sent_failed",            # Telegram or adapter blew up
-    "invalid_grype_match",           # BC-067: malformed CVE data
+    "notify_sent_failed",  # Telegram or adapter blew up
+    "invalid_grype_match",  # BC-067: malformed CVE data
     "reconcile_skipped_partial_inventory",  # BC-067: scout glitch
-    "regressed",                     # BC-031: fix regression — SEVERE
-    "set_status_failed",             # operator action failed
-    "manual_fix_reminder_sent",      # BC-066: operator never acted
+    "regressed",  # BC-031: fix regression — SEVERE
+    "set_status_failed",  # operator action failed
+    "manual_fix_reminder_sent",  # BC-066: operator never acted
 }
 ```
 

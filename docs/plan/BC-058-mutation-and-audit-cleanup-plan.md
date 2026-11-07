@@ -11,6 +11,7 @@
 class FindingNotFound(Exception):
     """Raised by set_status when the finding_id doesn't exist in the DB."""
 
+
 def set_status(finding_id: str, status: str, *, source: str = "telegram") -> None:
     con = sqlite3.connect(DB_PATH)
     row = con.execute(

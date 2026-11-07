@@ -89,7 +89,7 @@ _audit.append(
     "scan_received",
     host=host,
     sbom_count=len(sboms),
-    candidate_count=0,       # pre-ingestion unknown; left as 0 and updated below? No — split.
+    candidate_count=0,  # pre-ingestion unknown; left as 0 and updated below? No — split.
     exposed_count=sum(1 for v in port_exposure.values() if v),
 )
 ```
