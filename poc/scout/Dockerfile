@@ -1,15 +1,13 @@
-# BC-078 → BC-082 → BC-083: multi-stage build with self-owned forge runtime.
+# BC-078 → BC-082 → BC-083 → BC-095: multi-stage build with self-owned forge
+# builder AND runtime. Both bases are cosign-signed keyless-OIDC by
+# forge/build.yml@main.
 # Scout's job: syft a tree, POST SBOM to hub. No grype, no docker-CLI
 # writes — only read access to the Docker socket (compose mount is :ro).
 
 # ── Stage 1: builder ────────────────────────────────────────────────────────
-FROM python:3.13-slim-trixie AS builder
-
-RUN apt-get update && apt-get install -y curl && rm -rf /var/lib/apt/lists/*
-
-# syft — SBOM generator.
-RUN curl -sSfL https://raw.githubusercontent.com/anchore/syft/main/install.sh \
-    | sh -s -- -b /usr/local/bin
+# BC-095: forge-builder-trixie ships python 3.13.18 (ABI-matches the runtime),
+# pip, syft, CA certs. Scout needs exactly that set — no extra RUN steps.
+FROM ghcr.io/bboortz/forge-builder-trixie:latest AS builder
 
 WORKDIR /app
 COPY scout/requirements.txt .

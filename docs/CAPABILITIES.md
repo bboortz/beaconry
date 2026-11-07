@@ -1810,6 +1810,15 @@ Enforcement: `poc/scripts/verify_traceability.py` runs as part of `make check`. 
 - **verified by:**
   - `poc/tests/unit/test_BC_094_ghcr_image_overrides.py`
 
+### CAP-T196: Builder stage FROM forge's signed `forge-builder-trixie:latest`
+- **type:** technical
+- **status:** active
+- **origin:** BC-095 — BC-083 moved the runtime stage onto forge-managed `python-scratch-trixie`, but the builder stage was still upstream `python:3.13-slim-trixie` (unsigned, random rebuild cadence, no beaconry-controlled patch cadence). Forge published `ghcr.io/bboortz/forge-builder-trixie:latest` on 2026-11-07 shipping python 3.13.18 + pip + syft + CA certs + tar, which is exactly what beaconry's builder needs (modulo grype + docker CLI on the hub side).
+- **description:** Both `poc/{hub,scout}/Dockerfile` builder stages now FROM `ghcr.io/bboortz/forge-builder-trixie:latest`. Scout's builder prelude drops to zero RUN lines (syft already in the base). Hub's builder still installs grype + the docker CLI static binary, wrapped in a single RUN that temporarily apt-installs curl, runs both fetches, and purges curl before the layer closes. Runtime stage unchanged (`ghcr.io/bboortz/python-scratch-trixie:3.13`). `make verify-base-images` (CAP-T171) picks up the new ref automatically.
+- **supports:** CAP-T171, CAP-B023
+- **verified by:**
+  - `poc/tests/unit/test_BC_095_builder_from.py`
+
 ### CAP-T195: `BEACONRY_IMAGE_TAG` env + `DEPLOY_ONLY_ALLOWLIST` lint exemption
 - **type:** technical
 - **status:** active
