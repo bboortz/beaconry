@@ -4,6 +4,30 @@ All notable changes to beaconry are recorded here. The format is based
 on [Keep a Changelog](https://keepachangelog.com/), and this project
 follows [Semantic Versioning](https://semver.org/).
 
+## [v0.16.4] — 2026-11-07
+
+### Added (BC-096)
+
+- **SBOM at builder stage**: both `poc/{hub,scout}/Dockerfile` builder
+  stages now run `syft dir:/install -o syft-json=/sbom.json`; both
+  runtime stages `COPY --from=builder /sbom.json /sbom.json`. The
+  frozen SBOM travels with the image — adopts forge's FG-020 pattern.
+- **`GET /sbom` endpoint** on hub + scout returns the baked-in SBOM
+  as `application/json`. 503 when the file is missing (dev/host runs
+  without a built image degrade cleanly).
+- **`make dogfood-sbom`** + `poc/scripts/dogfood_sbom.py` runs
+  `grype sbom:/sbom.json` inside each image. No `docker.sock` mount
+  required. Same severity floor + skip env (`BEACONRY_SKIP_DOGFOOD=1`)
+  as `make dogfood-scan`. Wired into `make check-full`.
+
+### Changed (BC-096)
+
+- **`make check-full`** now runs both dogfood passes (image-scan
+  from BC-082 + frozen-SBOM-scan from BC-096). The two signals are
+  complementary: image-scan catches Go-stdlib bugs in built binaries;
+  SBOM-scan isolates "image regressed" from "grype DB learned a new
+  CVE". Opt-out env is shared.
+
 ## [v0.16.3] — 2026-11-07
 
 ### Changed (BC-095)

@@ -30,9 +30,7 @@ def _load_last_seen(finding_id: str) -> int | None:
     Returns None if row is missing OR last_seen_ts is 0; format_last_seen
     treats both as 'no info — skip the line'."""
     con = sqlite3.connect(DB_PATH)
-    row = con.execute(
-        "SELECT last_seen_ts FROM findings WHERE id=?", (finding_id,)
-    ).fetchone()
+    row = con.execute("SELECT last_seen_ts FROM findings WHERE id=?", (finding_id,)).fetchone()
     con.close()
     if row is None or not row[0]:
         return None

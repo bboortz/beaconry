@@ -1,4 +1,4 @@
-.PHONY: help lint format type test check check-full demo smoke clean cleanup install-hooks verify-traceability verify-dockerfile-health-copy verify-dockerfile-sources verify-pinned-versions verify-base-images verify-memory-drift verify-compose-env-propagation verify-docs-drift verify-evidence-pointers verify-per-file-coverage verify-variables verify-install-doc verify-version-sync verify-version-bumped verify-changelog verify-feature-complete bump-patch bump-minor bump-major bump-auto changelog findings status audit soak metrics test-e2e live-rebuild live-status scan set-status test-scenarios test-cli dogfood-scan test-cold-start
+.PHONY: help lint format type test check check-full demo smoke clean cleanup install-hooks verify-traceability verify-dockerfile-health-copy verify-dockerfile-sources verify-pinned-versions verify-base-images verify-memory-drift verify-compose-env-propagation verify-docs-drift verify-evidence-pointers verify-per-file-coverage verify-variables verify-install-doc verify-version-sync verify-version-bumped verify-changelog verify-feature-complete bump-patch bump-minor bump-major bump-auto changelog findings status audit soak metrics test-e2e live-rebuild live-status scan set-status test-scenarios test-cli dogfood-scan dogfood-sbom test-cold-start
 
 PYTHON ?= python3
 PYTEST_ARGS ?=
@@ -64,6 +64,7 @@ help:
 	@echo "  make test-cold-start            fresh beaconry stack w/ real grype DB download (BC-082)"
 	@echo "                                  the "will homelab install work?" probe"
 	@echo "  make dogfood-scan               grype rescan beaconry's own images; fails on High+ fixable (BC-082)"
+	@echo "  make dogfood-sbom               grype rescan against each image's baked-in /sbom.json (BC-096)"
 	@echo "                                  BEACONRY_SKIP_DOGFOOD=1 to opt out (dev-only emergency)"
 	@echo "  make verify-pinned-versions     Dockerfile pinned-version floor lint (BC-082)"
 	@echo "                                  DOCKER_CLI_VERSION ≥ 29.9.2 (BC-081), builder base python:3.11+, distroless runtime"
@@ -231,6 +232,9 @@ check-full: check
 	@echo "==> Full tier: dogfood-grype scan (BC-082; BEACONRY_SKIP_DOGFOOD=1 to opt out)"
 	$(MAKE) dogfood-scan
 	@echo ""
+	@echo "==> Full tier: dogfood-sbom scan (BC-096; BEACONRY_SKIP_DOGFOOD=1 to opt out)"
+	$(MAKE) dogfood-sbom
+	@echo ""
 	@echo "==> Full tier: cleanup (BC-080 — remove leaked test images)"
 	$(MAKE) cleanup
 	@echo ""
@@ -316,6 +320,14 @@ cleanup:
 # BEACONRY_SKIP_DOGFOOD=1 (dev-only emergency).
 dogfood-scan:
 	@$(PYTHON) -m poc.scripts.dogfood_scan
+
+# BC-096: dogfood grype rescan against each image's baked-in /sbom.json
+# (frozen SBOM; no docker-socket mount). Complements dogfood-scan —
+# same severity floor, same skip env. Separates "image regressed" from
+# "grype DB learned a new CVE" by giving operators a deterministic
+# frozen-SBOM lens.
+dogfood-sbom:
+	@$(PYTHON) -m poc.scripts.dogfood_sbom
 
 # BC-082: cold-start smoke. Brings up poc/docker-compose.cold-start.yml with
 # throwaway volumes + real grype DB download, asserts all 8 health endpoints

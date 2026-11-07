@@ -20,6 +20,7 @@ Run alongside FastAPI by starting polling in the FastAPI lifespan:
 ```python
 from telegram.ext import Application, CallbackQueryHandler
 
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     tg_app = Application.builder().token(TELEGRAM_BOT_TOKEN).build()
@@ -57,13 +58,15 @@ def format_finding(f: Finding) -> str:
 ```python
 from telegram import InlineKeyboardButton, InlineKeyboardMarkup
 
-keyboard = InlineKeyboardMarkup([
+keyboard = InlineKeyboardMarkup(
     [
-        InlineKeyboardButton("🔧 Fix now", callback_data=f"fix:{finding.id}"),
-        InlineKeyboardButton("⏰ Snooze 4h", callback_data=f"snooze:{finding.id}:4"),
-    ],
-    [InlineKeyboardButton("✅ Accept risk", callback_data=f"ack:{finding.id}")],
-])
+        [
+            InlineKeyboardButton("🔧 Fix now", callback_data=f"fix:{finding.id}"),
+            InlineKeyboardButton("⏰ Snooze 4h", callback_data=f"snooze:{finding.id}:4"),
+        ],
+        [InlineKeyboardButton("✅ Accept risk", callback_data=f"ack:{finding.id}")],
+    ]
+)
 
 await bot.send_message(
     chat_id=TELEGRAM_CHAT_ID,
@@ -78,7 +81,7 @@ await bot.send_message(
 ```python
 async def on_button_click(update: Update, context: ContextTypes.DEFAULT_TYPE):
     query = update.callback_query
-    await query.answer()                      # acknowledge the tap immediately
+    await query.answer()  # acknowledge the tap immediately
 
     parts = query.data.split(":")
     action, finding_id = parts[0], parts[1]
@@ -111,9 +114,8 @@ Escape with `\` or wrap in backticks.
 Generate a stable ID per finding to avoid re-notifying on repeat scans:
 ```python
 import hashlib
-finding_id = hashlib.sha256(
-    f"{host}:{cve_id}:{source_ref}:{package}".encode()
-).hexdigest()[:16]
+
+finding_id = hashlib.sha256(f"{host}:{cve_id}:{source_ref}:{package}".encode()).hexdigest()[:16]
 ```
 
 Store in SQLite. `INSERT OR IGNORE` — only notify when the row is genuinely new.

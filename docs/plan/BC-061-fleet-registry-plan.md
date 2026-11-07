@@ -63,7 +63,8 @@ con.execute("""
 # stale    → within BEACONRY_FLEET_DEAD_AFTER_S (default 86400s)
 # dead     → beyond
 FLEET_ACTIVE_WINDOW_S = int(os.environ.get("BEACONRY_FLEET_ACTIVE_WINDOW_S", "600"))
-FLEET_DEAD_AFTER_S    = int(os.environ.get("BEACONRY_FLEET_DEAD_AFTER_S", "86400"))
+FLEET_DEAD_AFTER_S = int(os.environ.get("BEACONRY_FLEET_DEAD_AFTER_S", "86400"))
+
 
 def _fleet_status(last_posted_ts: int, now: int) -> str:
     age = now - last_posted_ts

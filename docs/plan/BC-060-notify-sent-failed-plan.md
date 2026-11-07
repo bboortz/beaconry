@@ -10,6 +10,7 @@
 ```python
 _FAIL_REASON_MAX = 200
 
+
 def _emit_notify_sent_failed(finding: Finding, kind: str, exc: Exception) -> None:
     reason = f"{exc.__class__.__name__}: {str(exc)[:_FAIL_REASON_MAX]}"
     _audit.append(

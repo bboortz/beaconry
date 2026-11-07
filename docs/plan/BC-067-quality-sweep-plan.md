@@ -17,7 +17,7 @@ behaviour / safety nets.
 
 ```python
 rollback_cmd = f"docker tag {finding.source_ref} {base_name}:rollback"
-pull_cmd     = f"docker pull {pull_target}"
+pull_cmd = f"docker pull {pull_target}"
 # ...
 proc = await asyncio.create_subprocess_shell(rollback_cmd, ...)
 ```
