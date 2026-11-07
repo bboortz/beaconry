@@ -39,6 +39,14 @@ COPY hub/notifiers/ notifiers/
 COPY beaconry_health/ ./beaconry_health/
 COPY VERSION ./VERSION
 
+# BC-096: baked-in SBOM. syft (from forge-builder-trixie, BC-095) catalogs
+# the python wheels in /install → /sbom.json, which the runtime stage
+# COPYs in below. Adopts forge's FG-020 pattern: a frozen SBOM travels
+# with the image so `grype sbom:/sbom.json` separates "image regressed"
+# from "grype DB learned a new CVE" (image-scan dogfood path stays as
+# the complementary Go-stdlib-aware lens).
+RUN syft dir:/install -o syft-json=/sbom.json
+
 # Pre-create /data with the nonroot (65532) owner so the runtime COPY
 # below produces a correctly-owned mountpoint for fresh volumes.
 RUN mkdir -p /stage/data && chown -R 65532:65532 /stage/data
@@ -63,6 +71,10 @@ COPY --from=builder --chown=65532:65532 /app /app
 # Fresh named volumes inherit /data's ownership (65532:65532 preserved
 # from BC-082 → zero chown migration for upgrading operators).
 COPY --from=builder --chown=65532:65532 /stage/data /data
+
+# BC-096: baked-in SBOM. Served at GET /sbom + consumed by
+# `make dogfood-sbom` (`grype sbom:/sbom.json`).
+COPY --from=builder /sbom.json /sbom.json
 
 ENV PYTHONUNBUFFERED=1
 # USER 65532:65532 + ENTRYPOINT /usr/local/bin/python3 come from the base image.

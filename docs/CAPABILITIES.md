@@ -1819,6 +1819,16 @@ Enforcement: `poc/scripts/verify_traceability.py` runs as part of `make check`. 
 - **verified by:**
   - `poc/tests/unit/test_BC_095_builder_from.py`
 
+### CAP-T197: Baked-in SBOM at builder stage + `/sbom` endpoint + `make dogfood-sbom`
+- **type:** technical
+- **status:** active
+- **origin:** BC-096 — `dogfood_scan.py` (BC-082) scans the live image via `docker.sock` and conflates two signals: "image regressed" vs "grype DB learned a new CVE". BC-095's merge demonstrated the pain (syft v1.57.0 brotli → opt-out with `BEACONRY_SKIP_DOGFOOD=1`). Forge's FG-020 solves this by baking a frozen SBOM into the image: the SBOM only changes when the image is rebuilt, so grype-against-SBOM isolates the DB-update signal. `ghcr.io/bboortz/forge-builder-trixie:latest` ships syft on PATH, which made the beaconry-side cost near-zero.
+- **description:** Both `poc/{hub,scout}/Dockerfile` builder stages run `RUN syft dir:/install -o syft-json=/sbom.json` after the pip install + source copies; both runtime stages `COPY --from=builder /sbom.json /sbom.json`. Hub + scout expose `GET /sbom` returning the baked-in file as `application/json` (503 when missing — dev/host runs degrade cleanly). New `make dogfood-sbom` + `poc/scripts/dogfood_sbom.py` run `grype sbom:/sbom.json` inside each image with no socket mount; mirrors `dogfood_scan.py`'s severity floor (High+/fixable) and honours `BEACONRY_SKIP_DOGFOOD=1`. `make check-full` runs both dogfood passes.
+- **supports:** CAP-T167, CAP-B023
+- **verified by:**
+  - `poc/tests/unit/test_BC_096_sbom_at_builder.py`
+  - `poc/tests/unit/test_BC_096_dogfood_sbom.py`
+
 ### CAP-T195: `BEACONRY_IMAGE_TAG` env + `DEPLOY_ONLY_ALLOWLIST` lint exemption
 - **type:** technical
 - **status:** active

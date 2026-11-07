@@ -815,6 +815,30 @@ async def trigger_scan() -> "_FastAPIResponseOrDict":
     )
 
 
+# BC-096 — baked-in SBOM. Served from image-root `/sbom.json`.
+# Tests monkeypatch `scout.SBOM_PATH` to point at a tempfile. Same
+# shape as hub's /sbom endpoint.
+SBOM_PATH = "/sbom.json"
+
+
+@app.get("/sbom")
+async def sbom() -> "_FastAPIResponseOrDict":
+    from fastapi.responses import FileResponse, JSONResponse
+
+    if not os.path.isfile(SBOM_PATH):
+        return JSONResponse(
+            status_code=503,
+            content={
+                "status": "sbom_unavailable",
+                "detail": (
+                    "no /sbom.json baked into this image (dev/host run "
+                    "without a built image — see BC-096)"
+                ),
+            },
+        )
+    return FileResponse(SBOM_PATH, media_type="application/json")
+
+
 # Pure type alias; keeps the return annotation parseable without pulling in
 # fastapi.Response at module import time.
 _FastAPIResponseOrDict = object  # noqa: N816

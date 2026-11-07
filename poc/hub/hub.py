@@ -2839,6 +2839,34 @@ async def health(response: _FastAPIResponse) -> dict:
     return {"status": "ready"}
 
 
+# BC-096 — baked-in SBOM. Served from image-root `/sbom.json`.
+# Tests monkeypatch `hub.SBOM_PATH` to point at a tempfile fixture.
+# 503 when the file is missing so dev/host runs degrade cleanly instead
+# of 500ing (no new env var — this constant is the one knob).
+SBOM_PATH = "/sbom.json"
+
+
+@api.get("/sbom")
+async def sbom(response: _FastAPIResponse) -> "_FastAPIResponseOrDict":
+    from fastapi.responses import FileResponse, JSONResponse
+
+    if not os.path.isfile(SBOM_PATH):
+        return JSONResponse(
+            status_code=503,
+            content={
+                "status": "sbom_unavailable",
+                "detail": (
+                    "no /sbom.json baked into this image (dev/host run "
+                    "without a built image — see BC-096)"
+                ),
+            },
+        )
+    return FileResponse(SBOM_PATH, media_type="application/json")
+
+
+_FastAPIResponseOrDict = object  # noqa: N816
+
+
 def dedup_and_cap(findings: list[Finding], cap: int) -> tuple[list[Finding], list[Finding]]:
     """Deduplicate by cve_id (keep highest-CVSS variant), rank by (tier,-cvss),
     return (top_cap, suppressed_rest)."""
