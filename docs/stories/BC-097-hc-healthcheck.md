@@ -1,7 +1,7 @@
 ---
 id: BC-097
 title: Compose healthchecks use forge's `/hc`; runtime base tracks `:latest`
-status: in-progress
+status: shipped
 created: 2026-11-08
 branch: feat/BC-097-hc-healthcheck
 plan: docs/plan/BC-097-hc-healthcheck-plan.md
