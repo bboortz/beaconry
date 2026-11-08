@@ -1,7 +1,7 @@
 ---
 id: BC-102
 title: Hub-side scout-offline alerts + stale-scout findings reconcile
-status: in-progress
+status: shipped
 created: 2026-11-08
 branch: feat/BC-102-scout-offline-alerts
 plan: docs/plan/BC-102-scout-offline-alerts-plan.md
