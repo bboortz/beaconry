@@ -1861,11 +1861,21 @@ Enforcement: `poc/scripts/verify_traceability.py` runs as part of `make check`. 
 - **type:** technical
 - **status:** active
 - **origin:** BC-099 — 2026-11-08 ~17:26 UTC, `ghcr.io/bboortz/beaconry-hub:latest` crashed on hetzner + server2 with `ModuleNotFoundError: No module named 'uvicorn'`. Root cause: forge republished `forge-builder-trixie:latest` (Python 3.14) five minutes before `python-scratch-trixie:latest` (still Python 3.13) during FG-032's in-place bump, and forge's `beaconry-hub` build fired in the gap. The shipped image had `/usr/local/lib/python3.14/site-packages/fastapi/` (where BC-098 put wheels) and a Python 3.13 runtime whose sys.path pointed at `/usr/local/lib/python3.13/site-packages/` (empty). BC-098 trusted the two bases to match — BC-099 verifies they do.
-- **description:** Both `poc/{hub,scout}/Dockerfile` require BuildKit (`# syntax=docker/dockerfile:1` at top; Makefile exports `DOCKER_BUILDKIT=1` + `COMPOSE_DOCKER_CLI_BUILD=1`). A named `runtime-src` stage holds the runtime base; the runtime stage FROMs it (same digest). The builder's merged BC-098/BC-099 RUN step mounts `--mount=from=runtime-src,source=/usr/local/lib,target=/runtime-lib`, counts python3.X dirs (must be exactly one), reads the minor from the dir name, compares with the builder's minor, and exits non-zero with the `BC-099 ABI guard tripped` marker + remedy text if they differ. Single-version guarantee: when the guard passes, the final image has exactly one `/usr/local/lib/python3.X/` dir by construction.
+- **description:** `poc/{hub,scout,telegram_mock}/Dockerfile` require BuildKit (`# syntax=docker/dockerfile:1` at top; Makefile exports `DOCKER_BUILDKIT=1` + `COMPOSE_DOCKER_CLI_BUILD=1`). A named `runtime-src` stage holds the runtime base; the runtime stage FROMs it (same digest). The builder's merged BC-098/BC-099 RUN step mounts `--mount=from=runtime-src,source=/usr/local/lib,target=/runtime-lib`, counts python3.X dirs (must be exactly one), reads the minor from the dir name, compares with the builder's minor, and exits non-zero with the `BC-099 ABI guard tripped` marker + remedy text if they differ. Single-version guarantee: when the guard passes, the final image has exactly one `/usr/local/lib/python3.X/` dir by construction. BC-100 ported the pattern to `telegram_mock` (last beaconry-authored Dockerfile previously on upstream `python:3.12-slim`).
 - **supports:** CAP-T200, CAP-T171, CAP-B023
 - **verified by:**
   - `poc/tests/unit/test_BC_099_base_abi_guard.py`
   - `poc/tests/integration/test_BC_083_forge_runtime.py` (live oracle — cold-start import probes against the built image)
+
+### CAP-T202: telegram_mock on forge-signed scratch base (BC-099 recipe applied)
+- **type:** technical
+- **status:** active
+- **origin:** BC-100 — hub + scout migrated onto the forge chain (BC-083 → BC-099); telegram_mock was the last beaconry-authored Dockerfile on upstream `python:3.12-slim`. Asymmetry made audits awkward (three signed, one unsigned) and left the test-only mock without the ABI guard that would catch a future forge split-brain during CI builds.
+- **description:** `poc/telegram_mock/Dockerfile` rewritten per the BC-099 recipe: `# syntax=docker/dockerfile:1`, named `runtime-src` stage pointing at `python-scratch-trixie:latest`, `FROM runtime-src AS runtime`, forge builder (`forge-builder-trixie:latest`) with merged BC-098/BC-099 ABI guard RUN mounting `--mount=from=runtime-src`, Python-minor-agnostic staging mv to `/stage/usr/local/lib/python${BUILDER_PY_VER}/site-packages`, single `COPY --from=builder /stage /`, baked HEALTHCHECK pointing at `/hc -t 3 http://localhost:8080/readyz`, CMD adapted (no `python3` prefix — scratch base bakes ENTRYPOINT). mock_bot.py unchanged; BC-012's `beaconry_health.build_router` provides `/readyz` for the HEALTHCHECK.
+- **supports:** CAP-T201, CAP-T200, CAP-T199, CAP-T196, CAP-B023
+- **verified by:**
+  - `poc/tests/unit/test_BC_100_telegram_mock_forge_base.py`
+  - `poc/tests/e2e/test_BC_011_probe_flow.py` (BC-018 e2e flow exercises the mock live)
 
 ### CAP-T195: `BEACONRY_IMAGE_TAG` env + `DEPLOY_ONLY_ALLOWLIST` lint exemption
 - **type:** technical

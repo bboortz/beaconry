@@ -92,4 +92,4 @@ Lifecycle: `draft → ready → in-progress → shipped`. Status matches each st
 | BC-097 | Compose healthchecks use forge's `/hc`; runtime base tracks `:latest`    | shipped     | — (merged to dev)                   |
 | BC-098 | Stage-at-runtime-path: Dockerfiles detect Python minor at build time     | shipped     | — (merged to dev)                   |
 | BC-099 | Build-time ABI guard: fail if builder Python minor ≠ runtime minor       | shipped     | — (merged to dev)                   |
-| BC-100 | telegram_mock joins the forge-signed scratch base + ABI guard family     | draft       | —                                   |
+| BC-100 | telegram_mock joins the forge-signed scratch base + ABI guard family     | in-progress | feat/BC-100-telegram-mock-forge-base|
