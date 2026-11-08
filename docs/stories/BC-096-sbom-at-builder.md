@@ -1,7 +1,7 @@
 ---
 id: BC-096
 title: SBOM at builder stage → baked into runtime + `/sbom` endpoint + `make dogfood-sbom`
-status: in-progress
+status: shipped
 created: 2026-11-07
 branch: feat/BC-096-sbom-at-builder
 plan: docs/plan/BC-096-sbom-at-builder-plan.md
