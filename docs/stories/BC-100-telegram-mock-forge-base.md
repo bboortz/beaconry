@@ -1,7 +1,7 @@
 ---
 id: BC-100
 title: telegram_mock joins the forge-signed scratch base + ABI guard + HEALTHCHECK family
-status: in-progress
+status: shipped
 created: 2026-11-08
 branch: feat/BC-100-telegram-mock-forge-base
 plan: docs/plan/BC-100-telegram-mock-forge-base-plan.md
