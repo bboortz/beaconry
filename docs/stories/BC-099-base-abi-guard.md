@@ -1,7 +1,7 @@
 ---
 id: BC-099
 title: Fail the build if builder Python minor ≠ runtime Python minor (BuildKit required)
-status: in-progress
+status: shipped
 created: 2026-11-08
 branch: feat/BC-099-base-abi-guard
 plan: docs/plan/BC-099-base-abi-guard-plan.md
