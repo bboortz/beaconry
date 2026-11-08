@@ -4,6 +4,59 @@ All notable changes to beaconry are recorded here. The format is based
 on [Keep a Changelog](https://keepachangelog.com/), and this project
 follows [Semantic Versioning](https://semver.org/).
 
+## [v0.18.0] — 2026-11-08
+
+### Added (BC-102)
+
+- **Edge-triggered scout-offline Telegram alert.** When a scout stays
+  silent for longer than
+  `BEACONRY_SCOUT_OFFLINE_ALERT_THRESHOLD_S` (default 600 s / 10 min),
+  hub sends exactly one `⚠️ Scout offline` message naming the host,
+  outage duration, last-known health, and the auto-close timeline.
+  State is stored in the new `scouts.last_offline_alert_ts` column
+  (schema v7 → v8) so the alert survives hub restarts without
+  re-firing.
+- **Recovery alert.** When a previously-offline scout POSTs again,
+  hub sends exactly one `✓ Scout back online` message with the
+  outage duration + clears the alert stamp.
+- **Stale-scout findings reconcile.** Opt-out via
+  `BEACONRY_AUTO_CLOSE_STALE_SCOUT=0`. When enabled (default), the
+  sweep bumps `absent_count` on offline-scout findings every tick
+  (open / regressed / snoozed / accepted statuses). After
+  `BEACONRY_AUTO_FIX_THRESHOLD` ticks the finding flips to
+  `auto_fixed` and emits the distinct
+  `finding_auto_fixed_stale_scout` audit event (separate from
+  BC-086's `finding_auto_fixed` so forensics can filter).
+- **Background task** `_scout_offline_sweep_loop_forever` registered
+  in lifespan alongside the heartbeat + snooze loops. Cadence:
+  `BEACONRY_SCOUT_OFFLINE_SWEEP_INTERVAL_S` (default 60 s).
+- **Audit events**: `scout_offline`, `scout_online`,
+  `finding_auto_fixed_stale_scout`.
+- **Notifier interface extended** — abstract `send_scout_offline` +
+  `send_scout_online` (default no-op so out-of-tree adapters keep
+  booting); `TelegramAdapter` overrides both with concise HTML
+  bodies, no inline keyboard (operator action is on the host).
+
+### Changed (BC-102)
+
+- **Schema version 7 → 8.** `scouts.last_offline_alert_ts INTEGER
+  NOT NULL DEFAULT 0` added via idempotent PRAGMA-driven ALTER —
+  same pattern BC-063/BC-092 used. Legacy rows get 0 (no false
+  "already alerted" state).
+
+### Fixes the class of bug behind the 2026-11-08 bb-82jq incident
+
+Pre-BC-102: scout on bb-82jq exited silently; hub saw
+`heartbeat_stale=True` in `/fleet` but took no action; 17 open + 7
+regressed findings froze for 54 min until manual recovery.
+Post-BC-102: same scenario fires a Telegram inside 10 min + closes
+the findings inside ~13 min (`threshold + 3 × sweep_interval`).
+
+### Documentation
+- **story:** BC-102 scout-offline alerts + stale-scout reconcile
+- CAP-B050 (operator-visible detection) + CAP-T204 (sweep task) registered.
+- Three new env vars documented in `docs/VARIABLES.md` + `poc/.env.example`.
+
 ## [v0.17.2] — 2026-11-08
 
 ### Fixed (BC-101)

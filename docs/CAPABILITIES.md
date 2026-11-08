@@ -1086,7 +1086,7 @@ Enforcement: `poc/scripts/verify_traceability.py` runs as part of `make check`. 
 - **status:** active
 - **origin:** BC-041
 - **description:** `reverse_check` iterates `poc/tests/integration/test_BC_NNN_*.py`, resolves the matching `docs/plan/BC-NNN-*-plan.md` by `BC-NNN-` prefix, and asserts every top-level `def test_*(...)` function in the file is mentioned somewhere in the plan's shipping-evidence table (plain name match, parametrization-agnostic). Soft-passes when the plan file is missing OR has no `## Shipping evidence` section — BC-019 owns those checks. Empty-but-present table is NOT soft-pass. Explicit `REVERSE_CHECK_ALLOWLIST: dict[str, str]` for intentional helpers / grandfathered pre-BC-041 tests, reason per entry. Error message surfaces a copy-pasteable row template.
-- **supports:** CAP-B025
+- **supports:** CAP-B050
 - **verified by:**
   - `poc/tests/integration/test_BC_041_reverse_check.py`
 
@@ -1876,6 +1876,24 @@ Enforcement: `poc/scripts/verify_traceability.py` runs as part of `make check`. 
 - **verified by:**
   - `poc/tests/unit/test_BC_100_telegram_mock_forge_base.py`
   - `poc/tests/e2e/test_BC_011_probe_flow.py` (BC-018 e2e flow exercises the mock live)
+
+### CAP-B050: Operator-visible detection of scout outages
+- **type:** business
+- **status:** active
+- **origin:** BC-102 — 2026-11-08 ~21:20 UTC bb-82jq incident: operator scout died silently for 54 min. Hub computed `heartbeat_stale=True` on `/fleet` but took no action — no Telegram, no audit, no findings reconcile. Operator had to observe the gap manually via `make status`. CAP-B050 ships the "beaconry tells you when it loses visibility" guarantee.
+- **description:** When a scout crosses `BEACONRY_SCOUT_OFFLINE_ALERT_THRESHOLD_S` (default 600s) since its last POST, hub sends exactly one Telegram message (edge-triggered via `scouts.last_offline_alert_ts`) naming the host, outage duration, last-known health, and auto-close timeline. When a previously-offline scout POSTs again, hub sends exactly one recovery message. Audit trail: `scout_offline` + `scout_online` + (when `BEACONRY_AUTO_CLOSE_STALE_SCOUT=1`, default on) `finding_auto_fixed_stale_scout` for each finding closed by the stale-scout path.
+- **supports:** CAP-B023, CAP-T164
+- **verified by:**
+  - `poc/tests/unit/test_BC_102_scout_offline_sweep.py`
+
+### CAP-T204: `scout_offline_sweep` background task on hub
+- **type:** technical
+- **status:** active
+- **origin:** BC-102 — BC-086's reconcile only fires on scout POST. When scout stops POSTing, findings freeze forever (as seen in the 54-min dark window). Hub needed a time-driven complement.
+- **description:** `poc/hub/hub.py` adds a pure function `scout_offline_sweep(now_ts, threshold_s, sweep_interval_s, auto_close, threshold_ticks) -> {offline_alerts, online_alerts, findings_auto_closed}` that scans the `scouts` table and (edge-triggered via `last_offline_alert_ts`) stamps offline transitions, clears them on recovery, and (when `auto_close=True`) bumps `absent_count` on the scout's `open`/`regressed`/`snoozed`/`accepted` findings until `BEACONRY_AUTO_FIX_THRESHOLD` ticks flip them to `auto_fixed` with the distinct `finding_auto_fixed_stale_scout` audit (separate from BC-086's `finding_auto_fixed` so forensics can filter). Background task `_scout_offline_sweep_loop_forever` registered in lifespan alongside the heartbeat + snooze loops; cadence `BEACONRY_SCOUT_OFFLINE_SWEEP_INTERVAL_S` (default 60s). Three new env vars documented in `docs/VARIABLES.md`. Schema v7 → v8 adds `scouts.last_offline_alert_ts` via idempotent ALTER.
+- **supports:** CAP-B050, CAP-T148, CAP-T044
+- **verified by:**
+  - `poc/tests/unit/test_BC_102_scout_offline_sweep.py`
 
 ### CAP-T203: Dev-compose container names namespaced as `beaconry-dev-*`
 - **type:** technical

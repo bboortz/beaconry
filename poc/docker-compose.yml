@@ -45,6 +45,10 @@ services:
       # BC-086: consecutive absent scans before an open/snoozed/accepted/regressed
       # finding flips to `auto_fixed`. Default 3; set to 1 to reproduce pre-BC-086 behaviour.
       - BEACONRY_AUTO_FIX_THRESHOLD=${BEACONRY_AUTO_FIX_THRESHOLD:-3}
+      # BC-102: scout-offline detection + reconcile.
+      - BEACONRY_SCOUT_OFFLINE_ALERT_THRESHOLD_S=${BEACONRY_SCOUT_OFFLINE_ALERT_THRESHOLD_S:-600}
+      - BEACONRY_SCOUT_OFFLINE_SWEEP_INTERVAL_S=${BEACONRY_SCOUT_OFFLINE_SWEEP_INTERVAL_S:-60}
+      - BEACONRY_AUTO_CLOSE_STALE_SCOUT=${BEACONRY_AUTO_CLOSE_STALE_SCOUT:-1}
       # BC-089: snooze buttons + sweep.
       - BEACONRY_SNOOZE_DEFAULT_HOURS=${BEACONRY_SNOOZE_DEFAULT_HOURS:-1,4,24,168}
       - BEACONRY_SNOOZE_SWEEP_INTERVAL_S=${BEACONRY_SNOOZE_SWEEP_INTERVAL_S:-60}

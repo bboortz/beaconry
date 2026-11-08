@@ -102,3 +102,38 @@ class TelegramAdapter(NotificationAdapter):
         text = self._fmt["auto_fix_regression"](finding, auto_fixed_ts, last_seen_ts=last_seen_ts)
         kb = self._kb["regression"](finding)
         await self._send(text, reply_markup=kb)
+
+    async def send_scout_offline(
+        self,
+        host: str,
+        last_heartbeat_ts: int,
+        offline_duration_s: int,
+        last_health: str | None,
+    ) -> None:
+        """BC-102: edge-triggered offline alert. No keyboard — operator
+        action is on the host, not in Telegram."""
+        mins = offline_duration_s // 60
+        health_line = f"\nLast health: <code>{last_health}</code>" if last_health else ""
+        text = (
+            f"⚠️ <b>Scout offline</b>\n"
+            f"Host: <code>{host}</code>\n"
+            f"Silent for: <b>{mins}m</b> (last POST: unix {last_heartbeat_ts})"
+            f"{health_line}\n"
+            f"\nFindings on this host will <b>auto-close</b> after "
+            f"<code>BEACONRY_AUTO_FIX_THRESHOLD</code> sweep ticks "
+            f"(<code>BEACONRY_AUTO_CLOSE_STALE_SCOUT=0</code> to opt out).\n"
+            f"\nCheck <code>systemctl status beaconry-scout.service</code> on the host "
+            f"or <code>docker ps --filter name=beaconry-scout</code>."
+        )
+        await self._send(text, reply_markup=None)
+
+    async def send_scout_online(self, host: str, offline_duration_s: int) -> None:
+        """BC-102: edge-triggered recovery alert."""
+        mins = offline_duration_s // 60
+        text = (
+            f"✓ <b>Scout back online</b>\n"
+            f"Host: <code>{host}</code>\n"
+            f"Was offline for: <b>{mins}m</b>\n"
+            f"Resumed normal scanning."
+        )
+        await self._send(text, reply_markup=None)

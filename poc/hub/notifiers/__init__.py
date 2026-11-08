@@ -94,6 +94,18 @@ async def notify_auto_fix_regression(
     await _dispatch("send_auto_fix_regression", finding, auto_fixed_ts, last_seen_ts)
 
 
+async def notify_scout_offline(
+    host: str, last_heartbeat_ts: int, offline_duration_s: int, last_health: str | None
+) -> None:
+    """BC-102: scout crossed the offline threshold — edge-triggered."""
+    await _dispatch("send_scout_offline", host, last_heartbeat_ts, offline_duration_s, last_health)
+
+
+async def notify_scout_online(host: str, offline_duration_s: int) -> None:
+    """BC-102: previously-offline scout POSTed again — edge-triggered."""
+    await _dispatch("send_scout_online", host, offline_duration_s)
+
+
 __all__ = [
     "NotificationAdapter",
     "TelegramAdapter",
@@ -103,6 +115,8 @@ __all__ = [
     "notify_finding",
     "notify_heartbeat",
     "notify_regression",
+    "notify_scout_offline",
+    "notify_scout_online",
     "notify_snooze_expired",
     "register",
     "reset_registry_for_tests",
