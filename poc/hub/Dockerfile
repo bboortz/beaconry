@@ -2,29 +2,37 @@
 # forge builder AND forge runtime. Both bases are cosign-signed keyless-OIDC
 # by forge/build.yml@main.
 #
+# ── Stage 0: grype source (Docker Hub) ──────────────────────────────────────
+# Pull grype's static Go binary from Docker Hub instead of GitHub releases.
+# GitHub's releases/download/* CDN flaps 504s during traffic spikes
+# (observed 2026-11-08: ≥6-min outages that exhausted curl --retry). Docker
+# Hub is a separate CDN that stayed healthy during the same windows.
+# Forge's own CI made the same pivot for syft/grype/cosign/hadolint.
+FROM anchore/grype:latest AS grype-src
+
 # ── Stage 1: builder ────────────────────────────────────────────────────────
 # BC-095: forge-builder-trixie ships python 3.13.18 (ABI-matches the runtime),
 # pip, syft, CA certs, tar. Extends BC-083's runtime migration one stage up.
-# Still-missing tooling installed below: curl (build-time only), grype, docker CLI.
 FROM ghcr.io/bboortz/forge-builder-trixie:latest AS builder
 
-# BC-095: forge-builder-trixie has no `curl` — apt it in temporarily for the
-# two static fetches below (grype + docker CLI), then purge to keep the
-# builder layer slim. `ca-certificates` + `tar` are already baked in.
-#
+# grype — pulled from the stage above, no GitHub release CDN dependency.
+COPY --from=grype-src /grype /usr/local/bin/grype
+
 # BC-009: docker CLI so DockerAdapter.execute can run `docker tag`/`docker pull`
 # against the host daemon via the mounted socket. Static binary; pinned.
 # BC-081 (2026-11-03): bumped 27.5.1 → 29.9.2 to pick up Go stdlib ≥1.26.9.
+#
+# curl is still needed for the docker CLI tarball (download.docker.com, not
+# GitHub). apt it in temporarily, then purge to keep the builder layer slim.
 ARG DOCKER_CLI_VERSION=29.9.2
 RUN apt-get update \
  && apt-get install -y --no-install-recommends curl \
- && curl -sSfL https://raw.githubusercontent.com/anchore/grype/main/install.sh \
-      | sh -s -- -b /usr/local/bin \
  && curl -fsSL "https://download.docker.com/linux/static/stable/x86_64/docker-${DOCKER_CLI_VERSION}.tgz" \
       | tar -xz -C /tmp \
  && mv /tmp/docker/docker /usr/local/bin/docker \
  && rm -rf /tmp/docker \
  && docker --version \
+ && grype --version \
  && apt-get purge -y curl \
  && apt-get autoremove -y \
  && rm -rf /var/lib/apt/lists/*
