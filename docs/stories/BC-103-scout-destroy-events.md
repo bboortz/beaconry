@@ -1,7 +1,7 @@
 ---
 id: BC-103
 title: Scout rescans on image/container `delete` + `destroy` + `die` events
-status: in-progress
+status: shipped
 created: 2026-11-08
 branch: feat/BC-103-scout-destroy-events
 plan: docs/plan/BC-103-scout-destroy-events-plan.md
