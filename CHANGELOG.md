@@ -4,6 +4,25 @@ All notable changes to beaconry are recorded here. The format is based
 on [Keep a Changelog](https://keepachangelog.com/), and this project
 follows [Semantic Versioning](https://semver.org/).
 
+## [v0.18.1] — 2026-11-08
+
+### Changed (BC-103)
+
+- **Scout rescans on image/container removal events too.** The
+  BC-093 docker events listener filter widened from
+  `[pull, create, start]` to
+  `[pull, create, start, destroy, die, delete]`. Operator runs
+  `docker rmi X` → next scan fires inside the BC-093 debounce
+  window (~10 s) instead of waiting up to `SCAN_INTERVAL` (300 s
+  default). Combined with BC-086's threshold, auto-close latency
+  for a removed image drops from up to 15 min to roughly
+  `3 × SCAN_INTERVAL` with the first absent_count bump landing
+  within seconds. Bulk removals still coalesce via the existing
+  debounce — no change to the "compose down of 10 containers →
+  1 scan" guarantee.
+- **CAPABILITIES**: CAP-T205 registered; CAP-T192 description
+  notes the widened filter.
+
 ## [v0.18.0] — 2026-11-08
 
 ### Added (BC-102)

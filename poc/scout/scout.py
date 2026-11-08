@@ -647,7 +647,14 @@ async def _daily_rescan_loop_forever() -> None:  # pragma: no cover - infinite a
 
 
 def _docker_events_stream():  # pragma: no cover - docker.from_env wrapper
-    """BC-093: return a docker events iterator filtered to pull/create/start.
+    """BC-093 + BC-103: return a docker events iterator for inventory-shape changes.
+
+    BC-093 (original): pull / create / start → image appeared.
+    BC-103 (2026-11-08): delete / destroy / die → image or container disappeared.
+    Both classes feed the same debounced rescan path; hub reconciles
+    absent inventory via BC-086's POST-driven threshold — but now the
+    operator doesn't wait up to SCAN_INTERVAL between `docker rmi` and
+    the first absent_count bump.
 
     Separated for test monkeypatch; the real implementation hits the
     docker daemon.
@@ -655,7 +662,10 @@ def _docker_events_stream():  # pragma: no cover - docker.from_env wrapper
     client = docker.from_env()
     return client.events(
         decode=True,
-        filters={"type": ["image", "container"], "event": ["pull", "create", "start"]},
+        filters={
+            "type": ["image", "container"],
+            "event": ["pull", "create", "start", "destroy", "die", "delete"],
+        },
     )
 
 
