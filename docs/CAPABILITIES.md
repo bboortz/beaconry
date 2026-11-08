@@ -1829,6 +1829,24 @@ Enforcement: `poc/scripts/verify_traceability.py` runs as part of `make check`. 
   - `poc/tests/unit/test_BC_096_sbom_at_builder.py`
   - `poc/tests/unit/test_BC_096_dogfood_sbom.py`
 
+### CAP-T198: Compose healthchecks use forge's `/hc`
+- **type:** technical
+- **status:** active
+- **origin:** BC-097 — forge FG-031 (shipped 2026-11-08) added `/hc` to every `*-scratch-trixie` image. Pre-BC-097 compose probes used `["CMD", "python3", "-c", "import urllib.request..."]` — a full CPython cold-start every 30 s per container because the scratch runtime has no shell/curl and python3 is the only in-image binary that can speak HTTP.
+- **description:** All 6 compose healthcheck probe sites across `poc/docker-compose.yml`, `poc/docker-compose.cold-start.yml`, `poc/docker-compose.scout-only.yml`, and `poc/scenarios/compose.yml` now use `["CMD", "/hc", "-t", "3", "http://localhost:<port>/<path>"]`. Same observable semantics (exit 0 iff 2xx), ~400 KB static binary instead of CPython cold-start per probe. `memory/docker-standard.md` + `memory/health-checks.md` rewritten to lead with `/hc`; python-inline retained as the documented fallback for services on bases without `/hc`.
+- **supports:** CAP-T043, CAP-B023
+- **verified by:**
+  - `poc/tests/unit/test_BC_097_hc_healthcheck.py`
+
+### CAP-T199: Runtime base tracks `python-scratch-trixie:latest`
+- **type:** technical
+- **status:** active
+- **origin:** BC-097 — BC-083 pinned the runtime base to `python-scratch-trixie:3.13`; the semver-pinned tag lags the eagerly-rebuilt `:latest`, which delayed every forge-side improvement (e.g. FG-031's `/hc`) by the next `:3.13` rebuild window. Builder was already on `:latest` (BC-095); runtime stayed behind.
+- **description:** Both `poc/{hub,scout}/Dockerfile` runtime FROM `ghcr.io/bboortz/python-scratch-trixie:latest`. `verify_pinned_versions.py`'s `RUNTIME_IMAGE_RE` accepts `:latest` + the existing `:3.13` + distroless fallbacks (operators rolling back shouldn't trip the lint). Trade-off documented in the BC-097 story: a future forge bump to Python 3.14 would break the hardcoded `COPY /install/lib/python3.13/...` paths — cold-start smoke (BC-082) catches this on the first rebuild.
+- **supports:** CAP-T171, CAP-T196, CAP-B023
+- **verified by:**
+  - `poc/tests/unit/test_BC_097_hc_healthcheck.py`
+
 ### CAP-T195: `BEACONRY_IMAGE_TAG` env + `DEPLOY_ONLY_ALLOWLIST` lint exemption
 - **type:** technical
 - **status:** active

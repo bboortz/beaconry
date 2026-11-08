@@ -23,30 +23,37 @@ HUB_DOCKERFILE = REPO_ROOT / "poc" / "hub" / "Dockerfile"
 SCOUT_DOCKERFILE = REPO_ROOT / "poc" / "scout" / "Dockerfile"
 PLAN_DOC = REPO_ROOT / "docs" / "plan" / "BC-083-forge-base-image-plan.md"
 
-FORGE_RUNTIME = "ghcr.io/bboortz/python-scratch-trixie:3.13"
+# BC-097 broadened to accept either `:latest` (preferred) or `:3.13`
+# (rollback path). The repo-identity check is the forge path, not the tag.
+FORGE_RUNTIME_REPO = "ghcr.io/bboortz/python-scratch-trixie"
+FORGE_RUNTIME_TAGS = ("latest", "3.13")
+# Current preferred ref — used by cache-fixture tests below.
+FORGE_RUNTIME = f"{FORGE_RUNTIME_REPO}:{FORGE_RUNTIME_TAGS[0]}"
+_FORGE_RUNTIME_RE = re.compile(
+    rf"^FROM\s+{re.escape(FORGE_RUNTIME_REPO)}:(?:{'|'.join(re.escape(t) for t in FORGE_RUNTIME_TAGS)})\s+AS\s+runtime\b",
+    re.MULTILINE,
+)
 
 
 # ── CAP-T169: Dockerfiles use the forge runtime ─────────────────────────────
 
 
 def test_hub_runtime_is_forge() -> None:
-    """CAP-T169: hub runtime stage must be the forge image."""
+    """CAP-T169: hub runtime stage must be the forge image (any accepted tag)."""
     content = HUB_DOCKERFILE.read_text()
-    assert re.search(
-        rf"^FROM\s+{re.escape(FORGE_RUNTIME)}\s+AS\s+runtime\b",
-        content,
-        re.MULTILINE,
-    ), f"hub Dockerfile runtime stage must FROM {FORGE_RUNTIME}"
+    assert _FORGE_RUNTIME_RE.search(content), (
+        f"hub Dockerfile runtime stage must FROM {FORGE_RUNTIME_REPO}:"
+        f"{{{','.join(FORGE_RUNTIME_TAGS)}}}"
+    )
 
 
 def test_scout_runtime_is_forge() -> None:
-    """CAP-T169: scout runtime stage must be the forge image."""
+    """CAP-T169: scout runtime stage must be the forge image (any accepted tag)."""
     content = SCOUT_DOCKERFILE.read_text()
-    assert re.search(
-        rf"^FROM\s+{re.escape(FORGE_RUNTIME)}\s+AS\s+runtime\b",
-        content,
-        re.MULTILINE,
-    ), f"scout Dockerfile runtime stage must FROM {FORGE_RUNTIME}"
+    assert _FORGE_RUNTIME_RE.search(content), (
+        f"scout Dockerfile runtime stage must FROM {FORGE_RUNTIME_REPO}:"
+        f"{{{','.join(FORGE_RUNTIME_TAGS)}}}"
+    )
 
 
 def test_runtime_site_packages_path() -> None:

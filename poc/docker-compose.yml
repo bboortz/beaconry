@@ -89,7 +89,7 @@ services:
     ports:
       - "${HUB_PUBLISH_ADDR:-127.0.0.1}:8000:8000"
     healthcheck:
-      test: ["CMD", "python3", "-c", "import urllib.request,sys;sys.exit(0 if urllib.request.urlopen('http://localhost:8000/readyz').status==200 else 1)"]
+      test: ["CMD", "/hc", "-t", "3", "http://localhost:8000/readyz"]
       interval: 60s
       start_interval: 2s
       timeout: 10s
@@ -147,7 +147,7 @@ services:
       hub:
         condition: service_healthy
     healthcheck:
-      test: ["CMD", "python3", "-c", "import urllib.request,sys;sys.exit(0 if urllib.request.urlopen('http://localhost:8001/readyz').status==200 else 1)"]
+      test: ["CMD", "/hc", "-t", "3", "http://localhost:8001/readyz"]
       interval: 60s
       start_interval: 2s
       timeout: 5s
