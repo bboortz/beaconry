@@ -57,13 +57,27 @@ def test_scout_runtime_is_forge() -> None:
 
 
 def test_runtime_site_packages_path() -> None:
-    """CAP-T169: forge sys.path uses /usr/local/lib/python3.13; site-packages
-    COPY must target that path or imports fail inside the container."""
+    """CAP-T169 ext (BC-098 broadened): site-packages must still reach
+    Python's sys.path (/usr/local/lib/pythonX.Y/site-packages), but the
+    specific minor is detected at build time rather than hardcoded.
+
+    Post-BC-098 the Dockerfile stages site-packages at
+    `/stage/usr/local/lib/python${PY_VER}/site-packages` and the runtime
+    does a single `COPY --from=builder /stage /`. The lint here checks
+    the structural shape: (a) a builder-stage mv into
+    `/stage/usr/local/lib/python${PY_VER}/site-packages`, (b) a runtime
+    `COPY --from=builder /stage /`. If either is missing, the import
+    probes below will fail loudly — this grep catches the Dockerfile
+    regression at pre-push time.
+    """
     for df in (HUB_DOCKERFILE, SCOUT_DOCKERFILE):
         content = df.read_text()
-        assert "/usr/local/lib/python3.13/site-packages" in content, (
-            f"{df.name}: site-packages COPY must target "
-            f"/usr/local/lib/python3.13/site-packages for forge sys.path"
+        assert "/stage/usr/local/lib/python${PY_VER}/site-packages" in content, (
+            f"{df.name}: builder stage must `mv` site-packages into "
+            f"/stage/usr/local/lib/python${{PY_VER}}/site-packages (BC-098)"
+        )
+        assert "COPY --from=builder /stage /" in content, (
+            f"{df.name}: runtime stage must `COPY --from=builder /stage /` (BC-098)"
         )
 
 

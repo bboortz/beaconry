@@ -1842,10 +1842,20 @@ Enforcement: `poc/scripts/verify_traceability.py` runs as part of `make check`. 
 - **type:** technical
 - **status:** active
 - **origin:** BC-097 — BC-083 pinned the runtime base to `python-scratch-trixie:3.13`; the semver-pinned tag lags the eagerly-rebuilt `:latest`, which delayed every forge-side improvement (e.g. FG-031's `/hc`) by the next `:3.13` rebuild window. Builder was already on `:latest` (BC-095); runtime stayed behind.
-- **description:** Both `poc/{hub,scout}/Dockerfile` runtime FROM `ghcr.io/bboortz/python-scratch-trixie:latest`. `verify_pinned_versions.py`'s `RUNTIME_IMAGE_RE` accepts `:latest` + the existing `:3.13` + distroless fallbacks (operators rolling back shouldn't trip the lint). Trade-off documented in the BC-097 story: a future forge bump to Python 3.14 would break the hardcoded `COPY /install/lib/python3.13/...` paths — cold-start smoke (BC-082) catches this on the first rebuild.
+- **description:** Both `poc/{hub,scout}/Dockerfile` runtime FROM `ghcr.io/bboortz/python-scratch-trixie:latest`. `verify_pinned_versions.py`'s `RUNTIME_IMAGE_RE` accepts `:latest` + the existing `:3.13` + distroless fallbacks (operators rolling back shouldn't trip the lint). BC-097 documented a trade-off: hardcoded `COPY /install/lib/python3.13/...` paths would break on a forge Python minor bump. **BC-098 retired that risk** by moving site-packages placement onto a version-detected staging path (CAP-T200); the Python-version literal is gone.
 - **supports:** CAP-T171, CAP-T196, CAP-B023
 - **verified by:**
   - `poc/tests/unit/test_BC_097_hc_healthcheck.py`
+
+### CAP-T200: Python-minor-agnostic site-packages placement (stage-at-runtime-path)
+- **type:** technical
+- **status:** active
+- **origin:** BC-098 — BC-097 shipped `python-scratch-trixie:latest` on the runtime with a documented risk: `COPY --from=builder /install/lib/python3.13/site-packages …` hardcoded a Python minor. Forge FG-032 (2026-11-08, PR #60) bumped `python-scratch-trixie` + `forge-builder-trixie` in-place to Python 3.14 — the exact break the risk predicted. Forge's release pipeline paused until beaconry shipped this companion fix.
+- **description:** Both `poc/{hub,scout}/Dockerfile` builder stages run `RUN PY_VER="$(python3 -c '…')" && mkdir -p "/stage/usr/local/lib/python${PY_VER}" && mv "/install/lib/python${PY_VER}/site-packages" "/stage/usr/local/lib/python${PY_VER}/site-packages"` after the existing `syft dir:/install` step. Runtime stages do a single `COPY --from=builder /stage /` and site-packages lands at the exact path Python's native sys.path expects. Zero `python3.X` literals in either Dockerfile. Works for 3.13 today and every future minor bump transparently.
+- **supports:** CAP-T199, CAP-B023
+- **verified by:**
+  - `poc/tests/unit/test_BC_098_python_version_detect.py`
+  - `poc/tests/integration/test_BC_083_forge_runtime.py` (the `test_{hub,scout}_can_import_all_runtime_deps` probes are the live oracle — they fail if PY_VER resolution or mv target is wrong)
 
 ### CAP-T195: `BEACONRY_IMAGE_TAG` env + `DEPLOY_ONLY_ALLOWLIST` lint exemption
 - **type:** technical

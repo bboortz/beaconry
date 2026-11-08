@@ -5,8 +5,10 @@
 # writes — only read access to the Docker socket (compose mount is :ro).
 
 # ── Stage 1: builder ────────────────────────────────────────────────────────
-# BC-095: forge-builder-trixie ships python 3.13.18 (ABI-matches the runtime),
-# pip, syft, CA certs. Scout needs exactly that set — no extra RUN steps.
+# BC-095: forge-builder-trixie ships Python + pip + syft + CA certs.
+# Python minor is detected at build time (BC-098) and matches runtime by
+# forge contract (both images bumped as a pair). Scout needs exactly
+# that set — no extra RUN steps.
 FROM ghcr.io/bboortz/forge-builder-trixie:latest AS builder
 
 WORKDIR /app
@@ -22,13 +24,23 @@ COPY VERSION ./VERSION
 # grype-DB-learned signals).
 RUN syft dir:/install -o syft-json=/sbom.json
 
+# BC-098: Python-minor-agnostic site-packages staging (see hub/Dockerfile
+# for the rationale). Runs AFTER the syft step so the SBOM captures
+# wheels in their original /install location first.
+RUN PY_VER="$(python3 -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')" \
+ && mkdir -p "/stage/usr/local/lib/python${PY_VER}" \
+ && mv "/install/lib/python${PY_VER}/site-packages" \
+       "/stage/usr/local/lib/python${PY_VER}/site-packages"
+
 # ── Stage 2: runtime (forge) ────────────────────────────────────────────────
 # ghcr.io/bboortz/python-scratch-trixie:latest — same forge base as hub.
 # See hub/Dockerfile for the baked-in guarantees (uid 65532, ENTRYPOINT,
 # SSL_CERT_FILE, nonroot passwd entry) and the BC-097 rationale for :latest.
+# BC-098: /stage layout + `COPY --from=builder /stage /` — Python
+# version-agnostic (see hub).
 FROM ghcr.io/bboortz/python-scratch-trixie:latest AS runtime
 
-COPY --from=builder /install/lib/python3.13/site-packages /usr/local/lib/python3.13/site-packages
+COPY --from=builder /stage /
 
 COPY --from=builder /usr/local/bin/syft /usr/local/bin/syft
 

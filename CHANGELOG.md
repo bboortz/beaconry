@@ -4,6 +4,34 @@ All notable changes to beaconry are recorded here. The format is based
 on [Keep a Changelog](https://keepachangelog.com/), and this project
 follows [Semantic Versioning](https://semver.org/).
 
+## [v0.16.6] — 2026-11-08
+
+### Changed (BC-098)
+
+- **Dockerfiles are Python-minor-agnostic.** `poc/{hub,scout}/Dockerfile`
+  no longer carry `python3.X` literals in any instruction. The builder
+  stage runs `PY_VER="$(python3 -c 'import sys; …')"` to detect the
+  interpreter's `major.minor` at build time, then moves site-packages
+  from pip's `--prefix=/install` layout into a staging path mirroring
+  runtime (`/stage/usr/local/lib/python${PY_VER}/site-packages`). The
+  runtime stage replaces the previous hardcoded site-packages COPY
+  with a single `COPY --from=builder /stage /` — site-packages land
+  at the exact path Python's native sys.path expects.
+- **Retires BC-097's documented risk.** Forge FG-032 (PR #60) bumped
+  `python-scratch-trixie` + `forge-builder-trixie` to Python 3.14
+  in-place — exactly the failure mode BC-097's risk note predicted
+  for the hardcoded `python3.13` paths. BC-098 ships the companion
+  fix so forge's release pipeline can promote; next daily cron
+  republishes `:latest` with Python 3.14, beaconry's next
+  `make live-rebuild` picks it up transparently.
+- **CAPABILITIES**: CAP-T200 registered (stage-at-runtime-path pattern).
+  CAP-T199 description updated past-tense to point at CAP-T200 as the
+  successor.
+- **Hub Dockerfile cleanup**: standalone `COPY --from=builder
+  --chown=65532:65532 /stage/data /data` dropped — now subsumed by
+  `COPY --from=builder /stage /` (ownership preserved from the
+  builder-stage `chown -R`).
+
 ## [v0.16.5] — 2026-11-08
 
 ### Changed (BC-097)
