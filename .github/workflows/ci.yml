@@ -112,12 +112,25 @@ jobs:
           pip install -r poc/hub/requirements.txt
           pip install -r poc/scout/requirements.txt
 
-      - name: Install syft + grype (POC pipeline tools)
+      - name: Install syft + grype from Docker Hub (POC pipeline tools)
+        # Bypass GitHub's flaky releases/download CDN (observed 2026-11-08:
+        # multi-minute 504s). Docker Hub hosts the same binaries in the
+        # anchore/{syft,grype} images; extract via docker cp.
         run: |
-          curl -sSfL https://raw.githubusercontent.com/anchore/syft/main/install.sh \
-            | sh -s -- -b /usr/local/bin
-          curl -sSfL https://raw.githubusercontent.com/anchore/grype/main/install.sh \
-            | sh -s -- -b /usr/local/bin
+          mkdir -p "$HOME/.local/bin"
+          install_from_docker() {
+            local image="$1" bin_in="$2" dest="$3"
+            for attempt in 1 2 3; do
+              docker pull --quiet "$image" >/dev/null && break
+              sleep $((attempt * 5))
+            done
+            local cid; cid=$(docker create "$image")
+            docker cp "$cid:$bin_in" "$dest"
+            docker rm "$cid" >/dev/null
+            chmod +x "$dest"
+          }
+          install_from_docker anchore/syft:latest  /syft  /usr/local/bin/syft
+          install_from_docker anchore/grype:latest /grype /usr/local/bin/grype
 
       - name: make check (fast tier, same as pre-push)
         env:
