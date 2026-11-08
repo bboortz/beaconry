@@ -1,7 +1,7 @@
 ---
 id: BC-101
 title: Rename dev-compose containers to avoid collision with operator systemd scout
-status: in-progress
+status: shipped
 created: 2026-11-08
 branch: feat/BC-101-dev-compose-container-rename
 plan: docs/plan/BC-101-dev-compose-container-rename-plan.md
