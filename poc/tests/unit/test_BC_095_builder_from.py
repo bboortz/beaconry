@@ -16,7 +16,11 @@ HUB_DF = REPO / "poc" / "hub" / "Dockerfile"
 SCOUT_DF = REPO / "poc" / "scout" / "Dockerfile"
 
 EXPECTED_BUILDER = "FROM ghcr.io/bboortz/forge-builder-trixie:latest AS builder"
-RUNTIME_BASE = "ghcr.io/bboortz/python-scratch-trixie:3.13"
+# BC-097 broadened to :latest (preferred) with :3.13 kept as a rollback path.
+RUNTIME_BASES = (
+    "ghcr.io/bboortz/python-scratch-trixie:latest",
+    "ghcr.io/bboortz/python-scratch-trixie:3.13",
+)
 
 
 def _hub() -> str:
@@ -55,9 +59,12 @@ def test_no_upstream_python_from() -> None:
 
 
 def test_runtime_stage_unchanged() -> None:
-    """Runtime stage (BC-083) must still be the forge scratch python base."""
+    """Runtime stage must still be the forge scratch python base (BC-097: any accepted tag)."""
     for name, body in (("hub", _hub()), ("scout", _scout())):
-        assert RUNTIME_BASE in body, f"{name}/Dockerfile lost the BC-083 runtime base"
+        assert any(base in body for base in RUNTIME_BASES), (
+            f"{name}/Dockerfile lost the forge scratch python runtime base "
+            f"(expected one of {RUNTIME_BASES})"
+        )
 
 
 # ── Hub still installs grype + docker CLI ───────────────────────────────────

@@ -52,11 +52,19 @@ RUN syft dir:/install -o syft-json=/sbom.json
 RUN mkdir -p /stage/data && chown -R 65532:65532 /stage/data
 
 # ── Stage 2: runtime (forge) ────────────────────────────────────────────────
-# ghcr.io/bboortz/python-scratch-trixie:3.13 — self-owned forge image.
+# ghcr.io/bboortz/python-scratch-trixie:latest — self-owned forge image.
 # Python 3.13.18, PATH=/usr/local/bin, baked USER 65532:65532 +
 # ENTRYPOINT /usr/local/bin/python3 + SSL_CERT_FILE + /etc/passwd entry
 # for nonroot. No shell, no apt, no coreutils. BC-083 pre-flight #2 verified.
-FROM ghcr.io/bboortz/python-scratch-trixie:3.13 AS runtime
+#
+# BC-097 (2026-11-08): bumped `:3.13` → `:latest` for symmetry with the
+# BC-095 builder (`forge-builder-trixie:latest`) and to pick up FG-031's
+# `/hc` healthcheck binary without waiting for the `:3.13` rebuild
+# window. Risk: a future forge bump to Python 3.14 would break the
+# hardcoded `COPY /install/lib/python3.13/...` paths below — cold-start
+# smoke (BC-082) catches this on the next rebuild; remedy is a one-line
+# bump of the python-minor path in both Dockerfiles.
+FROM ghcr.io/bboortz/python-scratch-trixie:latest AS runtime
 
 # Python deps — forge sys.path is /usr/local/lib/python3.13/*, not /usr/lib/*.
 COPY --from=builder /install/lib/python3.13/site-packages /usr/local/lib/python3.13/site-packages

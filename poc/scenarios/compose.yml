@@ -36,7 +36,7 @@ services:
     # BC-038: scenarios don't invoke grype → /readyz would always 503 on
     # the "grype_db missing" check. /startupz is the correct gate here.
     healthcheck:
-      test: ["CMD", "python3", "-c", "import urllib.request,sys;sys.exit(0 if urllib.request.urlopen('http://localhost:8000/startupz').status==200 else 1)"]
+      test: ["CMD", "/hc", "-t", "3", "http://localhost:8000/startupz"]
       interval: 5s
       start_interval: 2s
       timeout: 5s

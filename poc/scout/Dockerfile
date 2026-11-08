@@ -23,10 +23,10 @@ COPY VERSION ./VERSION
 RUN syft dir:/install -o syft-json=/sbom.json
 
 # ── Stage 2: runtime (forge) ────────────────────────────────────────────────
-# ghcr.io/bboortz/python-scratch-trixie:3.13 — same forge base as hub.
+# ghcr.io/bboortz/python-scratch-trixie:latest — same forge base as hub.
 # See hub/Dockerfile for the baked-in guarantees (uid 65532, ENTRYPOINT,
-# SSL_CERT_FILE, nonroot passwd entry).
-FROM ghcr.io/bboortz/python-scratch-trixie:3.13 AS runtime
+# SSL_CERT_FILE, nonroot passwd entry) and the BC-097 rationale for :latest.
+FROM ghcr.io/bboortz/python-scratch-trixie:latest AS runtime
 
 COPY --from=builder /install/lib/python3.13/site-packages /usr/local/lib/python3.13/site-packages
 

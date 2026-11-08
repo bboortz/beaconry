@@ -4,6 +4,32 @@ All notable changes to beaconry are recorded here. The format is based
 on [Keep a Changelog](https://keepachangelog.com/), and this project
 follows [Semantic Versioning](https://semver.org/).
 
+## [v0.16.5] — 2026-11-08
+
+### Changed (BC-097)
+
+- **compose healthchecks**: all 6 probe sites across
+  `poc/docker-compose.yml`, `poc/docker-compose.cold-start.yml`,
+  `poc/docker-compose.scout-only.yml`, and `poc/scenarios/compose.yml`
+  moved from `["CMD", "python3", "-c", "import urllib.request..."]`
+  to `["CMD", "/hc", "-t", "3", "http://localhost:<port>/<path>"]`.
+  Same semantics (exit 0 iff 2xx), ~400 KB static binary instead of a
+  CPython cold-start per probe. Possible thanks to forge FG-031
+  baking `/hc` into every `*-scratch-trixie` image.
+- **runtime base**: both `poc/{hub,scout}/Dockerfile` runtime FROM
+  `ghcr.io/bboortz/python-scratch-trixie:3.13` →
+  `ghcr.io/bboortz/python-scratch-trixie:latest`. Symmetry with the
+  `forge-builder-trixie:latest` builder (BC-095); picks up forge's
+  daily rebuild cadence immediately. `verify_pinned_versions.py`
+  accepts both tags.
+- **memory docs**: `memory/docker-standard.md` and
+  `memory/health-checks.md` now lead with the `/hc` recipe. The
+  python-inline form is retained as a documented fallback for
+  services on bases without `/hc`.
+
+### Documentation
+- **status:** BC-096 shipped — flip INDEX + story frontmatter
+
 ## [v0.16.4] — 2026-11-07
 
 ### Added (BC-096)

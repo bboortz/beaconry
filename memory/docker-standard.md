@@ -21,7 +21,7 @@ services:
     volumes:
       - beaconry-data:/data
     healthcheck:
-      test: ["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:<port>/health')"]
+      test: ["CMD", "/hc", "-t", "3", "http://localhost:<port>/readyz"]
       interval: 60s
       start_interval: 2s   # Docker 25+: polls every 2s during start_period — cuts smoke wait to ~5s
       timeout: 10s
@@ -41,11 +41,17 @@ volumes:
 
 **Point every service's compose healthcheck at `/readyz` per `memory/health-checks.md`** (the four-endpoint convention adopted BC-010). HTTP is now the canonical path for every beaconry service — scout migrated in BC-013. The file-sentinel style below is retained for intentionally HTTP-less loop services only; HTTP is preferred because it survives deadlock-with-fresh-mtime.
 
-- **Hub (FastAPI, canonical)**: `["CMD", "python3", "-c", "import urllib.request,sys;sys.exit(0 if urllib.request.urlopen('http://localhost:8000/readyz').status==200 else 1)"]`
-- **Scout (FastAPI/uvicorn on 8001, canonical since BC-013)**: `["CMD", "python3", "-c", "import urllib.request,sys;sys.exit(0 if urllib.request.urlopen('http://localhost:8001/readyz').status==200 else 1)"]`
+Canonical probe: forge's `/hc` static binary (shipped in every `*-scratch-trixie` image since FG-031; adopted by beaconry in BC-097). Invocation `["CMD", "/hc", "-t", "3", "http://localhost:<port>/<path>"]` — exits 0 iff the URL returned 2xx within 3 s. ~400 KB static binary vs. a full CPython cold-start per probe; same observable semantics as the previous python-inline form.
+
+- **Hub (FastAPI, canonical)**: `["CMD", "/hc", "-t", "3", "http://localhost:8000/readyz"]`
+- **Scout (FastAPI/uvicorn on 8001, canonical since BC-013)**: `["CMD", "/hc", "-t", "3", "http://localhost:8001/readyz"]`
+- **Scenarios compose (points at `/startupz` per BC-038 — scenarios don't invoke grype)**: `["CMD", "/hc", "-t", "3", "http://localhost:8000/startupz"]`
 - **File-sentinel path for HTTP-less loop services** (via `beaconry_health.SentinelWriter`): `["CMD-SHELL", "test -f /data/<svc>.ready && [ $(stat -c %Y /data/<svc>.live) -gt $(( $(date +%s) - 300 )) ]"]`
-- **Legacy single `/health` (hub, pre-BC-010)**: `["CMD", "python3", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/health')"]`
-- **Legacy process check (do not use for new services)**: `["CMD-SHELL", "pgrep -f <svc>.py > /dev/null"]`
+
+**Fallback — python3-inline (for images on bases without `/hc`)**: `["CMD", "python3", "-c", "import urllib.request,sys;sys.exit(0 if urllib.request.urlopen('http://localhost:<port>/readyz').status==200 else 1)"]`. Correct and still supported, but incurs a CPython cold-start per probe. Prefer `/hc` when the base image provides it (every forge `*-scratch-trixie`, every forge `nginx-scratch-trixie`).
+
+- **Legacy single `/health` (hub, pre-BC-010)**: `["CMD", "/hc", "-t", "3", "http://localhost:8000/health"]`
+- **Legacy process check (do not use for new services)**: not possible in scratch runtime — no `pgrep`.
 
 ## Dockerfile template (Python service)
 

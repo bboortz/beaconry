@@ -89,3 +89,4 @@ Lifecycle: `draft → ready → in-progress → shipped`. Status matches each st
 | BC-094 | Homelab consumes forge-signed ghcr images for beaconry                   | shipped     | — (merged to dev)                   |
 | BC-095 | Builder stage FROM `ghcr.io/bboortz/forge-builder-trixie:latest`         | shipped     | — (merged to dev)                   |
 | BC-096 | SBOM at builder → baked into runtime + `/sbom` + `make dogfood-sbom`     | shipped     | — (merged to dev)                   |
+| BC-097 | Compose healthchecks use forge's `/hc`; runtime base tracks `:latest`    | in-progress | feat/BC-097-hc-healthcheck          |

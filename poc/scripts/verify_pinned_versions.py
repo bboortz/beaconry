@@ -43,22 +43,23 @@ BUILDER_BASE_RE = re.compile(
     re.MULTILINE,
 )
 
-# BC-078 → BC-082 → BC-083 runtime contract.
-# BC-083 moved runtime to the self-owned forge image;
-# distroless debian12/debian13 stay accepted for the migration window
-# (one release). Operators on distroless see a soft notice; the hard
-# cutoff ships in a future BC once the migration completes.
-# Any other variant (random ghcr repo, distroless-debug, etc.) must edit
-# this lint too — that's the "conscious choice" gate.
+# BC-078 → BC-082 → BC-083 → BC-097 runtime contract.
+# BC-083 moved runtime to the self-owned forge image on the semver-pinned
+# `:3.13` tag; BC-097 (2026-11-08) bumped to `:latest` for symmetry with
+# the BC-095 builder and to pick up FG-031's `/hc` immediately.
+# `:3.13` + distroless debian12/debian13 stay accepted for rollback and
+# the migration window. Any other variant (random ghcr repo,
+# distroless-debug, etc.) must edit this lint too — that's the
+# "conscious choice" gate.
 RUNTIME_IMAGE_RE = re.compile(
     r"^FROM\s+(?:"
-    r"ghcr\.io/bboortz/python-scratch-trixie:3\.13"  # BC-083 primary
+    r"ghcr\.io/bboortz/python-scratch-trixie:(?:latest|3\.13)"  # BC-097/BC-083 primary
     r"|gcr\.io/distroless/python3-debian1[23]:nonroot"  # BC-078/BC-082 fallback
     r")\s+AS\s+runtime\b",
     re.MULTILINE,
 )
 # Preferred (newest accepted) tag — error messages name this one.
-RUNTIME_IMAGE_PREFERRED = "ghcr.io/bboortz/python-scratch-trixie:3.13"
+RUNTIME_IMAGE_PREFERRED = "ghcr.io/bboortz/python-scratch-trixie:latest"
 
 # BC-081 docker CLI pin.
 DOCKER_CLI_RE = re.compile(

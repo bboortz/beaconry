@@ -25,11 +25,13 @@ Rule of thumb: before adding a check to `/livez` or `/readyz`, ask *"would resta
 
 Compose has no per-probe type knob. Policy: healthcheck → `/readyz`. The other endpoints exist for `make status`, future k8s migration, and operator curl.
 
+Canonical probe is forge's `/hc` static binary (shipped in every `*-scratch-trixie` image since FG-031; beaconry adopted this in BC-097). ~400 KB vs a full CPython cold-start on every probe; same exit-0-iff-2xx semantics.
+
 ```yaml
 services:
   <name>:
     healthcheck:
-      test: ["CMD", "python3", "-c", "import urllib.request,sys;sys.exit(0 if urllib.request.urlopen('http://localhost:<port>/readyz').status==200 else 1)"]
+      test: ["CMD", "/hc", "-t", "3", "http://localhost:<port>/readyz"]
       interval: 30s
       start_interval: 2s     # Docker 25+ — polls every 2s during start_period
       start_period: 60s      # grype DB download grace, etc.
@@ -37,7 +39,15 @@ services:
       retries: 3
 ```
 
-(Docker Hardened Images without a shell → use the sidecar + `network_mode: service:<name>` pattern instead. Not needed today; `python:3.12-slim` ships `python3`.)
+**Fallback** — for services on a base image without `/hc` (non-forge, or forge pre-FG-031):
+
+```yaml
+test: ["CMD", "python3", "-c", "import urllib.request,sys;sys.exit(0 if urllib.request.urlopen('http://localhost:<port>/readyz').status==200 else 1)"]
+```
+
+Pays a CPython cold-start per probe. Correct, but prefer `/hc` when the base image ships it.
+
+(Docker Hardened Images without a shell and without `/hc` → use the sidecar + `network_mode: service:<name>` pattern instead. Not needed today; every beaconry service runs on `python-scratch-trixie` with `/hc` baked in.)
 
 ## `depends_on: service_healthy` — compose startup ordering
 
