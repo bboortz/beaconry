@@ -95,3 +95,4 @@ Lifecycle: `draft → ready → in-progress → shipped`. Status matches each st
 | BC-100 | telegram_mock joins the forge-signed scratch base + ABI guard family     | shipped     | — (merged to dev)                   |
 | BC-101 | Dev-compose containers renamed to avoid collision with systemd scout     | shipped     | — (merged to dev)                   |
 | BC-102 | Hub-side scout-offline Telegram alert + stale-scout findings reconcile  | shipped     | — (merged to dev)                   |
+| BC-103 | Scout rescans on image/container `delete` + `destroy` + `die` events   | in-progress | feat/BC-103-scout-destroy-events    |

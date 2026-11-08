@@ -1796,10 +1796,19 @@ Enforcement: `poc/scripts/verify_traceability.py` runs as part of `make check`. 
 - **type:** technical
 - **status:** active
 - **origin:** BC-093 — `docker pull nginx:1.27` sat invisible for up to SCAN_INTERVAL seconds pre-BC-093. Operators with heavy container churn (compose up/down cycles) felt the lag.
-- **description:** `_docker_events_loop_forever` subscribes to `docker.events(filters={"type": ["image","container"], "event": ["pull","create","start"]})` via a blocking iterator running in a worker thread. Every event schedules a trailing scan `DOCKER_EVENTS_DEBOUNCE_S` later (default 10s), cancelling any earlier pending schedule — so a compose up pulling 5 images coalesces into ONE scan 10s after the last pull, not 5 back-to-back. `BEACONRY_DOCKER_EVENTS_ENABLED=0` disables the listener. `BEACONRY_DOCKER_EVENTS_DEBOUNCE_S` tunes the window.
+- **description:** `_docker_events_loop_forever` subscribes to `docker.events(filters={"type": ["image","container"], "event": ["pull","create","start"]})` via a blocking iterator running in a worker thread. Every event schedules a trailing scan `DOCKER_EVENTS_DEBOUNCE_S` later (default 10s), cancelling any earlier pending schedule — so a compose up pulling 5 images coalesces into ONE scan 10s after the last pull, not 5 back-to-back. `BEACONRY_DOCKER_EVENTS_ENABLED=0` disables the listener. `BEACONRY_DOCKER_EVENTS_DEBOUNCE_S` tunes the window. **BC-103 widened the filter** to also catch `delete`, `destroy`, `die` so `docker rmi` triggers the same immediate-rescan path.
 - **supports:** CAP-B023
 - **verified by:**
   - `poc/tests/integration/test_BC_093_rescan_hooks.py`
+
+### CAP-T205: Scout rescans on container/image removal events (BC-103)
+- **type:** technical
+- **status:** active
+- **origin:** BC-103 — the user removed `homelab-bot-alpine-test:latest` and the finding stayed `regressed` for 24 min: scout's events filter only caught pull/create/start, so the next scan (and thus the first absent_count bump) waited up to `SCAN_INTERVAL` (300s default). BC-086's threshold then added another 2 × SCAN_INTERVAL = 600s before `auto_fixed` landed.
+- **description:** `poc/scout/scout.py`'s `_docker_events_stream` filter widened from `{"event": ["pull", "create", "start"]}` to `{"event": ["pull", "create", "start", "destroy", "die", "delete"]}`. Same BC-093 debounce window applies (no behavior change for bulk operations — compose down of 10 containers still produces one scan). `docker rmi` now flows through the same immediate-rescan path as `docker pull`.
+- **supports:** CAP-T192, CAP-B023
+- **verified by:**
+  - `poc/tests/unit/test_BC_103_scout_destroy_events.py`
 
 ### CAP-T194: ghcr image override compose files (`docker-compose.{hub,scout}-ghcr.yml`)
 - **type:** technical
