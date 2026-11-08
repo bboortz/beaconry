@@ -4,6 +4,52 @@ All notable changes to beaconry are recorded here. The format is based
 on [Keep a Changelog](https://keepachangelog.com/), and this project
 follows [Semantic Versioning](https://semver.org/).
 
+## [v0.17.2] — 2026-11-08
+
+### Fixed (BC-101)
+
+- **Dev-compose + operator-systemd container name collision.**
+  2026-11-08 ~21:20 UTC incident: `docker rm -f beaconry-scout`
+  during BC-099 cold-start troubleshooting killed the operator's
+  systemd-wrapped production scout on bb-82jq. Root cause: both
+  `poc/docker-compose.yml` (dev) and
+  `poc/docker-compose.scout-only.yml` (operator/systemd) declared
+  `container_name: beaconry-scout`. Operator scout stayed dark
+  54 min without alert; 17 open + 7 regressed findings frozen on
+  hetzner-side hub DB because BC-086 reconcile can't fire without
+  scout POSTs.
+
+### Changed (BC-101)
+
+- **`poc/docker-compose.yml` container_name namespaced**:
+  `beaconry-{hub,scout}` → `beaconry-dev-{hub,scout}`. Operator
+  `docker-compose.scout-only.yml` keeps the bare `beaconry-scout`
+  name (systemd/ansible expect this).
+- **CLI script defaults track dev names**:
+  `BEACONRY_HUB_CONTAINER` default `beaconry-hub` → `beaconry-dev-hub`
+  (in `audit.py`, `findings.py`, `cli_smoke.py`). New
+  **`BEACONRY_SCOUT_CONTAINER`** env (default `beaconry-dev-scout`)
+  replaces the hardcoded `SCOUT_CONTAINER = "beaconry-scout"` in
+  `scan_cli.py` + `cli_smoke.py`. Operators on homelab/systemd
+  override via `.env` (back to `beaconry-{hub,scout}`).
+- **Makefile** `live-rebuild` + `live-status` targets use the new
+  dev names.
+- **Docs**: `poc/.env.example` + `docs/VARIABLES.md` updated with
+  the new default + `BEACONRY_SCOUT_CONTAINER` row. Memory files
+  (`workflow.md`, `docker-standard.md`) refreshed where they named
+  the dev containers explicitly.
+
+### Unaffected
+
+- `poc/docker-compose.scout-only.yml` + `docker-compose.cold-start.yml`
+  + `docker-compose.test.yml` — operator and test-harness names
+  already distinct or intentionally kept.
+- `status.py` display labels — service-level table headers, not
+  container names; they stay `beaconry-hub` / `beaconry-scout`.
+- `poc/scripts/cleanup.py` — allowlist is by IMAGE name, unaffected.
+
+CAP-T203 registered. Version 0.17.1 → 0.17.2.
+
 ## [v0.17.1] — 2026-11-08
 
 ### Changed (BC-100)

@@ -1877,6 +1877,15 @@ Enforcement: `poc/scripts/verify_traceability.py` runs as part of `make check`. 
   - `poc/tests/unit/test_BC_100_telegram_mock_forge_base.py`
   - `poc/tests/e2e/test_BC_011_probe_flow.py` (BC-018 e2e flow exercises the mock live)
 
+### CAP-T203: Dev-compose container names namespaced as `beaconry-dev-*`
+- **type:** technical
+- **status:** active
+- **origin:** BC-101 — 2026-11-08 ~21:20 UTC bb-82jq: `docker rm -f beaconry-scout` during BC-099 cold-start troubleshooting killed the operator's systemd-wrapped production scout (both stacks used `container_name: beaconry-scout`). Service exited cleanly → systemd marked it "Deactivated successfully" without alert → operator scout stayed dark 54 min, 17 open + 7 regressed findings frozen on hetzner-side hub DB because BC-086 reconcile couldn't fire without POSTs.
+- **description:** `poc/docker-compose.yml` container_name updated: `beaconry-{hub,scout}` → `beaconry-dev-{hub,scout}`. `poc/docker-compose.scout-only.yml` keeps `beaconry-scout` (operator/systemd stack). CLI scripts default to the new dev names and respect env overrides (`BEACONRY_HUB_CONTAINER` default `beaconry-dev-hub`; new `BEACONRY_SCOUT_CONTAINER` default `beaconry-dev-scout`). Operators on homelab/systemd override via `.env`. Service-level display labels in `status.py` (`beaconry-hub`/`beaconry-scout`) stay generic — they're table headers, not container names. Makefile `live-rebuild` + `live-status` targets updated. Both stacks now coexist on the same host without silent takeover.
+- **supports:** CAP-B023
+- **verified by:**
+  - `poc/tests/unit/test_BC_101_dev_compose_rename.py`
+
 ### CAP-T195: `BEACONRY_IMAGE_TAG` env + `DEPLOY_ONLY_ALLOWLIST` lint exemption
 - **type:** technical
 - **status:** active

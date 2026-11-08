@@ -160,7 +160,7 @@ poc/tests/
 
 ## Live-stack verification: always rebuild first
 
-Any real-world verification against the running `beaconry-hub` / `beaconry-scout` containers (reading `/healthz`, interpreting `make findings`, taking a Telegram screenshot, running `make demo` in real mode) MUST be preceded by `make live-rebuild`. Stale containers have produced false test results three times already — most notably BC-020 (where `/healthz` had no `kev` field because the container predated the ship) and BC-022 (where the digest was interpreted as "shipped behavior" when it was pre-ship code).
+Any real-world verification against the running dev stack containers (`beaconry-dev-hub` / `beaconry-dev-scout` since BC-101; previously `beaconry-{hub,scout}`) — reading `/healthz`, interpreting `make findings`, taking a Telegram screenshot, running `make demo` in real mode — MUST be preceded by `make live-rebuild`. Stale containers have produced false test results three times already — most notably BC-020 (where `/healthz` had no `kev` field because the container predated the ship) and BC-022 (where the digest was interpreted as "shipped behavior" when it was pre-ship code).
 
 Discipline:
 

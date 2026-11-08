@@ -10,6 +10,7 @@ Else fail with a clear message.
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 import sys
 import urllib.error
@@ -18,7 +19,7 @@ import urllib.request
 from poc.scripts.cli_config import load_cli_config
 from poc.scripts.cli_http import friendly_http_error, http_post, is_localhost_url
 
-SCOUT_CONTAINER = "beaconry-scout"
+SCOUT_CONTAINER = os.environ.get("BEACONRY_SCOUT_CONTAINER", "beaconry-dev-scout")
 
 
 def _scout_running() -> bool:
@@ -36,8 +37,14 @@ def _scout_running() -> bool:
 
 
 def _trigger_local_scout() -> int:
-    """Pre-BC-055 path: curl the scout directly on localhost:8001."""
-    url = "http://127.0.0.1:8001/scan/trigger"
+    """Pre-BC-055 path: curl the scout directly on host port 18001.
+
+    BC-101: dev scout was rebound from 8001 → 18001 on the host so the
+    operator systemd stack (which binds 0.0.0.0:8001) coexists.
+    `BEACONRY_SCOUT_LOCAL_URL` lets operators retarget if they've
+    customized the binding.
+    """
+    url = os.environ.get("BEACONRY_SCOUT_LOCAL_URL", "http://127.0.0.1:18001/scan/trigger")
     print(f"==> triggering scan via POST {url}")
     req = urllib.request.Request(url, method="POST", data=b"")
     try:

@@ -3,7 +3,7 @@
 One row per container. Columns: NAME · STATE · HEALTH · LAST SCAN · DETAILS.
 
 Both services queried uniformly via HTTP /healthz (hub on localhost:8000,
-scout on localhost:8001 via BC-013). No `docker exec` fallback. All error
+scout on localhost:18001 since BC-101 — was 8001 pre-BC-101; the operator systemd stack took 8001 so dev scout rebinds). No `docker exec` fallback. All error
 cases produce human-readable DETAILS strings — no raw Python exception
 class names leak into the operator-facing output.
 
@@ -34,7 +34,7 @@ HUB_HEALTHZ_URL = os.environ.get(
     "BEACONRY_HUB_HEALTHZ_URL",
     _CLI_CFG.hub_url.rstrip("/") + "/healthz",
 )
-SCOUT_HEALTHZ_URL = os.environ.get("BEACONRY_SCOUT_HEALTHZ_URL", "http://localhost:8001/healthz")
+SCOUT_HEALTHZ_URL = os.environ.get("BEACONRY_SCOUT_HEALTHZ_URL", "http://localhost:18001/healthz")
 HUB_AUTH_TOKEN = _CLI_CFG.hub_token
 
 STATE_RUNNING = "running"

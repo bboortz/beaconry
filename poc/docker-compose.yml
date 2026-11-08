@@ -11,7 +11,10 @@ services:
     # Default 999 matches Debian/Ubuntu; Fedora 995, Arch 989, Alpine 412.
     group_add:
       - "${DOCKER_GID:-999}"
-    container_name: beaconry-hub
+    # BC-101: dev stack namespaced as `beaconry-dev-*` to avoid colliding
+    # with the operator systemd stack (`beaconry-scout.service` wraps
+    # `docker-compose.scout-only.yml` which keeps the unqualified name).
+    container_name: beaconry-dev-hub
     restart: unless-stopped
     environment:
       - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
@@ -110,7 +113,8 @@ services:
     # via `docker events` + `docker ps` for inventory.
     group_add:
       - "${DOCKER_GID:-999}"
-    container_name: beaconry-scout
+    # BC-101: dev stack namespaced (see hub).
+    container_name: beaconry-dev-scout
     restart: unless-stopped
     environment:
       - HUB_URL=http://hub:8000
@@ -142,7 +146,11 @@ services:
       - /var/lib/pacman:/host/var/lib/pacman:ro
       - beaconry-data:/data
     ports:
-      - "127.0.0.1:8001:8001"
+      # BC-101: host port 18001 (not 8001) so the dev stack coexists with
+      # the operator systemd scout (docker-compose.scout-only.yml uses
+      # network_mode: host and binds 0.0.0.0:8001 directly). Container
+      # internal port is still 8001.
+      - "127.0.0.1:18001:8001"
     depends_on:
       hub:
         condition: service_healthy

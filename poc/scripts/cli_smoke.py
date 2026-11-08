@@ -24,8 +24,8 @@ import sys
 from abc import ABC, abstractmethod
 from pathlib import Path
 
-HUB_CONTAINER = os.environ.get("BEACONRY_HUB_CONTAINER", "beaconry-hub")
-SCOUT_CONTAINER = "beaconry-scout"
+HUB_CONTAINER = os.environ.get("BEACONRY_HUB_CONTAINER", "beaconry-dev-hub")
+SCOUT_CONTAINER = os.environ.get("BEACONRY_SCOUT_CONTAINER", "beaconry-dev-scout")
 REPO_ROOT = Path(__file__).resolve().parents[2]
 
 

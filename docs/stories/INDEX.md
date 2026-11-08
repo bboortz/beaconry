@@ -93,4 +93,4 @@ Lifecycle: `draft → ready → in-progress → shipped`. Status matches each st
 | BC-098 | Stage-at-runtime-path: Dockerfiles detect Python minor at build time     | shipped     | — (merged to dev)                   |
 | BC-099 | Build-time ABI guard: fail if builder Python minor ≠ runtime minor       | shipped     | — (merged to dev)                   |
 | BC-100 | telegram_mock joins the forge-signed scratch base + ABI guard family     | shipped     | — (merged to dev)                   |
-| BC-101 | Dev-compose containers renamed to avoid collision with systemd scout     | draft       | —                                   |
+| BC-101 | Dev-compose containers renamed to avoid collision with systemd scout     | in-progress | feat/BC-101-dev-compose-container-rename |
