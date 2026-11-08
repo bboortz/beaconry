@@ -112,7 +112,7 @@ First startup runs `grype db update` (~200MB download). Subsequent starts use ca
 
 ## Port binding
 
-Hub is internal only in production (scout reaches it via Docker network `beaconry-hub:8000`).
+Hub is internal only in production (scout reaches it via Docker network `hub:8000` — the compose service hostname; BC-101 renamed `container_name` to `beaconry-dev-hub` but the service name `hub` stays as the canonical intra-network DNS).
 Expose `8000` on the host only for local development:
 ```yaml
 ports:

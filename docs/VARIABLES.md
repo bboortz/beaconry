@@ -146,7 +146,9 @@ See also:
 
 | Variable | Default | Type | Where read | Reason | Origin |
 |---|---|---|---|---|---|
-| `BEACONRY_HUB_CONTAINER` | `beaconry-hub` | string | `poc/scripts/findings.py`, `poc/scripts/status.py` | Container name the `make findings` + `make status` CLIs docker-exec into. Operators who rename their compose service (e.g. multi-tenant hosts) can retarget without editing scripts. | BC-013 |
+| `BEACONRY_HUB_CONTAINER` | `beaconry-dev-hub` | string | `poc/scripts/{findings,audit,cli_smoke}.py` | Container name the `make findings` / `make audit` / cli-smoke CLIs docker-exec into. BC-101: default moved from `beaconry-hub` → `beaconry-dev-hub` to avoid collision with the operator systemd stack. Operators on homelab/systemd scout set this back to `beaconry-hub` in their `.env`. | BC-013 |
+| `BEACONRY_SCOUT_CONTAINER` | `beaconry-dev-scout` | string | `poc/scripts/{scan_cli,cli_smoke}.py` | Container name `make scan` + cli-smoke target. BC-101: new env; was hardcoded `beaconry-scout` pre-BC-101. Operators on homelab/systemd set this back to `beaconry-scout`. | BC-101 |
+| `BEACONRY_SCOUT_LOCAL_URL` | `http://127.0.0.1:18001/scan/trigger` | URL | `poc/scripts/scan_cli.py` | Localhost scout `/scan/trigger` URL for the BC-055 pre-CLI path. BC-101: host port moved 8001 → 18001 to coexist with operator systemd scout (which binds 0.0.0.0:8001 via `network_mode: host`). Operators who've customized the compose port override this; non-localhost workflows route through hub HTTP (unaffected). | BC-101 |
 | `BEACONRY_FINDINGS_LOCAL` | *(empty)* | bool (`0`/`1`) | `poc/scripts/findings.py` | `1` forces `make findings` to use the local `.beaconry-cache/beaconry.db` even if the compose hub is up. Needed when debugging an older dev-mode DB without stopping the live stack. | BC-007 |
 
 ## Scenario harness

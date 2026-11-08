@@ -1,8 +1,10 @@
 ---
 id: BC-101
 title: Rename dev-compose containers to avoid collision with operator systemd scout
-status: draft
+status: in-progress
 created: 2026-11-08
+branch: feat/BC-101-dev-compose-container-rename
+plan: docs/plan/BC-101-dev-compose-container-rename-plan.md
 ---
 
 # BC-101: `beaconry-{hub,scout}` → `beaconry-dev-{hub,scout}` in dev compose

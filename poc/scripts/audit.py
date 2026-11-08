@@ -20,7 +20,7 @@ Filters (all AND together):
 
 Env overrides:
     DATA_DIR                — audit.log location (default /data)
-    BEACONRY_HUB_CONTAINER  — container name for compose-aware routing (default beaconry-hub)
+    BEACONRY_HUB_CONTAINER  — container name for compose-aware routing (default beaconry-dev-hub; BC-101: operators on systemd stack set beaconry-hub)
     BEACONRY_FINDINGS_LOCAL — any non-empty value forces local DATA_DIR path even if hub is up
 """
 
@@ -59,7 +59,7 @@ COL_CVE = 20
 COL_HOST = 12
 COL_EXTRA = 50  # right-truncated with …
 
-HUB_CONTAINER = os.environ.get("BEACONRY_HUB_CONTAINER", "beaconry-hub")
+HUB_CONTAINER = os.environ.get("BEACONRY_HUB_CONTAINER", "beaconry-dev-hub")
 
 # ── Time parsing ────────────────────────────────────────────────────────────
 

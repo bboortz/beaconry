@@ -153,7 +153,7 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     return p.parse_args(argv)
 
 
-HUB_CONTAINER = os.environ.get("BEACONRY_HUB_CONTAINER", "beaconry-hub")
+HUB_CONTAINER = os.environ.get("BEACONRY_HUB_CONTAINER", "beaconry-dev-hub")
 
 
 def _running_compose_hub() -> bool:

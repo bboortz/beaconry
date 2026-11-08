@@ -361,18 +361,18 @@ status:
 # containers are the #1 source of "my change doesn't work" false negatives
 # (bit us 3+ times in BC-020 and BC-022). See memory/workflow.md.
 live-rebuild:
-	@echo "==> Rebuilding beaconry-hub + beaconry-scout from current source…"
+	@echo "==> Rebuilding beaconry-dev-hub + beaconry-dev-scout from current source…"
 	cd poc && docker compose up -d --build
 	@echo "==> Waiting for /readyz on hub…"
 	@until curl -sS http://localhost:8000/readyz >/dev/null 2>&1; do sleep 1; done
 	@echo "==> Live stack now matches source. /healthz:"
-	@docker exec beaconry-hub python3 -c "import urllib.request,json; print(json.dumps(json.loads(urllib.request.urlopen('http://localhost:8000/healthz').read())['checks'], indent=2))" 2>&1 | sed 's/^/    /'
+	@docker exec beaconry-dev-hub python3 -c "import urllib.request,json; print(json.dumps(json.loads(urllib.request.urlopen('http://localhost:8000/healthz').read())['checks'], indent=2))" 2>&1 | sed 's/^/    /'
 
 # Verdict: is the running stack up-to-date with current source? Prints FRESH
 # or STALE and the delta in seconds. Checks hub + scout.
 live-status:
 	@for svc in hub scout; do \
-	   CONTAINER="beaconry-$$svc"; \
+	   CONTAINER="beaconry-dev-$$svc"; \
 	   BUILT_ISO=$$(docker inspect $$CONTAINER --format='{{.Created}}' 2>/dev/null); \
 	   if [ -z "$$BUILT_ISO" ]; then \
 	     echo "$$CONTAINER: not running (run 'make live-rebuild')"; continue; \
