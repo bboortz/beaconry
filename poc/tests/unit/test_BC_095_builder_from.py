@@ -64,9 +64,17 @@ def test_runtime_stage_unchanged() -> None:
 
 
 def test_hub_still_installs_grype() -> None:
-    """Hub needs grype for CVE matching — forge builder base doesn't ship it."""
+    """Hub needs grype for CVE matching — forge builder base doesn't ship it.
+
+    Post-Docker-Hub-pivot: grype comes from `anchore/grype:latest` image via
+    `COPY --from=grype-src` instead of `curl install.sh`. GitHub's release CDN
+    flapped 504s on 2026-11-08; Docker Hub stayed up.
+    """
     body = _hub()
-    assert "anchore/grype/main/install.sh" in body
+    assert "anchore/grype" in body, "hub/Dockerfile lost grype entirely"
+    assert "COPY --from=grype-src /grype" in body, (
+        "grype must come from a FROM stage (Docker Hub-sourced), not curl install.sh"
+    )
 
 
 def test_hub_still_installs_docker_cli() -> None:
