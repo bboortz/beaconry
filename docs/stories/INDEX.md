@@ -94,3 +94,4 @@ Lifecycle: `draft → ready → in-progress → shipped`. Status matches each st
 | BC-099 | Build-time ABI guard: fail if builder Python minor ≠ runtime minor       | shipped     | — (merged to dev)                   |
 | BC-100 | telegram_mock joins the forge-signed scratch base + ABI guard family     | shipped     | — (merged to dev)                   |
 | BC-101 | Dev-compose containers renamed to avoid collision with systemd scout     | shipped     | — (merged to dev)                   |
+| BC-102 | Hub-side scout-offline Telegram alert + stale-scout findings reconcile  | draft       | —                                   |
