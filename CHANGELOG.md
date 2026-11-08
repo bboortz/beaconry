@@ -4,6 +4,31 @@ All notable changes to beaconry are recorded here. The format is based
 on [Keep a Changelog](https://keepachangelog.com/), and this project
 follows [Semantic Versioning](https://semver.org/).
 
+## [v0.17.1] — 2026-11-08
+
+### Changed (BC-100)
+
+- **telegram_mock now on the forge-signed scratch base** — last
+  beaconry-authored Dockerfile migrated off upstream `python:3.12-slim`
+  onto the same BC-099 recipe hub + scout use: multi-stage with
+  `forge-builder-trixie:latest` + `python-scratch-trixie:latest`,
+  BuildKit syntax directive, named `runtime-src` stage,
+  `RUN --mount=from=runtime-src` ABI guard with the
+  `BC-099 ABI guard tripped` marker, Python-minor-agnostic
+  `/stage/usr/local/lib/python${BUILDER_PY_VER}/site-packages` mv,
+  `COPY --from=builder /stage /` (single-dir guarantee).
+- **HEALTHCHECK baked in** — `["/hc", "-t", "3",
+  "http://localhost:8080/readyz"]` — `docker inspect
+  beaconry-test-telegram-mock:latest` now surfaces
+  `.Config.Healthcheck.Test`.
+- **CMD adapted** — `python3` prefix removed (scratch base bakes
+  `ENTRYPOINT ["/usr/local/bin/python3"]`); CMD is the arg list
+  passed to the baked interpreter.
+- **mock_bot.py unchanged** — BC-012's `beaconry_health.build_router`
+  already provides `/readyz` at port 8080.
+- **CAPABILITIES**: CAP-T202 registered. CAP-T201 description
+  extended to include telegram_mock in the covered-files list.
+
 ## [v0.17.0] — 2026-11-08
 
 ### Fixed (BC-099)
