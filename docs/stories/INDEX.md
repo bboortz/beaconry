@@ -91,3 +91,4 @@ Lifecycle: `draft → ready → in-progress → shipped`. Status matches each st
 | BC-096 | SBOM at builder → baked into runtime + `/sbom` + `make dogfood-sbom`     | shipped     | — (merged to dev)                   |
 | BC-097 | Compose healthchecks use forge's `/hc`; runtime base tracks `:latest`    | shipped     | — (merged to dev)                   |
 | BC-098 | Stage-at-runtime-path: Dockerfiles detect Python minor at build time     | shipped     | — (merged to dev)                   |
+| BC-099 | Build-time ABI guard: fail if builder Python minor ≠ runtime minor       | in-progress | feat/BC-099-base-abi-guard          |
