@@ -1,7 +1,7 @@
 ---
 id: BC-098
 title: Dockerfiles detect Python minor at build time (retire BC-097's risk)
-status: in-progress
+status: shipped
 created: 2026-11-08
 branch: feat/BC-098-python-version-detect
 plan: docs/plan/BC-098-python-version-detect-plan.md
