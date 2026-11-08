@@ -66,21 +66,23 @@ def test_no_python_minor_literals_in_instructions() -> None:
 
 def test_py_ver_detect_step_present_in_both() -> None:
     """Each Dockerfile has exactly one RUN that queries `sys.version_info`
-    and moves site-packages into `/stage/usr/local/lib/python${PY_VER}`."""
-    # Match the key tokens of the full step — regex kept loose on
-    # whitespace + line continuations so minor formatting changes don't
-    # break the lint.
+    and moves site-packages into `/stage/usr/local/lib/python${BUILDER_PY_VER}`.
+
+    Post-BC-099 the variable is renamed PY_VER → BUILDER_PY_VER (to pair
+    with RUNTIME_PY_VER in the ABI guard). The structural assertion is
+    the same.
+    """
     detect_re = re.compile(
-        r'PY_VER="\$\(python3\s+-c\s+[\'"]import\s+sys[^\n]*?\)"\s*\\?\s*\n'
-        r".*?mv\s+[\"']/install/lib/python\$\{PY_VER\}/site-packages[\"']\s*\\?\s*\n"
-        r".*?[\"']/stage/usr/local/lib/python\$\{PY_VER\}/site-packages[\"']",
+        r'BUILDER_PY_VER="\$\(python3\s+-c\s+[\'"]import\s+sys[^\n]*?\)"\s*\\?\s*\n'
+        r".*?mv\s+[\"']/install/lib/python\$\{BUILDER_PY_VER\}/site-packages[\"']\s*\\?\s*\n"
+        r".*?[\"']/stage/usr/local/lib/python\$\{BUILDER_PY_VER\}/site-packages[\"']",
         re.DOTALL,
     )
     for df in _DOCKERFILES:
         body = df.read_text()
         matches = detect_re.findall(body)
         assert len(matches) == 1, (
-            f"{df.name}: expected exactly one PY_VER detect + mv step, got {len(matches)}"
+            f"{df.name}: expected exactly one BUILDER_PY_VER detect + mv step, got {len(matches)}"
         )
 
 
@@ -114,16 +116,19 @@ def test_no_legacy_install_lib_copy_remains() -> None:
 
 def test_syft_runs_before_py_ver_move() -> None:
     """Order matters: if the move runs first, /install is empty and the
-    SBOM captures nothing. syft must come first in both files."""
+    SBOM captures nothing. syft must come first in both files.
+
+    Post-BC-099 the variable is BUILDER_PY_VER (was PY_VER pre-BC-099).
+    """
     for df in _DOCKERFILES:
         body = df.read_text()
         syft_idx = body.find("syft dir:/install -o syft-json=/sbom.json")
-        move_idx = body.find('mv "/install/lib/python${PY_VER}/site-packages"')
+        move_idx = body.find('mv "/install/lib/python${BUILDER_PY_VER}/site-packages"')
         if move_idx == -1:
             # Also accept single-quoted form
-            move_idx = body.find("mv '/install/lib/python${PY_VER}/site-packages'")
+            move_idx = body.find("mv '/install/lib/python${BUILDER_PY_VER}/site-packages'")
         assert syft_idx != -1, f"{df.name}: syft step missing"
-        assert move_idx != -1, f"{df.name}: PY_VER mv step missing"
+        assert move_idx != -1, f"{df.name}: BUILDER_PY_VER mv step missing"
         assert syft_idx < move_idx, (
             f"{df.name}: syft step must run BEFORE the site-packages mv "
             f"(otherwise SBOM is empty). syft at pos {syft_idx}, mv at {move_idx}"

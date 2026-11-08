@@ -4,6 +4,63 @@ All notable changes to beaconry are recorded here. The format is based
 on [Keep a Changelog](https://keepachangelog.com/), and this project
 follows [Semantic Versioning](https://semver.org/).
 
+## [v0.17.0] — 2026-11-08
+
+### Fixed (BC-099)
+
+- **Build-time ABI guard against base-image Python-minor drift.**
+  2026-11-08 ~17:26 UTC the shipped `beaconry-hub:latest` crashed on
+  hetzner + server2 with `ModuleNotFoundError: No module named
+  'uvicorn'`. Root cause: forge republished `forge-builder-trixie:latest`
+  (Python 3.14) **five minutes** before `python-scratch-trixie:latest`
+  (still Python 3.13) during FG-032's in-place Python bump, and
+  forge's `beaconry-hub` build fired in the gap. The shipped image
+  had wheels at `/usr/local/lib/python3.14/site-packages/` and a
+  Python 3.13 runtime whose sys.path pointed at an empty
+  `/usr/local/lib/python3.13/site-packages/`.
+- **Guard mechanism**: both Dockerfiles gain a `# syntax=docker/dockerfile:1`
+  directive (requires BuildKit) + a named `runtime-src` stage that
+  references `python-scratch-trixie:latest`. The runtime stage now
+  FROMs `runtime-src` (same resolved digest). BC-098's PY_VER step
+  is merged into a single BC-099 RUN that mounts
+  `--mount=from=runtime-src,source=/usr/local/lib,target=/runtime-lib`,
+  asserts exactly one `python3.X` dir in the runtime base, reads
+  the minor from that dir name, compares with the builder's minor,
+  and exits non-zero with a `BC-099 ABI guard tripped` marker + remedy
+  if they disagree.
+- **Single-version guarantee.** When the guard passes, the final
+  image contains exactly one `/usr/local/lib/python3.X/` directory
+  by construction — the builder's mv target matches the runtime
+  base's stdlib dir.
+
+### Added (BC-099)
+
+- **`HEALTHCHECK` baked into the image itself.** Pre-BC-099
+  `docker inspect ghcr.io/bboortz/beaconry-hub` (on the image) and
+  `docker run`-launched containers without a compose healthcheck
+  reported `no-healthcheck` / empty `.State.Health.Status`. Homelab's
+  smoke script relied on that status field. Both Dockerfiles now
+  ship `HEALTHCHECK --interval=60s --timeout=10s|5s
+  --start-period=120s|60s --retries=3 CMD ["/hc", "-t", "3",
+  "http://localhost:<port>/readyz"]` — matches the BC-097 compose
+  shape. Compose healthchecks (BC-097) still override when set;
+  composed path unchanged.
+
+### Changed (BC-099)
+
+- **BuildKit is now required** for beaconry builds (Dockerfile
+  `# syntax=` directive enforces it; Makefile exports
+  `DOCKER_BUILDKIT=1` + `COMPOSE_DOCKER_CLI_BUILD=1` so every
+  subshelled `docker build` and `docker compose build` goes through
+  the BuildKit frontend). Docker ≥ 23 defaults to BuildKit via
+  `buildx`, so no operator action required. Classic-builder
+  installs now fail with a clear error pointing at the syntax
+  directive. Local-dev machines without `docker-buildx` plugin
+  installed need the one-time install (Arch: `pacman -S docker-buildx`).
+- **CAPABILITIES**: CAP-T201 registered (ABI guard + image
+  HEALTHCHECK). CAP-T200 description updated to note BC-099
+  enforces the invariant BC-098 required.
+
 ## [v0.16.6] — 2026-11-08
 
 ### Changed (BC-098)

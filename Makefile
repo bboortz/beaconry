@@ -4,6 +4,15 @@ PYTHON ?= python3
 PYTEST_ARGS ?=
 ARGS ?=
 
+# BC-099: BuildKit is REQUIRED (Dockerfiles carry `# syntax=docker/dockerfile:1`
+# which only BuildKit accepts). Export at Makefile scope so every subshelled
+# `docker build` and `docker compose build` goes through the BuildKit frontend
+# — classic builder is incompatible with the BC-099 ABI guard's
+# `RUN --mount=from=<stage>` syntax. Docker ≥ 23 defaults to BuildKit via
+# buildx shim; these exports are belt-and-braces for older installs + CI.
+export DOCKER_BUILDKIT = 1
+export COMPOSE_DOCKER_CLI_BUILD = 1
+
 help:
 	@echo "Beaconry — local gates (what CI runs)"
 	@echo ""

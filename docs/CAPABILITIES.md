@@ -1851,11 +1851,21 @@ Enforcement: `poc/scripts/verify_traceability.py` runs as part of `make check`. 
 - **type:** technical
 - **status:** active
 - **origin:** BC-098 — BC-097 shipped `python-scratch-trixie:latest` on the runtime with a documented risk: `COPY --from=builder /install/lib/python3.13/site-packages …` hardcoded a Python minor. Forge FG-032 (2026-11-08, PR #60) bumped `python-scratch-trixie` + `forge-builder-trixie` in-place to Python 3.14 — the exact break the risk predicted. Forge's release pipeline paused until beaconry shipped this companion fix.
-- **description:** Both `poc/{hub,scout}/Dockerfile` builder stages run `RUN PY_VER="$(python3 -c '…')" && mkdir -p "/stage/usr/local/lib/python${PY_VER}" && mv "/install/lib/python${PY_VER}/site-packages" "/stage/usr/local/lib/python${PY_VER}/site-packages"` after the existing `syft dir:/install` step. Runtime stages do a single `COPY --from=builder /stage /` and site-packages lands at the exact path Python's native sys.path expects. Zero `python3.X` literals in either Dockerfile. Works for 3.13 today and every future minor bump transparently.
+- **description:** Both `poc/{hub,scout}/Dockerfile` builder stages run `RUN --mount=from=runtime-src,…` (BC-099 ABI guard + BC-098 staging) which queries the builder's Python minor, asserts it matches the runtime base, then `mv`s site-packages into `/stage/usr/local/lib/python${PY_VER}/site-packages`. Runtime stages do a single `COPY --from=builder /stage /`. Zero `python3.X` literals in either Dockerfile. Works for 3.13 today and every future minor bump transparently. BC-099 made the invariant enforced; pre-BC-099 the pattern trusted both bases to match.
 - **supports:** CAP-T199, CAP-B023
 - **verified by:**
   - `poc/tests/unit/test_BC_098_python_version_detect.py`
   - `poc/tests/integration/test_BC_083_forge_runtime.py` (the `test_{hub,scout}_can_import_all_runtime_deps` probes are the live oracle — they fail if PY_VER resolution or mv target is wrong)
+
+### CAP-T201: Build-time ABI guard against base-image Python-minor drift
+- **type:** technical
+- **status:** active
+- **origin:** BC-099 — 2026-11-08 ~17:26 UTC, `ghcr.io/bboortz/beaconry-hub:latest` crashed on hetzner + server2 with `ModuleNotFoundError: No module named 'uvicorn'`. Root cause: forge republished `forge-builder-trixie:latest` (Python 3.14) five minutes before `python-scratch-trixie:latest` (still Python 3.13) during FG-032's in-place bump, and forge's `beaconry-hub` build fired in the gap. The shipped image had `/usr/local/lib/python3.14/site-packages/fastapi/` (where BC-098 put wheels) and a Python 3.13 runtime whose sys.path pointed at `/usr/local/lib/python3.13/site-packages/` (empty). BC-098 trusted the two bases to match — BC-099 verifies they do.
+- **description:** Both `poc/{hub,scout}/Dockerfile` require BuildKit (`# syntax=docker/dockerfile:1` at top; Makefile exports `DOCKER_BUILDKIT=1` + `COMPOSE_DOCKER_CLI_BUILD=1`). A named `runtime-src` stage holds the runtime base; the runtime stage FROMs it (same digest). The builder's merged BC-098/BC-099 RUN step mounts `--mount=from=runtime-src,source=/usr/local/lib,target=/runtime-lib`, counts python3.X dirs (must be exactly one), reads the minor from the dir name, compares with the builder's minor, and exits non-zero with the `BC-099 ABI guard tripped` marker + remedy text if they differ. Single-version guarantee: when the guard passes, the final image has exactly one `/usr/local/lib/python3.X/` dir by construction.
+- **supports:** CAP-T200, CAP-T171, CAP-B023
+- **verified by:**
+  - `poc/tests/unit/test_BC_099_base_abi_guard.py`
+  - `poc/tests/integration/test_BC_083_forge_runtime.py` (live oracle — cold-start import probes against the built image)
 
 ### CAP-T195: `BEACONRY_IMAGE_TAG` env + `DEPLOY_ONLY_ALLOWLIST` lint exemption
 - **type:** technical
