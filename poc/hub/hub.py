@@ -37,7 +37,7 @@ try:
     import urgency as _urgency
     import waterfall as _waterfall
     from beaconry_health import build_router, check_binary, check_db, check_dir_populated
-    from notifiers import TelegramAdapter
+    from notifiers import TelegramAdapter, notify_scout_offline, notify_scout_online
     from notifiers import notify_auto_fix_regression as _dispatch_auto_fix_regression
     from notifiers import notify_digest as _dispatch_digest
     from notifiers import notify_finding as _dispatch_finding
@@ -53,7 +53,7 @@ except ImportError:
     from poc.hub import notifiers as _notifiers_pkg
     from poc.hub import urgency as _urgency
     from poc.hub import waterfall as _waterfall
-    from poc.hub.notifiers import TelegramAdapter
+    from poc.hub.notifiers import TelegramAdapter, notify_scout_offline, notify_scout_online
     from poc.hub.notifiers import (
         notify_auto_fix_regression as _dispatch_auto_fix_regression,
     )
@@ -119,6 +119,25 @@ RECONCILE_ENABLED = os.environ.get("BEACONRY_RECONCILE_ENABLED", "1") != "0"
 # won't trigger auto-close. Set to 1 to reproduce pre-BC-086 behaviour
 # (immediate close on first absence).
 AUTO_FIX_THRESHOLD = max(1, int(os.environ.get("BEACONRY_AUTO_FIX_THRESHOLD", "3")))
+
+# BC-102: time-based detection of scout outages.
+# `SCOUT_OFFLINE_ALERT_THRESHOLD_S` names the "truly offline" bar. Higher
+# than FLEET's `heartbeat_stale` cutoff (300s floor) so a short network
+# glitch doesn't page. Lower than daily reconcile windows.
+# `SCOUT_OFFLINE_SWEEP_INTERVAL_S` controls the background-task cadence —
+# fast enough that transitions are picked up quickly, slow enough that
+# hub load stays negligible. Default matches SCOUT_HEARTBEAT_INTERVAL_S.
+# `AUTO_CLOSE_STALE_SCOUT` gates the stale-scout reconcile path. Default
+# on (1); operators who prefer "unknown" over "auto_fixed" set to 0 —
+# in that case the Telegram alert + audit events still fire, only the
+# auto-close is suppressed.
+SCOUT_OFFLINE_ALERT_THRESHOLD_S = max(
+    60, int(os.environ.get("BEACONRY_SCOUT_OFFLINE_ALERT_THRESHOLD_S", "600"))
+)
+SCOUT_OFFLINE_SWEEP_INTERVAL_S = max(
+    5, int(os.environ.get("BEACONRY_SCOUT_OFFLINE_SWEEP_INTERVAL_S", "60"))
+)
+AUTO_CLOSE_STALE_SCOUT = os.environ.get("BEACONRY_AUTO_CLOSE_STALE_SCOUT", "1") != "0"
 
 
 def _parse_snooze_hours(raw: str) -> list[int]:
@@ -311,7 +330,7 @@ except ImportError:
 
 HUB_VERSION = SOFTWARE_VERSION  # back-compat alias
 API_VERSION = 1
-EXPECTED_SCHEMA_VERSION = 7
+EXPECTED_SCHEMA_VERSION = 8
 STRICT_API = os.environ.get("BEACONRY_STRICT_API") == "1"
 
 
@@ -477,6 +496,11 @@ def init_db() -> None:
         ("last_health", "TEXT"),
         ("last_scan_ts", "INTEGER"),
         ("role", "TEXT NOT NULL DEFAULT 'workstation'"),
+        # BC-102 (v7 → v8): edge-trigger state for `scout_offline` Telegram.
+        # Non-zero = "we're in an alerted-offline state"; 0 = either online
+        # or never-alerted. Survives hub restarts so we don't re-alert on
+        # reboot while a scout is still dark.
+        ("last_offline_alert_ts", "INTEGER NOT NULL DEFAULT 0"),
     ):
         if col not in existing_cols:
             con.execute(f"ALTER TABLE scouts ADD COLUMN {col} {decl}")
@@ -2288,18 +2312,27 @@ async def lifespan(
     # BC-089: periodic sweep of snoozed findings whose expiry has passed.
     _snooze_task = asyncio.create_task(_snooze_expiry_loop_forever())
 
+    # BC-102: periodic sweep that detects scout outages, sends edge-triggered
+    # Telegram alerts + emits audit events, and (when opt-in via
+    # BEACONRY_AUTO_CLOSE_STALE_SCOUT=1 — default) auto-closes the stale
+    # scout's open/regressed/snoozed/accepted findings.
+    _scout_offline_task = asyncio.create_task(_scout_offline_sweep_loop_forever())
+
     yield
 
     # BC-020: cancel KEV refresh loop on shutdown.
     _kev_task.cancel()
     _heartbeat_task.cancel()
     _snooze_task.cancel()
+    _scout_offline_task.cancel()
     with contextlib.suppress(asyncio.CancelledError):
         await _kev_task
     with contextlib.suppress(asyncio.CancelledError):
         await _snooze_task
     with contextlib.suppress(asyncio.CancelledError):
         await _heartbeat_task
+    with contextlib.suppress(asyncio.CancelledError):
+        await _scout_offline_task
 
     assert tg_app is not None
     assert tg_app.updater is not None
@@ -3265,6 +3298,167 @@ async def _snooze_expiry_loop_forever() -> None:  # pragma: no cover - infinite 
         except Exception as e:  # noqa: BLE001
             log.warning("BC-089: snooze expiry sweep failed: %s", e)
         await asyncio.sleep(SNOOZE_SWEEP_INTERVAL_S)
+
+
+# ── BC-102: scout-offline detection + stale-scout reconcile ─────────────────
+#
+# One background task runs on `SCOUT_OFFLINE_SWEEP_INTERVAL_S` cadence. Per
+# sweep tick:
+#   1. For every scout, compare `now - last_posted_ts` vs
+#      `SCOUT_OFFLINE_ALERT_THRESHOLD_S`:
+#        - Below threshold + `last_offline_alert_ts > 0` → RECOVERY path:
+#          emit `scout_online` audit, Telegram notify, clear the alert ts.
+#        - Above threshold + `last_offline_alert_ts == 0` → OFFLINE path:
+#          emit `scout_offline` audit, Telegram notify, stamp the alert ts.
+#        - Above threshold + `last_offline_alert_ts > 0` → ongoing offline,
+#          no alert, but if AUTO_CLOSE_STALE_SCOUT is on, bump absent_count
+#          on the scout's findings. On the N-th bump (AUTO_FIX_THRESHOLD),
+#          flip to `auto_fixed` with the `finding_auto_fixed_stale_scout`
+#          audit so forensics can distinguish from BC-086's path.
+#
+# Edge-triggered via the `last_offline_alert_ts` column — survives hub
+# restarts so we don't re-alert when hub comes back up to find a scout
+# still dark. Never-POSTed scouts (last_posted_ts == 0) are ignored.
+
+
+def scout_offline_sweep(
+    *,
+    now_ts: int | None = None,
+    threshold_s: int | None = None,
+    sweep_interval_s: int | None = None,
+    auto_close: bool | None = None,
+    threshold_ticks: int | None = None,
+) -> dict[str, int]:
+    """Pure sweep tick. Reads the scouts + findings tables, writes state
+    changes + audit events, and returns a counts dict for logging.
+
+    All kwargs resolve to the module-level config by default; tests
+    pass explicit values + monkeypatch `time.time` to exercise all
+    branches deterministically without clocks or Telegram.
+
+    Returns: {"offline_alerts": N, "online_alerts": N,
+              "findings_auto_closed": N}
+
+    Note: this is a sync function that queues `notify_scout_*` as
+    `asyncio` tasks (fire-and-forget, same pattern BC-086 uses for
+    its auto-fix regressions). Callers don't need to await it.
+    """
+    now = now_ts if now_ts is not None else int(time.time())
+    thr = threshold_s if threshold_s is not None else SCOUT_OFFLINE_ALERT_THRESHOLD_S
+    _sweep = sweep_interval_s if sweep_interval_s is not None else SCOUT_OFFLINE_SWEEP_INTERVAL_S
+    _ = _sweep  # reserved for future per-scout cadence
+    ac = auto_close if auto_close is not None else AUTO_CLOSE_STALE_SCOUT
+    at_threshold = threshold_ticks if threshold_ticks is not None else AUTO_FIX_THRESHOLD
+
+    counts = {"offline_alerts": 0, "online_alerts": 0, "findings_auto_closed": 0}
+
+    try:
+        con = sqlite3.connect(DB_PATH)
+    except sqlite3.OperationalError:
+        return counts
+
+    try:
+        rows = con.execute(
+            "SELECT host, last_posted_ts, last_offline_alert_ts, last_health "
+            "FROM scouts "
+            "WHERE last_posted_ts > 0"
+        ).fetchall()
+
+        for host, last_posted_ts, last_offline_alert_ts, last_health in rows:
+            age = now - int(last_posted_ts or 0)
+            is_offline_now = age >= thr
+            was_alerted = int(last_offline_alert_ts or 0) > 0
+
+            # ── RECOVERY: was alerted, now online ──
+            if was_alerted and not is_offline_now:
+                outage = now - int(last_offline_alert_ts or 0)
+                con.execute("UPDATE scouts SET last_offline_alert_ts=0 WHERE host=?", (host,))
+                _audit.append(
+                    "scout_online",
+                    host=host,
+                    was_offline_duration_s=outage,
+                    new_last_posted_ts=int(last_posted_ts),
+                )
+                asyncio.create_task(notify_scout_online(host, outage))
+                counts["online_alerts"] += 1
+                continue
+
+            # ── OFFLINE transition: first time we notice ──
+            if is_offline_now and not was_alerted:
+                con.execute("UPDATE scouts SET last_offline_alert_ts=? WHERE host=?", (now, host))
+                _audit.append(
+                    "scout_offline",
+                    host=host,
+                    last_heartbeat_ts=int(last_posted_ts),
+                    offline_duration_s=age,
+                    last_health=last_health or "",
+                )
+                asyncio.create_task(
+                    notify_scout_offline(host, int(last_posted_ts), age, last_health)
+                )
+                counts["offline_alerts"] += 1
+                # First alert tick — don't also auto-close on the same pass;
+                # the next sweep handles the "still offline" reconcile.
+                continue
+
+            # ── Ongoing offline — reconcile findings if enabled ──
+            if is_offline_now and was_alerted and ac:
+                counts["findings_auto_closed"] += _stale_scout_reconcile_tick(
+                    con, host, now, at_threshold
+                )
+
+        con.commit()
+    finally:
+        con.close()
+
+    return counts
+
+
+def _stale_scout_reconcile_tick(
+    con: sqlite3.Connection, host: str, now: int, threshold: int
+) -> int:
+    """Bump absent_count by 1 on `host`'s open/regressed/snoozed/accepted
+    findings. Flip to `auto_fixed` when absent_count hits `threshold`.
+
+    Returns count of findings flipped on this tick. Shared semantic with
+    BC-086's POST-driven reconcile, just time-driven instead of scan-driven.
+    """
+    closed = 0
+    rows = con.execute(
+        "SELECT id, cve_id, absent_count FROM findings "
+        "WHERE host=? AND status IN ('open','regressed','snoozed','accepted')",
+        (host,),
+    ).fetchall()
+    for fid, cve_id, absent_count in rows:
+        new_count = int(absent_count or 0) + 1
+        if new_count >= threshold:
+            con.execute(
+                "UPDATE findings SET status='auto_fixed', auto_fixed_ts=?, absent_count=? "
+                "WHERE id=?",
+                (now, new_count, fid),
+            )
+            _audit.append(
+                "finding_auto_fixed_stale_scout",
+                finding_id=fid,
+                cve_id=cve_id,
+                host=host,
+                absent_ticks=new_count,
+                threshold=threshold,
+            )
+            closed += 1
+        else:
+            con.execute("UPDATE findings SET absent_count=? WHERE id=?", (new_count, fid))
+    return closed
+
+
+async def _scout_offline_sweep_loop_forever() -> None:  # pragma: no cover - infinite loop
+    """BC-102: periodic sweep; cadence = SCOUT_OFFLINE_SWEEP_INTERVAL_S."""
+    while True:
+        try:
+            scout_offline_sweep()
+        except Exception as e:  # noqa: BLE001
+            log.warning("BC-102: scout offline sweep failed: %s", e)
+        await asyncio.sleep(SCOUT_OFFLINE_SWEEP_INTERVAL_S)
 
 
 async def _heartbeat_loop_forever() -> (

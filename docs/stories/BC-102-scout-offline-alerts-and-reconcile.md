@@ -1,8 +1,10 @@
 ---
 id: BC-102
 title: Hub-side scout-offline alerts + stale-scout findings reconcile
-status: draft
+status: in-progress
 created: 2026-11-08
+branch: feat/BC-102-scout-offline-alerts
+plan: docs/plan/BC-102-scout-offline-alerts-plan.md
 ---
 
 # BC-102: When a scout goes dark, beaconry notices + acts
@@ -160,7 +162,7 @@ Feature: Hub detects + acts when scout goes offline
 
 ## Capabilities delivered
 
-- **CAP-B024: Operator-visible detection of scout outages** (type:
+- **CAP-B050: Operator-visible detection of scout outages** (type:
   business, status: active). Closes the "beaconry silently loses
   visibility when a scout dies" class — BC-102 is the direct answer
   to the 2026-11-08 bb-82jq incident.

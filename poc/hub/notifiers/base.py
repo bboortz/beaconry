@@ -71,3 +71,15 @@ class NotificationAdapter(ABC):
         self, finding: Finding, auto_fixed_ts: int, last_seen_ts: int | None = None
     ) -> None:
         """BC-090 auto-fix regression — '🔥 AUTO-FIX REGRESSED'."""
+
+    # BC-102: scout liveness transitions. Default no-ops so out-of-tree
+    # adapters keep booting; TelegramAdapter overrides both.
+    async def send_scout_offline(  # noqa: B027
+        self, host: str, last_heartbeat_ts: int, offline_duration_s: int, last_health: str | None
+    ) -> None:
+        """BC-102 scout-offline alert — '⚠️ Scout on <host> offline'."""
+
+    async def send_scout_online(  # noqa: B027
+        self, host: str, offline_duration_s: int
+    ) -> None:
+        """BC-102 scout-recovery alert — '✓ Scout on <host> back online'."""
