@@ -11,8 +11,10 @@
 FROM anchore/grype:latest AS grype-src
 
 # ── Stage 1: builder ────────────────────────────────────────────────────────
-# BC-095: forge-builder-trixie ships python 3.13.18 (ABI-matches the runtime),
-# pip, syft, CA certs, tar. Extends BC-083's runtime migration one stage up.
+# BC-095: forge-builder-trixie ships Python + pip + syft + CA certs + tar.
+# Python minor is detected at build time (BC-098) and matches runtime by
+# forge contract (both images bumped as a pair). Extends BC-083's runtime
+# migration one stage up.
 FROM ghcr.io/bboortz/forge-builder-trixie:latest AS builder
 
 # grype — pulled from the stage above, no GitHub release CDN dependency.
@@ -59,23 +61,37 @@ RUN syft dir:/install -o syft-json=/sbom.json
 # below produces a correctly-owned mountpoint for fresh volumes.
 RUN mkdir -p /stage/data && chown -R 65532:65532 /stage/data
 
+# BC-098: Python-minor-agnostic site-packages staging. Ask the interpreter
+# for its own major.minor, then move site-packages from the pip --prefix
+# layout (/install/lib/pythonX.Y/) into a staging path that mirrors the
+# runtime root (/stage/usr/local/lib/pythonX.Y/). The runtime stage
+# below does a single `COPY --from=builder /stage /` and site-packages
+# lands at the exact path Python's native sys.path expects, with no
+# hardcoded version literal anywhere. Works for any future forge Python
+# bump without a beaconry PR. Order matters: this runs AFTER the
+# `syft dir:/install` step above so the SBOM captures wheels before
+# the move.
+RUN PY_VER="$(python3 -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')" \
+ && mkdir -p "/stage/usr/local/lib/python${PY_VER}" \
+ && mv "/install/lib/python${PY_VER}/site-packages" \
+       "/stage/usr/local/lib/python${PY_VER}/site-packages"
+
 # ── Stage 2: runtime (forge) ────────────────────────────────────────────────
 # ghcr.io/bboortz/python-scratch-trixie:latest — self-owned forge image.
-# Python 3.13.18, PATH=/usr/local/bin, baked USER 65532:65532 +
-# ENTRYPOINT /usr/local/bin/python3 + SSL_CERT_FILE + /etc/passwd entry
-# for nonroot. No shell, no apt, no coreutils. BC-083 pre-flight #2 verified.
-#
+# PATH=/usr/local/bin, baked USER 65532:65532 + ENTRYPOINT
+# /usr/local/bin/python3 + SSL_CERT_FILE + /etc/passwd entry for nonroot.
+# No shell, no apt, no coreutils. BC-083 pre-flight #2 verified.
 # BC-097 (2026-11-08): bumped `:3.13` → `:latest` for symmetry with the
-# BC-095 builder (`forge-builder-trixie:latest`) and to pick up FG-031's
-# `/hc` healthcheck binary without waiting for the `:3.13` rebuild
-# window. Risk: a future forge bump to Python 3.14 would break the
-# hardcoded `COPY /install/lib/python3.13/...` paths below — cold-start
-# smoke (BC-082) catches this on the next rebuild; remedy is a one-line
-# bump of the python-minor path in both Dockerfiles.
+# BC-095 builder and to pick up FG-031's `/hc` healthcheck binary.
+# BC-098 (2026-11-08): retired the "hardcoded python3.13 breaks on
+# forge Python bump" risk documented here pre-BC-098 — see CAP-T199
+# → CAP-T200.
 FROM ghcr.io/bboortz/python-scratch-trixie:latest AS runtime
 
-# Python deps — forge sys.path is /usr/local/lib/python3.13/*, not /usr/lib/*.
-COPY --from=builder /install/lib/python3.13/site-packages /usr/local/lib/python3.13/site-packages
+# BC-098: single staged COPY. /stage contains /data (chown 65532:65532)
+# + /usr/local/lib/python${PY_VER}/site-packages — see the builder-stage
+# comment above for the rationale. Ownership preserved from the builder.
+COPY --from=builder /stage /
 
 # Native binaries → /usr/local/bin (forge PATH).
 COPY --from=builder /usr/local/bin/syft /usr/local/bin/syft
@@ -84,9 +100,6 @@ COPY --from=builder /usr/local/bin/docker /usr/local/bin/docker
 
 WORKDIR /app
 COPY --from=builder --chown=65532:65532 /app /app
-# Fresh named volumes inherit /data's ownership (65532:65532 preserved
-# from BC-082 → zero chown migration for upgrading operators).
-COPY --from=builder --chown=65532:65532 /stage/data /data
 
 # BC-096: baked-in SBOM. Served at GET /sbom + consumed by
 # `make dogfood-sbom` (`grype sbom:/sbom.json`).
