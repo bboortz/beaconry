@@ -1801,6 +1801,15 @@ Enforcement: `poc/scripts/verify_traceability.py` runs as part of `make check`. 
 - **verified by:**
   - `poc/tests/integration/test_BC_093_rescan_hooks.py`
 
+### CAP-T208: Scout-reported inventory completeness + hub threshold-based reconcile skip
+- **type:** technical
+- **status:** active
+- **origin:** BC-106 — BC-067 added a hub-side heuristic (`sbom_count < 50%` of rolling baseline → skip reconcile). Useful but inferential: a scout syft-timeout on 1 of 50 images still passes the heuristic → that image's findings `absent_count++` falsely. Scout has the authoritative per-image success signal; BC-106 surfaces it.
+- **description:** `poc/scout/scout.py`'s `scan_docker_images` tracks `expected` (SCOUT_INCLUDE matches) and `collected` (syft-succeeded) locally; `collect_and_post` adds `images_expected`, `images_collected`, `scan_complete` to the POST payload. `poc/hub/hub.py`'s `receive_scan` reads them: when `images_expected > 0` and `collected/expected < BEACONRY_PARTIAL_SCAN_MIN_RATIO` (default 0.95, configurable via env), reconcile is skipped and `reconcile_skipped_partial_inventory` audit fires with `reason="bc_106_explicit_ratio"` + `expected` + `collected` + `ratio` + `threshold`. Pre-BC-106 scouts omit the fields → BC-067 baseline heuristic continues to apply (fallback). `0.0` disables the explicit check; `1.0` demands a fully-successful scan.
+- **supports:** CAP-T151, CAP-B023
+- **verified by:**
+  - `poc/tests/unit/test_BC_106_partial_inventory_guard.py`
+
 ### CAP-T207: Findings CLI shows FIRST SEEN + LAST CHANGE + auto-close reason
 - **type:** technical
 - **status:** active
