@@ -192,9 +192,9 @@ class TelegramAdapter(NotificationAdapter):
         kwargs: dict = {"chat_id": int(chat_id), "text": text, "parse_mode": "HTML"}
         if reply_markup_json is not None:
             try:
-                from telegram import InlineKeyboardMarkup
+                import telegram as _telegram
 
-                kwargs["reply_markup"] = InlineKeyboardMarkup.de_json(
+                kwargs["reply_markup"] = _telegram.InlineKeyboardMarkup.de_json(
                     __import__("json").loads(reply_markup_json), tg_app.bot
                 )
             except Exception as exc:  # noqa: BLE001
