@@ -4,6 +4,23 @@ All notable changes to beaconry are recorded here. The format is based
 on [Keep a Changelog](https://keepachangelog.com/), and this project
 follows [Semantic Versioning](https://semver.org/).
 
+## [v0.20.4] — 2026-11-09
+
+### Added (BC-111)
+
+- **DockerAdapter pull retry with exponential backoff.**
+  `DockerAdapter.execute` now retries `docker pull` up to
+  `BEACONRY_DOCKER_PULL_MAX_ATTEMPTS` times (default 3) with
+  `BASE_S × 2^(attempt-1)` backoff (5s/10s/20s default — ~35s worst
+  case). Pre-BC-111 a transient Docker Hub 503 or network hiccup
+  immediately failed operator Fix-now; now the retry handles the
+  common registry blip. Genuine failures (auth / tag-not-found)
+  still surface with the same `ExecutionResult(success=False)`
+  wire shape — just after more wall-clock time.
+- On retry success, `message` gains `(succeeded on attempt N/M)`
+  suffix so logs + Telegram show the retry worked.
+- Two new env vars + **CAP-T213**.
+
 ## [v0.20.3] — 2026-11-09
 
 ### Added (BC-110)

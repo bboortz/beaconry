@@ -103,3 +103,4 @@ Lifecycle: `draft → ready → in-progress → shipped`. Status matches each st
 | BC-108 | Docker events watchdog — reconnect on daemon restart                    | shipped     | — (merged to dev)                   |
 | BC-109 | Grype DB update retry — hub recovers from transient network failure    | shipped     | — (merged to dev)                   |
 | BC-110 | Verify probe retry — handle post-restart port-binding race              | shipped     | — (merged to dev)                   |
+| BC-111 | DockerAdapter pull retry — survive transient registry failures          | in-progress | feat/BC-111-docker-pull-retry       |

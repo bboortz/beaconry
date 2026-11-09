@@ -1801,6 +1801,15 @@ Enforcement: `poc/scripts/verify_traceability.py` runs as part of `make check`. 
 - **verified by:**
   - `poc/tests/integration/test_BC_093_rescan_hooks.py`
 
+### CAP-T213: DockerAdapter pull retry with exponential backoff
+- **type:** technical
+- **status:** active
+- **origin:** BC-111 — pre-BC-111 `DockerAdapter.execute` ran `docker pull` exactly once. A transient Docker Hub 503 or network hiccup immediately failed the operator's Fix-now action; retry required a manual re-tap of the button. Common registry hiccups almost always clear on the second attempt.
+- **description:** New `_run_docker_pull_once(pull_argv)` helper in `poc/hub/executor/docker_adapter.py` is the single-attempt wrapper; `DockerAdapter.execute` wraps it in a `for attempt in range(MAX)` loop with exponential backoff (`BASE_S × 2^(attempt-1)`, defaults 5s/10s/20s for 3 attempts). On success the `message` gains `"(succeeded on attempt N/M)"` suffix when `attempt > 1` — logs + Telegram show the retry worked. On all-fail, the LAST stderr tail is surfaced with the same `ExecutionResult(success=False, message=...)` wire shape as pre-BC-111 (just after more wall-clock time). Blind retry over error classification: auth / tag-not-found errors still fail after N attempts but their worst-case delay is ~35s with defaults. Env knobs: `BEACONRY_DOCKER_PULL_MAX_ATTEMPTS` (default 3), `BEACONRY_DOCKER_PULL_BASE_S` (default 5).
+- **supports:** CAP-T046, CAP-B023
+- **verified by:**
+  - `poc/tests/unit/test_BC_111_docker_pull_retry.py`
+
 ### CAP-T212: Verify-probe retry with exponential backoff
 - **type:** technical
 - **status:** active
