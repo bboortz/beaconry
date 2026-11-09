@@ -102,3 +102,4 @@ Lifecycle: `draft → ready → in-progress → shipped`. Status matches each st
 | BC-107 | Scout POST retry queue — no SBOM silently dropped on hub outage         | shipped     | — (merged to dev)                   |
 | BC-108 | Docker events watchdog — reconnect on daemon restart                    | shipped     | — (merged to dev)                   |
 | BC-109 | Grype DB update retry — hub recovers from transient network failure    | shipped     | — (merged to dev)                   |
+| BC-110 | Verify probe retry — handle post-restart port-binding race              | in-progress | feat/BC-110-verify-probe-retry      |

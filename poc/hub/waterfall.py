@@ -98,6 +98,37 @@ async def run_probe(probe: Probe) -> ProbeResult:
     return ProbeResult(ok=False, reason=f"unknown probe type: {probe.probe_type}")
 
 
+async def run_probe_with_retry(probe: Probe, *, max_attempts: int, base_s: float) -> ProbeResult:
+    """BC-110: run `probe` up to `max_attempts` times with exponential
+    backoff between retries.
+
+    Fixes the common race where a probe fires 100ms after `docker restart`
+    and the service hasn't bound its port / finished its healthcheck
+    `starting → healthy` transition yet. Pre-BC-110 any single failure
+    (even a 1ms-off-timing miss) flagged `verification_failed` and the
+    operator had to manually tap Verify again after waiting.
+
+    Backoff between attempts: `base_s × 2^(attempt-1)` (e.g. base_s=2
+    → 2s, 4s, 8s). First attempt fires immediately; sleep happens
+    AFTER a failure, before the next attempt. Returns the FIRST
+    successful result, or the LAST failed result.
+    """
+    max_attempts = max(1, int(max_attempts))
+    last: ProbeResult = ProbeResult(ok=False, reason="no attempts made")
+    for attempt in range(1, max_attempts + 1):
+        last = await run_probe(probe)
+        if last.ok:
+            if attempt > 1:
+                last = ProbeResult(
+                    ok=True,
+                    reason=f"{last.reason} (passed on attempt {attempt}/{max_attempts})",
+                )
+            return last
+        if attempt < max_attempts:
+            await asyncio.sleep(base_s * (2 ** (attempt - 1)))
+    return last
+
+
 async def _probe_tcp(arg: str) -> ProbeResult:
     """TCP connect to <host>:<port>."""
     if ":" not in arg:

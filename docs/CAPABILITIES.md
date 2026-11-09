@@ -1801,6 +1801,15 @@ Enforcement: `poc/scripts/verify_traceability.py` runs as part of `make check`. 
 - **verified by:**
   - `poc/tests/integration/test_BC_093_rescan_hooks.py`
 
+### CAP-T212: Verify-probe retry with exponential backoff
+- **type:** technical
+- **status:** active
+- **origin:** BC-110 — pre-BC-110 `_handle_verify` called `_waterfall.run_probe(probe)` exactly once. Immediately after `docker restart` the service is often still in its `starting → healthy` transition (port not yet bound, healthcheck still running). A single probe attempt in the first ~100-500ms would fail, hub flipped `verification_failed`, operator re-tapped Verify 10s later and it passed. False-failure UX.
+- **description:** New `run_probe_with_retry(probe, max_attempts, base_s)` in `poc/hub/waterfall.py` wraps `run_probe` with exponential backoff between failed attempts (`base_s × 2^(attempt-1)` — defaults 2s/4s/8s). First-success-wins (returns immediately if attempt N passes); all-fail returns the LAST ProbeResult. On retry-success the reason is decorated with `"(passed on attempt N/M)"` so operators + logs see the retry worked. Env knobs `BEACONRY_VERIFY_PROBE_MAX_ATTEMPTS` (default 3) + `_BASE_S` (default 2). `MAX_ATTEMPTS=1` preserves single-shot semantics for operators who want it.
+- **supports:** CAP-T046, CAP-B023
+- **verified by:**
+  - `poc/tests/unit/test_BC_110_verify_probe_retry.py`
+
 ### CAP-T211: Hub grype-db update retry with capped exponential backoff
 - **type:** technical
 - **status:** active
