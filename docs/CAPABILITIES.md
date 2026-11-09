@@ -1801,6 +1801,15 @@ Enforcement: `poc/scripts/verify_traceability.py` runs as part of `make check`. 
 - **verified by:**
   - `poc/tests/integration/test_BC_093_rescan_hooks.py`
 
+### CAP-T210: Scout docker-events watchdog with capped exponential backoff
+- **type:** technical
+- **status:** active
+- **origin:** BC-108 — pre-BC-108 `_blocking_consume` was single-shot: any exception from the `docker.events()` iterator (daemon restart, socket churn) made the thread exit and no new subscription was ever attempted. Event-driven scans silently stopped until scout process restart; fallback was `SCAN_INTERVAL` (300s) + daily 02:00 rescan.
+- **description:** `poc/scout/scout.py`'s `_docker_events_loop_forever` wraps `_blocking_consume` in a `while True` reconnection loop. `_blocking_consume` returns `True` on clean EOS (loop exits — scout shutdown) and `False` on exception (loop sleeps `backoff_s` seconds then re-subscribes). Backoff is a doubling schedule clamped to `[BEACONRY_DOCKER_EVENTS_BACKOFF_MIN_S, BEACONRY_DOCKER_EVENTS_BACKOFF_MAX_S]` (defaults 1/60); `_next_backoff(prev)` is pure + unit-testable. Each reconnect bumps `_docker_events_reconnects` + stamps `_docker_events_last_reconnect_ts`, both surfaced in `/healthz.checks` for operator diagnosis (steady growth = daemon-health issue; one-off bumps = routine restart). Env clamp: `MAX < MIN` silently pulls MAX up to MIN to avoid degenerate config.
+- **supports:** CAP-T192, CAP-B023
+- **verified by:**
+  - `poc/tests/unit/test_BC_108_docker_events_watchdog.py`
+
 ### CAP-T209: Scout-side POST retry queue with persistent backoff
 - **type:** technical
 - **status:** active

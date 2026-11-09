@@ -123,6 +123,19 @@ DOCKER_EVENTS_ENABLED = os.environ.get("BEACONRY_DOCKER_EVENTS_ENABLED", "1") !=
 # after the last event, not N scans back-to-back.
 DOCKER_EVENTS_DEBOUNCE_S = max(1, int(os.environ.get("BEACONRY_DOCKER_EVENTS_DEBOUNCE_S") or "10"))
 
+# BC-108: capped exponential backoff between reconnection attempts when the
+# docker events stream drops (daemon restart, socket tear). Pre-BC-108 the
+# single `_blocking_consume` thread exited silently and event-driven scans
+# stopped forever (until scout restart). BC-108 wraps the consume in a loop
+# that keeps retrying until daemon is up again. Clamps: MIN >= 1, MAX >= MIN.
+DOCKER_EVENTS_BACKOFF_MIN_S = max(
+    1, int(os.environ.get("BEACONRY_DOCKER_EVENTS_BACKOFF_MIN_S") or "1")
+)
+DOCKER_EVENTS_BACKOFF_MAX_S = max(
+    DOCKER_EVENTS_BACKOFF_MIN_S,
+    int(os.environ.get("BEACONRY_DOCKER_EVENTS_BACKOFF_MAX_S") or "60"),
+)
+
 # BC-107: scout-side persistent retry queue for failed /scan POSTs. Mirrors
 # BC-104's hub-side `pending_notifications`. Scout had no DB pre-BC-107 —
 # this is the first persistent file scout owns (`/data/scout-state.db`).
@@ -771,6 +784,11 @@ def _scout_healthz_summary() -> dict:
         # BC-107: non-zero = hub was unreachable at least once since this
         # scout started and the SBOM is awaiting retry.
         "pending_scans_queue_depth": _pending_scans_queue_depth(),
+        # BC-108: non-zero = docker daemon restarted (or socket churned)
+        # at least once since this scout started. Operators seeing a
+        # steadily growing count should investigate daemon health.
+        "docker_events_reconnects": _docker_events_reconnects,
+        "docker_events_last_reconnect_ts": _docker_events_last_reconnect_ts,
     }
     degraded = not _docker_socket_ok
     return {
@@ -907,14 +925,35 @@ def _docker_events_stream():  # pragma: no cover - docker.from_env wrapper
     )
 
 
-async def _docker_events_loop_forever() -> None:  # pragma: no cover - infinite async loop
-    """BC-093: subscribe to docker events; trigger a (debounced) scan on
-    image pull / container create+start.
+# BC-108: counters surfaced via /healthz so operators can see
+# reconnection activity without tailing logs.
+_docker_events_reconnects: int = 0
+_docker_events_last_reconnect_ts: int = 0
 
-    The docker events stream is blocking → runs in a worker thread. The
-    debounce uses a monotonic timestamp: an event schedules a trailing scan
-    `DOCKER_EVENTS_DEBOUNCE_S` later, cancelling any earlier pending scan.
+
+def _next_backoff(prev: int) -> int:
+    """BC-108: doubling backoff clamped to [MIN, MAX]. Pulled out for unit
+    testability. First call passes `prev=0` → returns MIN."""
+    if prev <= 0:
+        return DOCKER_EVENTS_BACKOFF_MIN_S
+    return min(prev * 2, DOCKER_EVENTS_BACKOFF_MAX_S)
+
+
+async def _docker_events_loop_forever() -> None:  # pragma: no cover - infinite async loop
+    """BC-093 + BC-108: subscribe to docker events; trigger a (debounced)
+    scan on image pull / container create+start/destroy/die/delete.
+    BC-108: wrap the blocking consume in a reconnection loop with capped
+    exponential backoff so a daemon restart doesn't silently kill the
+    listener.
+
+    The docker events stream is blocking → runs in a worker thread per
+    attempt. Each attempt returns to the async loop so the next attempt
+    can be scheduled. Pre-BC-108 the thread ended on exception and no
+    new attempt was ever scheduled — scout fell back to SCAN_INTERVAL
+    until restart.
     """
+    global _docker_events_reconnects, _docker_events_last_reconnect_ts
+
     loop = asyncio.get_running_loop()
     pending: list[asyncio.TimerHandle] = []
 
@@ -930,16 +969,42 @@ async def _docker_events_loop_forever() -> None:  # pragma: no cover - infinite 
         )
         pending.append(handle)
 
-    def _blocking_consume() -> None:
+    def _blocking_consume() -> bool:
+        """Return True if the stream ended cleanly (no exception), False on
+        error. Caller decides whether to retry."""
         try:
             for _event in _docker_events_stream():
                 loop.call_soon_threadsafe(_schedule_scan)
+            return True
         except Exception as e:  # noqa: BLE001
-            log.warning("BC-093 docker events stream ended: %s", e)
+            log.warning("BC-108 docker events stream broke: %s", e)
+            return False
 
-    # Fire-and-forget worker thread; it'll end on scout shutdown when the
-    # docker client is closed.
-    await loop.run_in_executor(None, _blocking_consume)
+    backoff_s = 0
+    attempt = 0
+    while True:
+        attempt += 1
+        if attempt > 1:
+            log.info(
+                "BC-108 docker events reconnecting (attempt=%d, backoff=%ds)",
+                attempt,
+                backoff_s,
+            )
+        clean = await loop.run_in_executor(None, _blocking_consume)
+        if clean:
+            log.info("BC-108 docker events stream ended cleanly — exiting loop")
+            return
+        # Stream raised. Sleep, then reconnect.
+        backoff_s = _next_backoff(backoff_s)
+        await asyncio.sleep(backoff_s)
+        _docker_events_reconnects += 1
+        _docker_events_last_reconnect_ts = int(time.time())
+        log.warning(
+            "BC-108 docker_events_reconnected total=%d attempt=%d backoff_next=%ds",
+            _docker_events_reconnects,
+            attempt + 1,
+            _next_backoff(backoff_s),
+        )
 
 
 def heartbeat_once() -> bool:
