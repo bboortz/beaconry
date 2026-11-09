@@ -4,6 +4,23 @@ All notable changes to beaconry are recorded here. The format is based
 on [Keep a Changelog](https://keepachangelog.com/), and this project
 follows [Semantic Versioning](https://semver.org/).
 
+## [v0.20.1] — 2026-11-09
+
+### Added (BC-108)
+
+- **Docker events watchdog.** Scout's `docker.events()` subscription
+  is now wrapped in a `while True` reconnection loop with capped
+  exponential backoff (`[1s, 60s]` defaults). Pre-BC-108, a daemon
+  restart or socket tear ended the single-shot consume thread and
+  event-driven scans silently stopped until scout process restart.
+  Scout now reconnects within 1s of daemon recovery on the common
+  case; prolonged outages still resume within ≤60s.
+- `/healthz` exposes `docker_events_reconnects` (cumulative) +
+  `docker_events_last_reconnect_ts` so operators see the drift at
+  a glance — steady growth signals daemon-health issues.
+- Two new env vars: `BEACONRY_DOCKER_EVENTS_BACKOFF_MIN_S` + `_MAX_S`.
+- **CAP-T210** registered.
+
 ## [v0.20.0] — 2026-11-09
 
 ### Added (BC-107)

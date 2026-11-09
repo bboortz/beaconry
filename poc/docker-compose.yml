@@ -159,6 +159,10 @@ services:
       - BEACONRY_SCOUT_POST_RETRY_BASE_S=${BEACONRY_SCOUT_POST_RETRY_BASE_S:-30}
       - BEACONRY_SCOUT_POST_RETRY_SWEEP_INTERVAL_S=${BEACONRY_SCOUT_POST_RETRY_SWEEP_INTERVAL_S:-60}
       - BEACONRY_SCOUT_STATE_DB=${BEACONRY_SCOUT_STATE_DB:-/data/scout-state.db}
+      # BC-108: wrap docker events listener in reconnect loop with capped
+      # exponential backoff so daemon restart doesn't silently kill it.
+      - BEACONRY_DOCKER_EVENTS_BACKOFF_MIN_S=${BEACONRY_DOCKER_EVENTS_BACKOFF_MIN_S:-1}
+      - BEACONRY_DOCKER_EVENTS_BACKOFF_MAX_S=${BEACONRY_DOCKER_EVENTS_BACKOFF_MAX_S:-60}
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
       - /var/lib/pacman:/host/var/lib/pacman:ro
