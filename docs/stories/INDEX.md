@@ -100,4 +100,4 @@ Lifecycle: `draft → ready → in-progress → shipped`. Status matches each st
 | BC-105 | `make findings` shows FIRST SEEN + LAST CHANGE + auto-close reason     | shipped     | — (merged to dev)                |
 | BC-106 | Partial-inventory guard strengthened — scout reports expected/collected| shipped     | — (merged to dev)               |
 | BC-107 | Scout POST retry queue — no SBOM silently dropped on hub outage         | shipped     | — (merged to dev)                   |
-| BC-108 | Docker events watchdog — reconnect on daemon restart                    | in-progress | feat/BC-108-docker-events-watchdog  |
+| BC-108 | Docker events watchdog — reconnect on daemon restart                    | shipped     | — (merged to dev)                   |
