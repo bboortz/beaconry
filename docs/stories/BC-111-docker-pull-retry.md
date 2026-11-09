@@ -1,7 +1,7 @@
 ---
 id: BC-111
 title: DockerAdapter pull retry — survive transient registry failures
-status: in-progress
+status: shipped
 created: 2026-11-09
 branch: feat/BC-111-docker-pull-retry
 plan: docs/plan/BC-111-docker-pull-retry-plan.md
