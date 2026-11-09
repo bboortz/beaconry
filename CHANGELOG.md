@@ -4,6 +4,24 @@ All notable changes to beaconry are recorded here. The format is based
 on [Keep a Changelog](https://keepachangelog.com/), and this project
 follows [Semantic Versioning](https://semver.org/).
 
+## [v0.20.2] — 2026-11-09
+
+### Added (BC-109)
+
+- **Grype DB update retry.** Hub's lifespan `grype db update` now
+  retries with capped exponential backoff on failure (10s → 600s
+  defaults). Pre-BC-109 a transient network failure during startup
+  left hub stuck at `/readyz grype_db: empty` → compose unhealthy
+  → scout `depends_on: service_healthy` blocked downstream, requiring
+  manual hub restart once the network recovered. BC-109 spawns a
+  background retry task that keeps trying until the download
+  succeeds, at which point `/readyz` turns green on its own.
+- Three new `/healthz.checks` keys: `grype_db_update_attempts`,
+  `grype_db_last_update_ts`, `grype_db_last_error`.
+- Two new env vars: `BEACONRY_GRYPE_DB_RETRY_BASE_S`,
+  `BEACONRY_GRYPE_DB_BACKOFF_MAX_S`.
+- **CAP-T211** registered.
+
 ## [v0.20.1] — 2026-11-09
 
 ### Added (BC-108)

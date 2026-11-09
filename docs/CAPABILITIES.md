@@ -1801,6 +1801,15 @@ Enforcement: `poc/scripts/verify_traceability.py` runs as part of `make check`. 
 - **verified by:**
   - `poc/tests/integration/test_BC_093_rescan_hooks.py`
 
+### CAP-T211: Hub grype-db update retry with capped exponential backoff
+- **type:** technical
+- **status:** active
+- **origin:** BC-109 — pre-BC-109 `grype db update` was single-shot in lifespan. On transient network failure (ISP flap, DNS glitch, registry 5xx) the download failed, hub logged a warning, `_startup_complete = True` fired, and `/readyz` sat at 503 for `grype_db` (empty dir) forever. Scout `depends_on: service_healthy` blocked downstream. Operator had to `docker restart beaconry-hub` once the network recovered.
+- **description:** `poc/hub/hub.py` adds `_grype_db_update_once()` (single-attempt subprocess wrapper, shared by startup + retry loop), `_next_grype_backoff(prev)` (pure helper: doubling clamped to `[BEACONRY_GRYPE_DB_RETRY_BASE_S, BEACONRY_GRYPE_DB_BACKOFF_MAX_S]`, defaults 10/600), and `_grype_db_update_retry_loop_forever()` (background task spawned only when startup fails). Lifespan tries once synchronously; on failure, spawns the loop and continues. `/readyz` already gates on `check_dir_populated(_grype_db_dir())` (pre-BC-109 behavior), so compose keeps the hub unhealthy until the loop succeeds — no restart-loop trap. Three new `/healthz.checks` keys: `grype_db_update_attempts` (cumulative), `grype_db_last_update_ts` (last successful update), `grype_db_last_error` (stderr tail truncated to 400 chars). Env clamp: `MAX < BASE` silently pulls MAX up to BASE.
+- **supports:** CAP-T210, CAP-B023
+- **verified by:**
+  - `poc/tests/unit/test_BC_109_grype_db_retry.py`
+
 ### CAP-T210: Scout docker-events watchdog with capped exponential backoff
 - **type:** technical
 - **status:** active

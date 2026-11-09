@@ -139,7 +139,7 @@ typical self-hosted deployment (1s → 60s cap).
 |---|---|---|---|
 | Scenario "Daemon restart mid-session" | unit | `poc/tests/unit/test_BC_108_docker_events_watchdog.py::test_next_backoff_first_attempt_returns_min`, `test_next_backoff_doubles_each_attempt` | ✓ |
 | Scenario "Repeated reconnect failures grow backoff" | unit | `poc/tests/unit/test_BC_108_docker_events_watchdog.py::test_next_backoff_clamped_at_max` | ✓ |
-| Scenario "Clean shutdown exits the loop" | manual | `_blocking_consume` returns `True` on clean EOS; loop breaks. Covered by code review — infinite async loop not easily unit-testable. | ⚠️ |
+| Scenario "Clean shutdown exits the loop" | manual | `_blocking_consume` returns `True` on clean EOS; loop breaks (poc/scout/scout.py — `if clean: return`). Verified by code review 2026-11-09 — infinite async loop not easily unit-testable. | ✓ |
 | `/healthz` exposes counters | unit | `test_healthz_exposes_reconnect_counters`, `test_healthz_reflects_bumped_counter` | ✓ |
 | Env clamp MAX ≥ MIN | unit | `test_env_max_clamped_to_min` | ✓ |
 | Memory drift pattern added | N/A | N/A — no documented behavior deprecated | ✓ |

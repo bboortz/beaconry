@@ -56,6 +56,10 @@ services:
       # BC-106: partial-inventory guard. Skip reconcile when scout reports
       # collected/expected < ratio. 0 disables; BC-067 baseline is fallback.
       - BEACONRY_PARTIAL_SCAN_MIN_RATIO=${BEACONRY_PARTIAL_SCAN_MIN_RATIO:-0.95}
+      # BC-109: grype DB update retry — spawn background task on startup
+      # failure, keep retrying with capped exponential backoff.
+      - BEACONRY_GRYPE_DB_RETRY_BASE_S=${BEACONRY_GRYPE_DB_RETRY_BASE_S:-10}
+      - BEACONRY_GRYPE_DB_BACKOFF_MAX_S=${BEACONRY_GRYPE_DB_BACKOFF_MAX_S:-600}
       # BC-089: snooze buttons + sweep.
       - BEACONRY_SNOOZE_DEFAULT_HOURS=${BEACONRY_SNOOZE_DEFAULT_HOURS:-1,4,24,168}
       - BEACONRY_SNOOZE_SWEEP_INTERVAL_S=${BEACONRY_SNOOZE_SWEEP_INTERVAL_S:-60}
