@@ -104,3 +104,4 @@ Lifecycle: `draft → ready → in-progress → shipped`. Status matches each st
 | BC-109 | Grype DB update retry — hub recovers from transient network failure    | shipped     | — (merged to dev)                   |
 | BC-110 | Verify probe retry — handle post-restart port-binding race              | shipped     | — (merged to dev)                   |
 | BC-111 | DockerAdapter pull retry — survive transient registry failures          | shipped     | — (merged to dev)                   |
+| BC-112 | Scan trigger proxy retry — survive transient scout unreachability       | in-progress | feat/BC-112-scan-trigger-proxy-retry|

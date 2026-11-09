@@ -1801,6 +1801,15 @@ Enforcement: `poc/scripts/verify_traceability.py` runs as part of `make check`. 
 - **verified by:**
   - `poc/tests/integration/test_BC_093_rescan_hooks.py`
 
+### CAP-T214: Hub scan-trigger proxy retry with exponential backoff
+- **type:** technical
+- **status:** active
+- **origin:** BC-112 — pre-BC-112 `http_scan_trigger` POSTed to scout exactly once. A transient DNS blip or compose-network churn immediately returned 503 to the operator; `make scan` had to be re-run manually. HTTP 4xx/5xx from scout (e.g. `409 already_running` per BC-037) must still pass through verbatim — those are real responses the operator should see.
+- **description:** `poc/hub/hub.py` adds `_scan_trigger_once(scout_url)` — single-attempt POST returning `(status_code, body, transport_error)`. 2xx/4xx/5xx populate `status_code`; transport failures (URLError / ConnectionError / TimeoutError / OSError) populate `transport_error`. `http_scan_trigger` loops over `_scan_trigger_once` with exponential backoff (`BASE_S × 2^(attempt-1)`, defaults 1s/2s/4s for 3 attempts) ONLY on transport errors. 2xx returns immediately (adds `retry_attempts: N` to the response JSON when N>1); 4xx/5xx returns immediately (no retry — those are genuine scout responses). All-fail raises `HTTPException(503, "scout unreachable after N attempt(s): <err_class>")`. Env knobs: `BEACONRY_SCAN_TRIGGER_MAX_ATTEMPTS` (default 3), `BEACONRY_SCAN_TRIGGER_BASE_S` (default 1).
+- **supports:** CAP-T108, CAP-B023
+- **verified by:**
+  - `poc/tests/unit/test_BC_112_scan_trigger_proxy_retry.py`
+
 ### CAP-T213: DockerAdapter pull retry with exponential backoff
 - **type:** technical
 - **status:** active

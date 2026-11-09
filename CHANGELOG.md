@@ -4,6 +4,24 @@ All notable changes to beaconry are recorded here. The format is based
 on [Keep a Changelog](https://keepachangelog.com/), and this project
 follows [Semantic Versioning](https://semver.org/).
 
+## [v0.20.5] — 2026-11-09
+
+### Added (BC-112)
+
+- **`/scan/trigger` proxy retry.** Hub's `/scan/trigger` → scout
+  POST now retries on transport failures (DNS blip, ECONNREFUSED,
+  timeout) up to `BEACONRY_SCAN_TRIGGER_MAX_ATTEMPTS` times
+  (default 3) with `BASE_S × 2^(attempt-1)` backoff (1s/2s/4s
+  default — ~15s worst case total). Pre-BC-112 a single transport
+  failure immediately returned 503 to the operator; `make scan`
+  had to be re-run manually. 4xx/5xx responses from scout (e.g.
+  `409 already_running` per BC-037) still pass through verbatim —
+  those are genuine responses the operator should see.
+- Response JSON gains `retry_attempts: N` on success when N>1.
+- 503 detail message reads "scout unreachable after N attempt(s):
+  <transport_error_class>".
+- Two new env vars + **CAP-T214**.
+
 ## [v0.20.4] — 2026-11-09
 
 ### Added (BC-111)
