@@ -1,7 +1,7 @@
 ---
 id: BC-112
 title: Scan trigger proxy retry — survive transient scout unreachability
-status: in-progress
+status: shipped
 created: 2026-11-09
 branch: feat/BC-112-scan-trigger-proxy-retry
 plan: docs/plan/BC-112-scan-trigger-proxy-retry-plan.md
