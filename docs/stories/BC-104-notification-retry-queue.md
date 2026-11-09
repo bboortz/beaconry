@@ -1,7 +1,7 @@
 ---
 id: BC-104
 title: Notification retry queue — Telegram outage no longer silently drops alerts
-status: in-progress
+status: shipped
 created: 2026-11-09
 branch: feat/BC-104-notify-retry-queue
 plan: docs/plan/BC-104-notification-retry-queue-plan.md
