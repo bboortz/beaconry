@@ -1035,7 +1035,27 @@ def reconcile_scan(
         AUTO_FIX_THRESHOLD,
     )
     con = sqlite3.connect(DB_PATH)
+    # BC-114: wrap the SELECT + per-row UPDATEs in a BEGIN IMMEDIATE so a
+    # concurrent save_finding / bump_last_seen can't interleave between the
+    # read and the write. Pre-BC-114 a race could silently auto-close a
+    # finding that another scan had just re-observed (TOCTOU). Setting
+    # `isolation_level=None` disables Python's implicit transaction so our
+    # explicit BEGIN IMMEDIATE / COMMIT is authoritative. BEGIN IMMEDIATE
+    # grabs a reserved (write) lock immediately — other readers still see
+    # the pre-transaction snapshot; other writers block until we COMMIT.
+    con.isolation_level = None
     try:
+        try:
+            con.execute("BEGIN IMMEDIATE")
+        except sqlite3.OperationalError as e:
+            # Another writer holds the lock past the default 5s timeout.
+            # Skip this reconcile cycle — the next one will retry; no
+            # auto-close misfires in the interim.
+            log.warning(
+                "BC-114: reconcile_scan could not acquire write lock (%s); skipping cycle",
+                e,
+            )
+            return [], [], []
         try:
             # BC-086: widen scope to snoozed + accepted; add
             # absent_count + auto_fixed_ts columns to the row payload.
@@ -1049,6 +1069,8 @@ def reconcile_scan(
             ).fetchall()
         except sqlite3.OperationalError:
             # Cold boot / init_db hasn't run yet — nothing to reconcile.
+            with contextlib.suppress(sqlite3.OperationalError):
+                con.execute("ROLLBACK")
             return [], [], []
 
         regressed_from_fix: list[Finding] = []
@@ -1147,8 +1169,16 @@ def reconcile_scan(
                     regressed_ts=now,
                 )
 
-        con.commit()
+        # BC-114: explicit COMMIT (isolation_level=None disables auto-commit).
+        # Any uncaught exception in the iteration above falls through to the
+        # `finally` → ROLLBACK, leaving the DB consistent with the pre-reconcile
+        # snapshot.
+        con.execute("COMMIT")
         return regressed_from_fix, auto_fixed_closes, regressed_from_auto_fix
+    except Exception:
+        with contextlib.suppress(sqlite3.OperationalError):
+            con.execute("ROLLBACK")
+        raise
     finally:
         con.close()
 
