@@ -1,7 +1,7 @@
 ---
 id: BC-113
 title: /scan payload size limit — DoS guard
-status: in-progress
+status: shipped
 created: 2026-11-09
 branch: feat/BC-113-scan-payload-size-limit
 plan: docs/plan/BC-113-scan-payload-size-limit-plan.md

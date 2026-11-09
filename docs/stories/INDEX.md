@@ -105,4 +105,4 @@ Lifecycle: `draft → ready → in-progress → shipped`. Status matches each st
 | BC-110 | Verify probe retry — handle post-restart port-binding race              | shipped     | — (merged to dev)                   |
 | BC-111 | DockerAdapter pull retry — survive transient registry failures          | shipped     | — (merged to dev)                   |
 | BC-112 | Scan trigger proxy retry — survive transient scout unreachability       | shipped     | — (merged to dev)                   |
-| BC-113 | /scan payload size limit — DoS guard                                    | in-progress | feat/BC-113-scan-payload-size-limit |
+| BC-113 | /scan payload size limit — DoS guard                                    | shipped     | — (merged to dev)                   |
