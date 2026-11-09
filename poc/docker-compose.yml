@@ -152,6 +152,13 @@ services:
       - BEACONRY_DAILY_RESCAN_HOUR=${BEACONRY_DAILY_RESCAN_HOUR:-2}
       - BEACONRY_DOCKER_EVENTS_ENABLED=${BEACONRY_DOCKER_EVENTS_ENABLED:-1}
       - BEACONRY_DOCKER_EVENTS_DEBOUNCE_S=${BEACONRY_DOCKER_EVENTS_DEBOUNCE_S:-10}
+      # BC-107: scout-side persistent retry queue for failed /scan POSTs.
+      # Mirrors BC-104 on the hub side. Pre-BC-107 a transient hub outage
+      # silently lost that cycle's SBOM; now we persist + replay.
+      - BEACONRY_SCOUT_POST_RETRY_MAX_ATTEMPTS=${BEACONRY_SCOUT_POST_RETRY_MAX_ATTEMPTS:-5}
+      - BEACONRY_SCOUT_POST_RETRY_BASE_S=${BEACONRY_SCOUT_POST_RETRY_BASE_S:-30}
+      - BEACONRY_SCOUT_POST_RETRY_SWEEP_INTERVAL_S=${BEACONRY_SCOUT_POST_RETRY_SWEEP_INTERVAL_S:-60}
+      - BEACONRY_SCOUT_STATE_DB=${BEACONRY_SCOUT_STATE_DB:-/data/scout-state.db}
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
       - /var/lib/pacman:/host/var/lib/pacman:ro

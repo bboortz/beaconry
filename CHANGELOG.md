@@ -4,6 +4,28 @@ All notable changes to beaconry are recorded here. The format is based
 on [Keep a Changelog](https://keepachangelog.com/), and this project
 follows [Semantic Versioning](https://semver.org/).
 
+## [v0.20.0] — 2026-11-09
+
+### Added (BC-107)
+
+- **Scout POST retry queue.** Scout gets its first persistent file
+  at `/data/scout-state.db` (configurable via
+  `BEACONRY_SCOUT_STATE_DB`) with a `pending_scans` table. When
+  the `/scan` POST to hub fails (503, timeout, connection refused),
+  the SBOM payload is persisted and a background sweep replays it
+  with exponential backoff (`BASE_S × 2^attempts`:
+  30→60→120→240→480s by default). Success → DELETE + `scan_delivered`
+  log; beyond `MAX_ATTEMPTS` (default 5) → DELETE + `scan_abandoned`
+  log. Mirror of BC-104's hub-side `pending_notifications` — both
+  halves of the scout ↔ hub wire now survive transient outages
+  without silent data loss. State survives scout restart.
+- `/healthz` surfaces `pending_scans_queue_depth` so operators
+  spot a growing backlog at a glance.
+- Three new env vars: `BEACONRY_SCOUT_POST_RETRY_MAX_ATTEMPTS`,
+  `BEACONRY_SCOUT_POST_RETRY_BASE_S`,
+  `BEACONRY_SCOUT_POST_RETRY_SWEEP_INTERVAL_S`.
+- **CAP-T209** registered.
+
 ## [v0.19.2] — 2026-11-09
 
 ### Added (BC-106)
