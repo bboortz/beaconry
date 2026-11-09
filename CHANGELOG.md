@@ -4,6 +4,23 @@ All notable changes to beaconry are recorded here. The format is based
 on [Keep a Changelog](https://keepachangelog.com/), and this project
 follows [Semantic Versioning](https://semver.org/).
 
+## [v0.19.2] — 2026-11-09
+
+### Added (BC-106)
+
+- **Scout-reported inventory completeness.** Scout now includes
+  `images_expected`, `images_collected`, and `scan_complete`
+  in every /scan POST. Hub reads them; when
+  `collected / expected < BEACONRY_PARTIAL_SCAN_MIN_RATIO`
+  (default 0.95), reconcile is skipped and
+  `reconcile_skipped_partial_inventory` audit fires with
+  `reason="bc_106_explicit_ratio"` and the explicit numbers.
+  Strengthens BC-067's baseline heuristic (which remains as
+  fallback for pre-BC-106 scouts).
+- **CAP-T208** registered. New env `BEACONRY_PARTIAL_SCAN_MIN_RATIO`
+  documented. `0.0` disables the explicit check; `1.0` demands a
+  fully-successful scan.
+
 ## [v0.19.1] — 2026-11-09
 
 ### Added (BC-105)

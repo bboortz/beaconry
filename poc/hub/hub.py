@@ -155,6 +155,25 @@ NOTIFY_RETRY_SWEEP_INTERVAL_S = max(
 )
 
 
+# BC-106: scout-reported completeness floor. When a scout's POST carries
+# `images_collected / images_expected < PARTIAL_SCAN_MIN_RATIO`, reconcile
+# is skipped (findings still ingested). Default 0.95 — one failed image
+# in a 20-image inventory is tolerated; losing 2+ triggers the skip.
+# `0.0` disables the explicit check; BC-067 baseline heuristic still applies.
+# `1.0` demands a fully-successful scan to reconcile.
+def _parse_ratio(raw: str, default: float) -> float:
+    try:
+        v = float(raw)
+    except (TypeError, ValueError):
+        return default
+    return max(0.0, min(1.0, v))
+
+
+PARTIAL_SCAN_MIN_RATIO = _parse_ratio(
+    os.environ.get("BEACONRY_PARTIAL_SCAN_MIN_RATIO", "0.95"), 0.95
+)
+
+
 def _parse_snooze_hours(raw: str) -> list[int]:
     """BC-089: parse `BEACONRY_SNOOZE_DEFAULT_HOURS=1,4,24,168` → [1, 4, 24, 168].
     Drops non-integer tokens silently; result clamped to ≥1 and deduped
@@ -3752,7 +3771,13 @@ async def receive_scan(payload: dict, request: _FastAPIRequest) -> dict:
             log.error("Error processing SBOM entry: %s", e)
 
     return await _ingest_candidates(
-        host, candidates, now_ts=int(time.time()), sbom_count=len(sboms)
+        host,
+        candidates,
+        now_ts=int(time.time()),
+        sbom_count=len(sboms),
+        # BC-106: pass through scout's explicit counts when present.
+        images_expected=int(payload.get("images_expected") or 0),
+        images_collected=int(payload.get("images_collected") or 0),
     )
 
 
@@ -3840,6 +3865,10 @@ async def _ingest_candidates(
     *,
     now_ts: int,
     sbom_count: int | None = None,
+    # BC-106: scout-reported per-scan completeness. Both default 0 =
+    # "scout didn't report" → BC-067 baseline heuristic is the only check.
+    images_expected: int = 0,
+    images_collected: int = 0,
 ) -> dict:
     """BC-038: extracted ingest flow — dedup+cap, save+notify, digest, reconcile.
 
@@ -3898,16 +3927,47 @@ async def _ingest_candidates(
     scanned_ids = {c.id for c in candidates}
     # BC-034: bookkeeping — always, regardless of RECONCILE_ENABLED.
     bump_last_seen(host, scanned_ids, now_ts=now_ts)
+    # BC-106: explicit scout-reported completeness — takes precedence over the
+    # BC-067 baseline heuristic when the fields are present (pre-BC-106 scouts
+    # omit them → falls through to BC-067). Scout reports how many images the
+    # SCOUT_INCLUDE filter matched (expected) vs how many syft succeeded on
+    # (collected); hub compares the ratio to PARTIAL_SCAN_MIN_RATIO.
+    explicit_partial = False
+    if images_expected > 0 and PARTIAL_SCAN_MIN_RATIO > 0:
+        ratio = images_collected / images_expected
+        if ratio < PARTIAL_SCAN_MIN_RATIO:
+            explicit_partial = True
+            _audit.append(
+                "reconcile_skipped_partial_inventory",
+                host=host,
+                reason="bc_106_explicit_ratio",
+                expected=images_expected,
+                collected=images_collected,
+                ratio=round(ratio, 3),
+                threshold=PARTIAL_SCAN_MIN_RATIO,
+            )
+            log.warning(
+                "BC-106: reconcile skipped for %s — scout collected %d/%d (ratio %.2f < %.2f)",
+                host,
+                images_collected,
+                images_expected,
+                ratio,
+                PARTIAL_SCAN_MIN_RATIO,
+            )
     # BC-067: partial-inventory guard. If the scout's SBOM count dropped
     # dramatically vs. the rolling baseline (socket hiccup, syft crashed on
     # one image), reconcile would mass-close everything missing from the
     # shrunk set — then re-flag them all as regressions on the next scan.
     # Skip reconcile when the signal looks like noise, but still save new
-    # findings (candidates path above is unaffected).
-    if _is_partial_inventory(host, sbom_count):
+    # findings (candidates path above is unaffected). Applies only if BC-106
+    # explicit check didn't already skip.
+    if explicit_partial:
+        regressed, auto_fixed, regressed_from_auto_fix = [], [], []
+    elif _is_partial_inventory(host, sbom_count):
         _audit.append(
             "reconcile_skipped_partial_inventory",
             host=host,
+            reason="bc_067_baseline",
             sbom_count=sbom_count or 0,
             baseline=_scout_sbom_baseline.get(host, 0),
         )

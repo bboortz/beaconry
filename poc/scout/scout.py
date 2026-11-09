@@ -132,6 +132,12 @@ _started: bool = False
 _last_scan_ts: int = 0
 _images_seen: int = 0
 _bytes_posted: int = 0
+# BC-106: per-scan completeness counts. `expected` is SCOUT_INCLUDE
+# matches; `collected` is images that syft produced an SBOM for. Hub
+# compares the ratio to `BEACONRY_PARTIAL_SCAN_MIN_RATIO` and skips
+# reconcile when partial.
+_last_scan_images_expected: int = 0
+_last_scan_images_collected: int = 0
 SCOUT_VERSION = SOFTWARE_VERSION  # BC-062: single source of truth = VERSION file
 
 # BC-037: on-demand scan trigger. Single-threaded event loop → a bool is a
@@ -315,6 +321,13 @@ def scan_docker_images() -> list[
             )
     if cache_hits:
         log.info("Cache: %d/%d image(s) skipped (digest unchanged)", cache_hits, len(matching))
+    # BC-106: expose per-scan counts for the POST payload. `expected` is the
+    # number of images the SCOUT_INCLUDE filter matched (what we tried);
+    # `collected` is what syft actually produced an SBOM for. The diff
+    # (= syft failures / timeouts) feeds hub's partial-inventory guard.
+    global _last_scan_images_expected, _last_scan_images_collected
+    _last_scan_images_expected = len(matching)
+    _last_scan_images_collected = len(results)
     return results
 
 
@@ -489,6 +502,14 @@ def collect_and_post():  # pragma: no cover - orchestrator; integration-tested l
         "sboms": sboms,
         "open_ports": open_ports,
         "container_exposure": container_exposure,
+        # BC-106: explicit per-scan completeness. Hub compares to the
+        # BEACONRY_PARTIAL_SCAN_MIN_RATIO threshold; when below, reconcile
+        # is skipped (findings still ingested). Backward compat: pre-BC-106
+        # hubs ignore these keys, pre-BC-106 scouts omit them → BC-067
+        # baseline heuristic is the fallback on both sides.
+        "images_expected": _last_scan_images_expected,
+        "images_collected": _last_scan_images_collected,
+        "scan_complete": _last_scan_images_expected == _last_scan_images_collected,
     }
     try:
         body = json.dumps(payload)
