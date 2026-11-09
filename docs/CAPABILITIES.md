@@ -1801,6 +1801,15 @@ Enforcement: `poc/scripts/verify_traceability.py` runs as part of `make check`. 
 - **verified by:**
   - `poc/tests/integration/test_BC_093_rescan_hooks.py`
 
+### CAP-T218: Finding state machine extension (`fixing` + `rolled_back`) + validation + stale sweep
+- **type:** technical
+- **status:** active
+- **origin:** BC-116 — BC-067 audit flagged missing statuses for in-flight fixes + post-rollback terminals. Pre-BC-116 `set_status` wrote any string verbatim; a typo like `"accetped"` silently landed in the DB. `_handle_fix` kept status=`open` throughout the ~5-30s executor window — operators had no visibility into fixes in flight, and a hub crash mid-fix left no trace.
+- **description:** `poc/hub/hub.py` adds `_VALID_STATUSES: frozenset[str]` enumerating the 10 statuses (8 existing + `fixing` transient + `rolled_back` reserved). `set_status` validates against this set — a typo raises `ValueError` with the valid-set hint. `_handle_fix` transitions `open → fixing` before `EXECUTOR.execute` and back to `open` on any non-success path (executor fail, non-docker finding, verify_fix clean=False). On happy path the existing `set_status("fixed")` lands as before. New `stale_fixing_sweep(now_ts=None)` reverts `fixing` rows older than `BEACONRY_FIXING_TIMEOUT_S` (default 600s) back to `open` and emits `fix_timeout` audit events with `{finding_id, host, cve_id, stuck_since, reverted_at, timeout_s}`. `_stale_fixing_loop_forever` runs it every `BEACONRY_FIXING_SWEEP_INTERVAL_S` (default 60s) from lifespan. No schema migration — `status` column is TEXT with no CHECK constraint. `rolled_back` is reserved for a future `ExecutorPlugin.undo()` story (IDEAS.md line 128).
+- **supports:** CAP-T047, CAP-T165, CAP-B023
+- **verified by:**
+  - `poc/tests/unit/test_BC_116_finding_state_machine.py`
+
 ### CAP-T217: Audit log sticky degraded-mode flag
 - **type:** technical
 - **status:** active
