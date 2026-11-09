@@ -192,9 +192,14 @@ class TelegramAdapter(NotificationAdapter):
         kwargs: dict = {"chat_id": int(chat_id), "text": text, "parse_mode": "HTML"}
         if reply_markup_json is not None:
             try:
-                from telegram import InlineKeyboardMarkup
+                # pyright: ignore[reportAttributeAccessIssue] — CI pyright
+                # cannot resolve python-telegram-bot's lazy re-export of
+                # InlineKeyboardMarkup through `telegram/__init__.py`;
+                # runtime import works locally + on the deployed hub.
+                import telegram as _telegram  # pyright: ignore[reportAttributeAccessIssue]
 
-                kwargs["reply_markup"] = InlineKeyboardMarkup.de_json(
+                markup_cls = _telegram.InlineKeyboardMarkup  # pyright: ignore[reportAttributeAccessIssue]
+                kwargs["reply_markup"] = markup_cls.de_json(
                     __import__("json").loads(reply_markup_json), tg_app.bot
                 )
             except Exception as exc:  # noqa: BLE001

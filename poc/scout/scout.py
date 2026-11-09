@@ -25,7 +25,7 @@ import os
 import subprocess
 import sys
 import time
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
 from pathlib import Path
 
 import docker
@@ -122,6 +122,42 @@ DOCKER_EVENTS_ENABLED = os.environ.get("BEACONRY_DOCKER_EVENTS_ENABLED", "1") !=
 # Debounce window — compose up pulling N images fires one scan DEBOUNCE_S
 # after the last event, not N scans back-to-back.
 DOCKER_EVENTS_DEBOUNCE_S = max(1, int(os.environ.get("BEACONRY_DOCKER_EVENTS_DEBOUNCE_S") or "10"))
+
+# BC-107: scout-side persistent retry queue for failed /scan POSTs. Mirrors
+# BC-104's hub-side `pending_notifications`. Scout had no DB pre-BC-107 —
+# this is the first persistent file scout owns (`/data/scout-state.db`).
+# `MAX_ATTEMPTS=1` effectively disables retry (one try then drop — matches
+# pre-BC-107 behavior for operators who want air-gap sim).
+SCOUT_STATE_DB_PATH = os.environ.get("BEACONRY_SCOUT_STATE_DB", "/data/scout-state.db")
+
+
+def _parse_positive_int(raw: str | None, default: int, name: str) -> int:
+    try:
+        v = int(raw) if raw is not None else default
+    except ValueError:
+        log.warning("%s=%r invalid; using %d", name, raw, default)
+        return default
+    if v < 1:
+        log.warning("%s=%d must be >= 1; using %d", name, v, default)
+        return default
+    return v
+
+
+POST_RETRY_MAX_ATTEMPTS = _parse_positive_int(
+    os.environ.get("BEACONRY_SCOUT_POST_RETRY_MAX_ATTEMPTS"),
+    5,
+    "BEACONRY_SCOUT_POST_RETRY_MAX_ATTEMPTS",
+)
+POST_RETRY_BASE_S = _parse_positive_int(
+    os.environ.get("BEACONRY_SCOUT_POST_RETRY_BASE_S"),
+    30,
+    "BEACONRY_SCOUT_POST_RETRY_BASE_S",
+)
+POST_RETRY_SWEEP_INTERVAL_S = _parse_positive_int(
+    os.environ.get("BEACONRY_SCOUT_POST_RETRY_SWEEP_INTERVAL_S"),
+    60,
+    "BEACONRY_SCOUT_POST_RETRY_SWEEP_INTERVAL_S",
+)
 
 # BC-005 defaults — demo-safe allowlist, no excludes by default.
 DEFAULT_INCLUDE_GLOBS = "nginx*,redis*,postgres*"
@@ -439,7 +475,6 @@ def collect_and_post():  # pragma: no cover - orchestrator; integration-tested l
     log.info("Scan starting — host: %s", HOST_NAME)
     sboms: list[dict] = []
     images_seen = 0
-    bytes_posted = 0
 
     try:
         docker_sboms = scan_docker_images()
@@ -513,31 +548,210 @@ def collect_and_post():  # pragma: no cover - orchestrator; integration-tested l
     }
     try:
         body = json.dumps(payload)
-        bytes_posted = len(body)
-        _bytes_posted = bytes_posted
-        # BC-055: attach Bearer when HUB_TOKEN is set; empty = no header
-        # (back-compat for single-host operators who don't need auth).
-        headers = {
-            "Content-Type": "application/json",
-            # BC-062: tell the hub which API we expect. Soft by default
-            # (warns) — hard-fails only when the hub runs with
-            # BEACONRY_STRICT_API=1.
-            "X-Beaconry-API-Expect": str(CLIENT_API_VERSION),
-        }
-        # BC-075: explicit per-scout metrics opt-in. Hub honors by writing
-        # the metrics-fuel audit event ONLY when the header is present.
-        if SCOUT_METRICS_ENABLED:
-            headers["X-Beaconry-Metrics-Opt-In"] = "1"
-        token = os.environ.get("HUB_TOKEN", "")
-        if token:
-            headers["Authorization"] = f"Bearer {token}"
+    except (TypeError, ValueError) as e:
+        log.error("Failed to serialize SBOM payload: %s", e)
+        return
+    _bytes_posted = len(body)
+    ok, err, data = _post_scan_body(body)
+    if ok:
+        findings = (data or {}).get("findings", 0) if isinstance(data, dict) else 0
+        log.info("Hub response: %d new finding(s)", findings)
+        _started = True
+    else:
+        log.error("Failed to post to hub: %s", err)
+        # BC-107: persist to pending_scans so a retry sweep can replay it.
+        # Pre-BC-107 the SBOM was dropped here with only a log line.
+        _queue_pending_scan(body, err)
+
+
+# ── BC-107 — Scout POST retry queue ──────────────────────────────────────────
+
+
+def _init_scout_db() -> None:
+    """BC-107: ensure `scout-state.db` exists with the `pending_scans` table.
+
+    Called once from lifespan. Safe to re-run (CREATE TABLE IF NOT EXISTS).
+    If the DB can't be opened (read-only mount, permission denied), scout
+    continues — retry queue is best-effort; without it we degrade to
+    pre-BC-107 behavior (log + drop).
+    """
+    import sqlite3
+
+    db_dir = os.path.dirname(SCOUT_STATE_DB_PATH)
+    if db_dir:
+        with suppress(OSError):
+            os.makedirs(db_dir, exist_ok=True)
+    try:
+        con = sqlite3.connect(SCOUT_STATE_DB_PATH)
+    except sqlite3.OperationalError as e:
+        log.warning("BC-107: can't open scout-state.db at %s: %s", SCOUT_STATE_DB_PATH, e)
+        return
+    try:
+        con.execute("""
+            CREATE TABLE IF NOT EXISTS pending_scans (
+                id              INTEGER PRIMARY KEY AUTOINCREMENT,
+                payload_json    TEXT NOT NULL,
+                created_ts      INTEGER NOT NULL,
+                attempts        INTEGER NOT NULL DEFAULT 0,
+                next_attempt_ts INTEGER NOT NULL,
+                last_error      TEXT
+            )
+        """)
+        con.commit()
+    finally:
+        con.close()
+
+
+def _post_scan_body(body: str) -> tuple[bool, str, object | None]:
+    """BC-107: single-attempt POST to hub /scan.
+
+    Returns `(ok, error_message, response_body_or_None)`. Pulled out of
+    `collect_and_post` so the retry sweep replays through the same code
+    path — same headers, token, URL, timeout. Any divergence between
+    first-try and retry path is a bug magnet.
+    """
+    headers = {
+        "Content-Type": "application/json",
+        "X-Beaconry-API-Expect": str(CLIENT_API_VERSION),
+    }
+    if SCOUT_METRICS_ENABLED:
+        headers["X-Beaconry-Metrics-Opt-In"] = "1"
+    token = os.environ.get("HUB_TOKEN", "")
+    if token:
+        headers["Authorization"] = f"Bearer {token}"
+    try:
         resp = requests.post(f"{HUB_URL}/scan", data=body, headers=headers, timeout=1800)
         resp.raise_for_status()
-        data = resp.json()
-        log.info("Hub response: %d new finding(s)", data.get("findings", 0))
-        _started = True
+        try:
+            data = resp.json()
+        except ValueError:
+            data = None
+        return True, "", data
     except requests.RequestException as e:
-        log.error("Failed to post to hub: %s", e)
+        return False, str(e), None
+
+
+def _queue_pending_scan(payload_json: str, error: str) -> None:
+    """BC-107: persist a failed /scan POST to `pending_scans`.
+
+    Called from `collect_and_post`'s exception branch. Scheduled for
+    replay at `now + POST_RETRY_BASE_S`.
+    """
+    import sqlite3
+
+    now = int(time.time())
+    try:
+        con = sqlite3.connect(SCOUT_STATE_DB_PATH)
+    except sqlite3.OperationalError:
+        log.warning("BC-107: can't open DB to queue pending scan")
+        return
+    try:
+        con.execute(
+            "INSERT INTO pending_scans "
+            "(payload_json, created_ts, attempts, next_attempt_ts, last_error) "
+            "VALUES (?, ?, 0, ?, ?)",
+            (payload_json, now, now + POST_RETRY_BASE_S, error[:400]),
+        )
+        con.commit()
+        log.warning("BC-107: scan_queued size_bytes=%d err=%s", len(payload_json), error[:200])
+    except sqlite3.OperationalError as e:
+        log.warning("BC-107: failed to queue pending scan: %s", e)
+    finally:
+        con.close()
+
+
+def post_retry_sweep(now_ts: int | None = None) -> dict[str, int]:
+    """BC-107: process due rows in `pending_scans`.
+
+    Mirror of hub's BC-104 `notify_retry_sweep`. Returns counts dict
+    `{delivered, requeued, abandoned}` for tests + logging.
+
+    For each due row:
+      - call `_post_scan_body(payload_json)`;
+      - on success → DELETE + log `scan_delivered`;
+      - on failure → bump `attempts`; if `attempts >= MAX_ATTEMPTS`,
+        DELETE + log `scan_abandoned`; else update
+        `next_attempt_ts = now + base × 2^attempts`.
+    """
+    import sqlite3
+
+    now = now_ts if now_ts is not None else int(time.time())
+    counts = {"delivered": 0, "requeued": 0, "abandoned": 0}
+    try:
+        con = sqlite3.connect(SCOUT_STATE_DB_PATH)
+    except sqlite3.OperationalError:
+        return counts
+    try:
+        rows = con.execute(
+            "SELECT id, payload_json, attempts FROM pending_scans "
+            "WHERE next_attempt_ts <= ? ORDER BY id ASC",
+            (now,),
+        ).fetchall()
+    except sqlite3.OperationalError:
+        con.close()
+        return counts
+
+    for row_id, payload_json, attempts in rows:
+        ok, err, _data = _post_scan_body(payload_json)
+        if ok:
+            con.execute("DELETE FROM pending_scans WHERE id=?", (row_id,))
+            counts["delivered"] += 1
+            log.info(
+                "BC-107: scan_delivered id=%d retry_attempts=%d",
+                row_id,
+                int(attempts) + 1,
+            )
+        else:
+            new_attempts = int(attempts) + 1
+            if new_attempts >= POST_RETRY_MAX_ATTEMPTS:
+                con.execute("DELETE FROM pending_scans WHERE id=?", (row_id,))
+                counts["abandoned"] += 1
+                log.warning(
+                    "BC-107: scan_abandoned id=%d attempts=%d err=%s",
+                    row_id,
+                    new_attempts,
+                    err[:200],
+                )
+            else:
+                backoff = POST_RETRY_BASE_S * (2**new_attempts)
+                con.execute(
+                    "UPDATE pending_scans SET attempts=?, next_attempt_ts=?, last_error=? "
+                    "WHERE id=?",
+                    (new_attempts, now + backoff, err[:400], row_id),
+                )
+                counts["requeued"] += 1
+    con.commit()
+    con.close()
+    return counts
+
+
+async def _post_retry_loop_forever() -> None:  # pragma: no cover - infinite async loop
+    """BC-107: background sweep. Cadence = POST_RETRY_SWEEP_INTERVAL_S."""
+    while True:
+        try:
+            await asyncio.to_thread(post_retry_sweep)
+        except Exception as e:  # noqa: BLE001
+            log.warning("BC-107: post retry sweep failed: %s", e)
+        await asyncio.sleep(POST_RETRY_SWEEP_INTERVAL_S)
+
+
+def _pending_scans_queue_depth() -> int:
+    """BC-107: /healthz key — count of pending_scans rows. Non-zero means
+    the hub was unreachable at least once since this scout started and
+    the payload is awaiting retry."""
+    import sqlite3
+
+    try:
+        con = sqlite3.connect(SCOUT_STATE_DB_PATH)
+    except sqlite3.OperationalError:
+        return 0
+    try:
+        row = con.execute("SELECT COUNT(*) FROM pending_scans").fetchone()
+        return int(row[0]) if row else 0
+    except sqlite3.OperationalError:
+        return 0
+    finally:
+        con.close()
 
 
 # ── Health providers for build_router ─────────────────────────────────────────
@@ -554,6 +768,9 @@ def _scout_healthz_summary() -> dict:
         "last_scan_ts": _last_scan_ts,
         "images_seen": _images_seen,
         "bytes_posted": _bytes_posted,
+        # BC-107: non-zero = hub was unreachable at least once since this
+        # scout started and the SBOM is awaiting retry.
+        "pending_scans_queue_depth": _pending_scans_queue_depth(),
     }
     degraded = not _docker_socket_ok
     return {
@@ -782,7 +999,15 @@ async def lifespan(_app: FastAPI):
         SCAN_INTERVAL,
         SCOUT_HEARTBEAT_INTERVAL_S,
     )
-    tasks: list[asyncio.Task[None]] = [asyncio.create_task(_scan_loop_forever())]
+    # BC-107: ensure scout-state.db + pending_scans table exist before the
+    # scan loop or retry sweep try to write to them.
+    _init_scout_db()
+    tasks: list[asyncio.Task[None]] = [
+        asyncio.create_task(_scan_loop_forever()),
+        # BC-107: pulls failed POSTs from pending_scans and replays through
+        # `_post_scan_body` with exponential backoff.
+        asyncio.create_task(_post_retry_loop_forever()),
+    ]
     if SCOUT_HEARTBEAT_INTERVAL_S > 0:
         tasks.append(asyncio.create_task(_heartbeat_loop_forever()))
     else:

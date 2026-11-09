@@ -1801,6 +1801,15 @@ Enforcement: `poc/scripts/verify_traceability.py` runs as part of `make check`. 
 - **verified by:**
   - `poc/tests/integration/test_BC_093_rescan_hooks.py`
 
+### CAP-T209: Scout-side POST retry queue with persistent backoff
+- **type:** technical
+- **status:** active
+- **origin:** BC-107 — pre-BC-107 a transient hub outage (ISP drop, 503, connection refused) during `collect_and_post` logged `"Failed to post to hub"` and dropped that cycle's SBOM forever. Mirror of the gap BC-104 closed on hub → Telegram; now closed on scout → hub.
+- **description:** Scout gets its first persistent file `{BEACONRY_SCOUT_STATE_DB}/scout-state.db` (default `/data/scout-state.db`) with a `pending_scans` table (`id, payload_json, created_ts, attempts, next_attempt_ts, last_error`). `_init_scout_db` creates it in lifespan; `_queue_pending_scan` persists on POST failure; `post_retry_sweep` replays due rows via the shared `_post_scan_body` helper (same headers, token, URL, timeout as the main path). Success → DELETE + `scan_delivered` log; failure beyond `BEACONRY_SCOUT_POST_RETRY_MAX_ATTEMPTS` (default 5) → DELETE + `scan_abandoned`; else exponential backoff `BASE_S × 2^attempts` (30→60→120→240→480s). `/healthz` summary exposes `pending_scans_queue_depth` so operators see backlog at a glance. State survives scout restart.
+- **supports:** CAP-T206, CAP-B023
+- **verified by:**
+  - `poc/tests/unit/test_BC_107_scout_post_retry.py`
+
 ### CAP-T208: Scout-reported inventory completeness + hub threshold-based reconcile skip
 - **type:** technical
 - **status:** active
