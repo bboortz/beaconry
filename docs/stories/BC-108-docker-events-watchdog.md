@@ -1,7 +1,7 @@
 ---
 id: BC-108
 title: Docker events watchdog — reconnect on daemon restart
-status: in-progress
+status: shipped
 created: 2026-11-09
 branch: feat/BC-108-docker-events-watchdog
 plan: docs/plan/BC-108-docker-events-watchdog-plan.md
