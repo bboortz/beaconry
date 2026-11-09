@@ -1,7 +1,7 @@
 ---
 id: BC-105
 title: `make findings` surfaces FIRST SEEN + LAST CHANGE + close_reason
-status: in-progress
+status: shipped
 created: 2026-11-09
 branch: feat/BC-105-findings-cli-lifecycle
 plan: docs/plan/BC-105-findings-cli-lifecycle-plan.md
