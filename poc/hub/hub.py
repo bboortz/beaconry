@@ -3179,10 +3179,19 @@ def _hub_healthz_summary() -> dict:
         "grype_db_update_attempts": _grype_db_update_attempts,
         "grype_db_last_update_ts": _grype_db_last_update_ts,
         "grype_db_last_error": _grype_db_last_error,
+        # BC-115: audit-log write health. `audit_degraded=True` means the
+        # LAST write attempt failed (sticky until the next success).
+        # `audit_write_failures` is cumulative since hub start — a non-zero
+        # count that stabilizes means the audit layer recovered; a count
+        # still climbing means the problem persists (disk full, perms).
+        **_audit.status(),
     }
     # KEV is non-fatal — stale/unfetched surface in /healthz but don't flip "degraded".
     # BC-066: executor is a policy label, not a health signal — exclude it too.
     # BC-086: auto_fix_threshold is a config echo, not a health signal — exclude.
+    # BC-109: grype_db retry counters/last_error are informational — exclude.
+    # BC-115: audit health surfaces separately; exclude from aggregate degraded
+    # check (operators see `audit_degraded=True` directly in checks block).
     bool_checks = [
         v
         for k, v in checks.items()
@@ -3194,6 +3203,12 @@ def _hub_healthz_summary() -> dict:
             "kev_count",
             "executor",
             "auto_fix_threshold",
+            "grype_db_update_attempts",
+            "grype_db_last_update_ts",
+            "grype_db_last_error",
+            "audit_degraded",
+            "audit_write_failures",
+            "audit_last_error",
         )
     ]
     degraded = any(v not in ("ok", "polling", "mock") for v in bool_checks)
