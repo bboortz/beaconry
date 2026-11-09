@@ -108,4 +108,4 @@ Lifecycle: `draft → ready → in-progress → shipped`. Status matches each st
 | BC-113 | /scan payload size limit — DoS guard                                    | shipped     | — (merged to dev)                   |
 | BC-114 | Reconcile TOCTOU lock — serialize concurrent writes during auto-close   | shipped     | — (merged to dev)                   |
 | BC-115 | Audit write failure sticky flag — surface disk-full degradation         | shipped     | — (merged to dev)                   |
-| BC-116 | Finding state machine extension — add `fixing` + `rolled_back` statuses | in-progress | feat/BC-116-finding-state-machine   |
+| BC-116 | Finding state machine extension — add `fixing` + `rolled_back` statuses | shipped     | — (merged to dev)                   |

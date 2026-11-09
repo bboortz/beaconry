@@ -1,7 +1,7 @@
 ---
 id: BC-116
 title: Finding state machine extension — add `fixing` + `rolled_back` statuses
-status: in-progress
+status: shipped
 created: 2026-11-09
 branch: feat/BC-116-finding-state-machine
 plan: docs/plan/BC-116-finding-state-machine-plan.md
