@@ -69,6 +69,8 @@ services:
       # BC-112: /scan/trigger proxy retry on transient scout unreachability.
       - BEACONRY_SCAN_TRIGGER_MAX_ATTEMPTS=${BEACONRY_SCAN_TRIGGER_MAX_ATTEMPTS:-3}
       - BEACONRY_SCAN_TRIGGER_BASE_S=${BEACONRY_SCAN_TRIGGER_BASE_S:-1}
+      # BC-113: /scan payload size limit — DoS guard against crafted huge SBOMs.
+      - BEACONRY_SCAN_MAX_PAYLOAD_BYTES=${BEACONRY_SCAN_MAX_PAYLOAD_BYTES:-52428800}
       # BC-089: snooze buttons + sweep.
       - BEACONRY_SNOOZE_DEFAULT_HOURS=${BEACONRY_SNOOZE_DEFAULT_HOURS:-1,4,24,168}
       - BEACONRY_SNOOZE_SWEEP_INTERVAL_S=${BEACONRY_SNOOZE_SWEEP_INTERVAL_S:-60}
