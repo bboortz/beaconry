@@ -96,3 +96,4 @@ Lifecycle: `draft → ready → in-progress → shipped`. Status matches each st
 | BC-101 | Dev-compose containers renamed to avoid collision with systemd scout     | shipped     | — (merged to dev)                   |
 | BC-102 | Hub-side scout-offline Telegram alert + stale-scout findings reconcile  | shipped     | — (merged to dev)                   |
 | BC-103 | Scout rescans on image/container `delete` + `destroy` + `die` events   | shipped     | — (merged to dev)                   |
+| BC-104 | Notification retry queue — Telegram outage no longer drops alerts       | in-progress | feat/BC-104-notify-retry-queue      |

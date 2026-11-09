@@ -4,6 +4,23 @@ All notable changes to beaconry are recorded here. The format is based
 on [Keep a Changelog](https://keepachangelog.com/), and this project
 follows [Semantic Versioning](https://semver.org/).
 
+## [v0.19.0] — 2026-11-09
+
+### Added (BC-104)
+
+- **Persistent notification retry queue** for Telegram deliveries.
+  Pre-BC-104: a transient Telegram outage during `notify_*` dispatch
+  emitted `notify_sent_failed` + the alert was LOST. Now every failed
+  delivery persists to the new `pending_notifications` table
+  (schema v8 → v9). Background `_notify_retry_loop_forever` sweep
+  retries due rows with exponential backoff
+  (`BASE_S × 2^attempt` — default 30→60→120→240→480s).
+  Success → `notify_delivered` audit + row deleted. After
+  `BEACONRY_NOTIFY_RETRY_MAX_ATTEMPTS` tries →
+  `notify_abandoned` audit + row deleted. State survives hub
+  restart. Three new env vars documented in VARIABLES.md.
+- **CAP-T206** registered.
+
 ## [v0.18.1] — 2026-11-08
 
 ### Changed (BC-103)
