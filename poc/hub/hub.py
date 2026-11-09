@@ -113,6 +113,24 @@ def _parse_positive_int_hub(raw: str | None, default: int, name: str) -> int:
     return v
 
 
+# BC-112: scan-trigger proxy retry. `/scan/trigger` hub→scout POST
+# occasionally fails with a transient compose-DNS blip or scout-busy
+# momentary refusal. Pre-BC-112 operator saw 503 on first failure.
+# BC-112 retries up to N times with short backoff (short because the
+# operator's HTTP request is blocked while we retry — total wait
+# bounded). Defaults: 3 attempts × ~1s/2s backoff → ~15s worst case
+# (plus the 5s timeout per attempt = ~18s absolute cap).
+SCAN_TRIGGER_MAX_ATTEMPTS = _parse_positive_int_hub(
+    os.environ.get("BEACONRY_SCAN_TRIGGER_MAX_ATTEMPTS"),
+    3,
+    "BEACONRY_SCAN_TRIGGER_MAX_ATTEMPTS",
+)
+SCAN_TRIGGER_BASE_S = _parse_positive_int_hub(
+    os.environ.get("BEACONRY_SCAN_TRIGGER_BASE_S"),
+    1,
+    "BEACONRY_SCAN_TRIGGER_BASE_S",
+)
+
 # BC-110: verify-probe retry. Probes that fire immediately after
 # `docker restart` can miss the service during its port-bind / healthcheck
 # `starting → healthy` transition. Pre-BC-110 a single-ms miss flagged
@@ -2913,34 +2931,72 @@ async def http_patch_finding(finding_id: str, payload: dict) -> dict:
     }
 
 
+def _scan_trigger_once(
+    scout_url: str,
+) -> tuple[int | None, str | None, str | None]:
+    """BC-112: single-attempt POST to scout. Returns
+    `(status_code, body_or_None, transport_error_or_None)`.
+
+    Shared by the retry loop so first-try and retry go through the
+    same code path. `status_code` is set on both success and 4xx-5xx
+    (HTTPError.code); `transport_error` is set only when the socket
+    layer fails (DNS, connection refused, timeout) — the kind of
+    failure that justifies a retry.
+    """
+    import urllib.error
+    import urllib.request
+
+    req = urllib.request.Request(scout_url, method="POST", data=b"")
+    try:
+        with urllib.request.urlopen(req, timeout=5) as resp:  # noqa: S310 — internal URL
+            return resp.status, resp.read().decode() or "{}", None
+    except urllib.error.HTTPError as exc:
+        # 4xx/5xx is a real response from scout — don't retry on, e.g., 401.
+        return exc.code, exc.read().decode()[:200], None
+    except (urllib.error.URLError, ConnectionError, TimeoutError, OSError) as exc:
+        return None, None, exc.__class__.__name__
+
+
 @api.post("/scan/trigger", dependencies=[Depends(require_cli_token)])
 async def http_scan_trigger() -> dict:
     """BC-055: proxy to the scout's local scan trigger.
 
     Scout stays bound inside the compose network — no host-side port
     exposure. The hub reaches it on `scout:8001` (Docker DNS).
-    """
-    import urllib.error
-    import urllib.request
 
+    BC-112: retry on transport failure (DNS blip, connection refused,
+    timeout) up to `BEACONRY_SCAN_TRIGGER_MAX_ATTEMPTS` with short
+    backoff. 4xx/5xx from scout are NOT retried — those are real
+    responses the operator should see.
+    """
     scout_url = os.environ.get("SCOUT_TRIGGER_URL", "http://scout:8001/scan/trigger")
-    req = urllib.request.Request(scout_url, method="POST", data=b"")
-    try:
-        with urllib.request.urlopen(req, timeout=5) as resp:  # noqa: S310 — internal URL
-            status_code = resp.status
-            body = resp.read().decode() or "{}"
-    except urllib.error.HTTPError as exc:
-        return {"status": "error", "code": exc.code, "detail": exc.read().decode()[:200]}
-    except (urllib.error.URLError, ConnectionError, TimeoutError, OSError) as exc:
-        raise HTTPException(
-            status_code=503, detail=f"scout unreachable: {exc.__class__.__name__}"
-        ) from exc
-    try:
-        parsed = json.loads(body)
-    except json.JSONDecodeError:
-        parsed = {"raw": body[:200]}
-    parsed.setdefault("code", status_code)
-    return parsed
+    last_err = "no attempts"
+    for attempt in range(1, SCAN_TRIGGER_MAX_ATTEMPTS + 1):
+        status_code, body, transport_err = await asyncio.to_thread(_scan_trigger_once, scout_url)
+        if transport_err is None:
+            # 2xx or 4xx/5xx — a real response. Success or non-retryable error.
+            if status_code is not None and 200 <= status_code < 300:
+                parsed: dict[str, object]
+                try:
+                    parsed = json.loads(body or "{}")
+                except json.JSONDecodeError:
+                    parsed = {"raw": (body or "")[:200]}
+                parsed.setdefault("code", status_code)
+                if attempt > 1:
+                    parsed["retry_attempts"] = attempt
+                return parsed
+            return {
+                "status": "error",
+                "code": status_code,
+                "detail": (body or "")[:200],
+            }
+        last_err = transport_err
+        if attempt < SCAN_TRIGGER_MAX_ATTEMPTS:
+            await asyncio.sleep(SCAN_TRIGGER_BASE_S * (2 ** (attempt - 1)))
+    raise HTTPException(
+        status_code=503,
+        detail=f"scout unreachable after {SCAN_TRIGGER_MAX_ATTEMPTS} attempt(s): {last_err}",
+    )
 
 
 def _grype_db_dir() -> Path:
