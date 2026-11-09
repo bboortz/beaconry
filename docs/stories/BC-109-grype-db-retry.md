@@ -1,7 +1,7 @@
 ---
 id: BC-109
 title: Grype DB update retry — hub recovers from transient network failure
-status: in-progress
+status: shipped
 created: 2026-11-09
 branch: feat/BC-109-grype-db-retry
 plan: docs/plan/BC-109-grype-db-retry-plan.md
