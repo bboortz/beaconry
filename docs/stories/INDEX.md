@@ -99,4 +99,4 @@ Lifecycle: `draft → ready → in-progress → shipped`. Status matches each st
 | BC-104 | Notification retry queue — Telegram outage no longer drops alerts       | shipped     | — (merged to dev)                   |
 | BC-105 | `make findings` shows FIRST SEEN + LAST CHANGE + auto-close reason     | shipped     | — (merged to dev)                |
 | BC-106 | Partial-inventory guard strengthened — scout reports expected/collected| shipped     | — (merged to dev)               |
-| BC-107 | Scout POST retry queue — no SBOM silently dropped on hub outage         | in-progress | feat/BC-107-scout-post-retry-queue  |
+| BC-107 | Scout POST retry queue — no SBOM silently dropped on hub outage         | shipped     | — (merged to dev)                   |

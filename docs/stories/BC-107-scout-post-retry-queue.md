@@ -1,7 +1,7 @@
 ---
 id: BC-107
 title: Scout POST retry queue — no SBOM silently dropped on hub outage
-status: in-progress
+status: shipped
 created: 2026-11-09
 branch: feat/BC-107-scout-post-retry-queue
 plan: docs/plan/BC-107-scout-post-retry-queue-plan.md
