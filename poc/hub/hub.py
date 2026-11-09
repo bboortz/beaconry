@@ -96,6 +96,43 @@ MOCK = os.environ.get("BEACONRY_MOCK") == "1"
 # python-telegram-bot against telegram-mock while still skipping the heavy
 # grype DB download. MOCK=1 remains a back-compat alias (sets both).
 SKIP_GRYPE_DB = os.environ.get("BEACONRY_SKIP_GRYPE_DB") == "1" or MOCK
+
+
+def _parse_positive_int_hub(raw: str | None, default: int, name: str) -> int:
+    """BC-109: lenient env parse — invalid / non-positive → default + warn.
+    Lives here (vs `os.environ.get(...)` + `int(...)`) so a typo in
+    BEACONRY_GRYPE_DB_* doesn't crash hub startup."""
+    try:
+        v = int(raw) if raw is not None else default
+    except ValueError:
+        log.warning("%s=%r invalid; using %d", name, raw, default)
+        return default
+    if v < 1:
+        log.warning("%s=%d must be >= 1; using %d", name, v, default)
+        return default
+    return v
+
+
+# BC-109: grype DB update retry — wrap the startup `grype db update` in
+# a retry loop with capped exponential backoff. Pre-BC-109 a transient
+# network failure (timeout, 5xx, incomplete download) logged a warning
+# and left the hub serving broken CVE matching until manual restart.
+# /readyz already gates on `check_dir_populated(_grype_db_dir())` so
+# compose keeps the hub unhealthy until this task succeeds — operators
+# downstream (scout via depends_on: service_healthy) block correctly.
+GRYPE_DB_RETRY_BASE_S = _parse_positive_int_hub(
+    os.environ.get("BEACONRY_GRYPE_DB_RETRY_BASE_S"),
+    10,
+    "BEACONRY_GRYPE_DB_RETRY_BASE_S",
+)
+GRYPE_DB_BACKOFF_MAX_S = max(
+    GRYPE_DB_RETRY_BASE_S,
+    _parse_positive_int_hub(
+        os.environ.get("BEACONRY_GRYPE_DB_BACKOFF_MAX_S"),
+        600,
+        "BEACONRY_GRYPE_DB_BACKOFF_MAX_S",
+    ),
+)
 # When set, hub's python-telegram-bot client talks here instead of
 # api.telegram.org. Enables e2e via `telegram-mock` service + dev-without-
 # real-bot workflows. Empty = default Telegram API.
@@ -316,6 +353,13 @@ tg_app: Application | None = None
 # by receive_scan so /healthz can report liveness-in-practice.
 _startup_complete: bool = False
 _last_scan_ts: int = 0
+# BC-109: counters for the grype-db retry loop. Operators see these via
+# /healthz so a flaky grype DB download isn't silent. `_last_update_ts`
+# bumps on every successful `grype db update`; `_last_error` carries the
+# most recent failure (first 400 chars, truncated).
+_grype_db_update_attempts: int = 0
+_grype_db_last_update_ts: int = 0
+_grype_db_last_error: str = ""
 # BC-067: per-host rolling SBOM-count baseline. In-memory only (resets on
 # hub restart; good enough — a partial scan right after restart is
 # survivable, the harmful case is "hub up for days, scout glitches
@@ -2317,22 +2361,26 @@ async def lifespan(  # noqa: PLR0915 - orchestration function; each background t
 
     # BC-018: dial 1 — grype DB download. Skipped in MOCK or when the
     # dedicated BEACONRY_SKIP_GRYPE_DB flag is set (e.g., e2e stacks).
+    # BC-109: single-shot replaced with retry loop. Try once synchronously
+    # so the common case (healthy network) still finishes before
+    # `_startup_complete = True`. On failure, spawn a background task
+    # that keeps retrying with capped exponential backoff; /readyz stays
+    # 503 for the grype_db provider (empty dir) until the task succeeds.
+    _grype_db_task: asyncio.Task[None] | None = None
     if SKIP_GRYPE_DB:
         log.info("Skipping grype vulnerability database update (SKIP_GRYPE_DB=1)")
     else:
         log.info("Updating grype vulnerability database (first run: ~200MB download)…")
-        proc = await asyncio.create_subprocess_exec(
-            "grype",
-            "db",
-            "update",
-            stdout=asyncio.subprocess.PIPE,
-            stderr=asyncio.subprocess.PIPE,
-        )
-        _, stderr = await proc.communicate()
-        if proc.returncode != 0:
-            log.warning("grype db update warning: %s", stderr.decode()[:200])
-        else:
+        ok, err = await _grype_db_update_once()
+        if ok:
             log.info("Grype vulnerability database ready")
+        else:
+            log.warning(
+                "grype db update failed (%s) — starting retry loop; /readyz will "
+                "stay 503 for grype_db until it succeeds",
+                err[:200],
+            )
+            _grype_db_task = asyncio.create_task(_grype_db_update_retry_loop_forever())
     _startup_complete = True
 
     # BC-018: dial 2 — Telegram wiring. Driven by TELEGRAM_BOT_TOKEN presence.
@@ -2874,6 +2922,71 @@ def _grype_db_dir() -> Path:
     return Path(os.environ.get("GRYPE_DB_CACHE_DIR", "/data/grype-db"))
 
 
+async def _grype_db_update_once() -> tuple[bool, str]:
+    """BC-109: single-attempt `grype db update`. Returns `(ok, error_tail)`.
+
+    Pulled out of lifespan so the startup path AND the background retry
+    loop share the exact same subprocess invocation — same exit-code
+    interpretation, same stderr truncation.
+    """
+    global _grype_db_update_attempts, _grype_db_last_update_ts, _grype_db_last_error
+    _grype_db_update_attempts += 1
+    try:
+        proc = await asyncio.create_subprocess_exec(
+            "grype",
+            "db",
+            "update",
+            stdout=asyncio.subprocess.PIPE,
+            stderr=asyncio.subprocess.PIPE,
+        )
+        _, stderr = await proc.communicate()
+    except (OSError, FileNotFoundError) as e:
+        err = f"spawn failed: {e}"
+        _grype_db_last_error = err[:400]
+        return False, err
+    if proc.returncode != 0:
+        err = stderr.decode(errors="replace")[:400]
+        _grype_db_last_error = err
+        return False, err
+    _grype_db_last_update_ts = int(time.time())
+    _grype_db_last_error = ""
+    return True, ""
+
+
+def _next_grype_backoff(prev: int) -> int:
+    """BC-109: doubling backoff clamped to [BASE_S, MAX_S]."""
+    if prev <= 0:
+        return GRYPE_DB_RETRY_BASE_S
+    return min(prev * 2, GRYPE_DB_BACKOFF_MAX_S)
+
+
+async def _grype_db_update_retry_loop_forever() -> (
+    None
+):  # pragma: no cover - infinite loop; tested via _grype_db_update_once
+    """BC-109: keeps retrying `grype db update` with capped exponential
+    backoff until it succeeds, then exits. Fired only when the startup
+    single-shot fails — otherwise no task is spawned (saves resources).
+
+    `/readyz` already returns 503 for `grype_db` when the cache dir is
+    empty, so compose keeps the hub unhealthy and scout
+    `depends_on: service_healthy` blocks downstream — no behavior change
+    there. BC-109's job is to eventually resolve the 503 without manual
+    hub restart.
+    """
+    backoff = 0
+    while True:
+        backoff = _next_grype_backoff(backoff)
+        log.info(
+            "BC-109: grype db retry in %ds (attempt=%d)", backoff, _grype_db_update_attempts + 1
+        )
+        await asyncio.sleep(backoff)
+        ok, err = await _grype_db_update_once()
+        if ok:
+            log.info("BC-109: grype db ready after %d attempt(s)", _grype_db_update_attempts)
+            return
+        log.warning("BC-109: grype db retry %d failed: %s", _grype_db_update_attempts, err[:200])
+
+
 def _telegram_check() -> str:
     if MOCK:
         return "mock"
@@ -2904,6 +3017,13 @@ def _hub_healthz_summary() -> dict:
         # before a finding flips to auto_fixed). Surfaced so `make status`
         # shows it without the operator having to read env.
         "auto_fix_threshold": AUTO_FIX_THRESHOLD,
+        # BC-109: grype db retry diagnostics. Attempts > 1 means the
+        # startup single-shot failed and the background retry loop had
+        # to kick in. last_update_ts is the latest success; last_error is
+        # the latest failure stderr tail (truncated to 400 chars).
+        "grype_db_update_attempts": _grype_db_update_attempts,
+        "grype_db_last_update_ts": _grype_db_last_update_ts,
+        "grype_db_last_error": _grype_db_last_error,
     }
     # KEV is non-fatal — stale/unfetched surface in /healthz but don't flip "degraded".
     # BC-066: executor is a policy label, not a health signal — exclude it too.
