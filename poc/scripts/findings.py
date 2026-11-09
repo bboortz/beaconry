@@ -48,9 +48,35 @@ COLUMNS: list[tuple[str, str, int]] = [
     ("host", "Host", 14),
     ("source_ref", "Target", 22),
     ("package", "Package", 18),
-    ("status", "Status", 19),  # BC-011: fits "verification_failed"
+    ("status", "Status", 25),  # BC-105 widened to fit `auto_fixed (stale-scout)`
+    ("found_at_fmt", "First seen", 10),  # BC-105
+    ("last_change_fmt", "Last change", 11),  # BC-105
 ]
-SORT_ONLY_COLUMNS = ("tier",)
+SORT_ONLY_COLUMNS = ("tier", "found_at", "last_status_change_ts", "close_reason")
+
+_CLOSE_REASON_LABELS = {
+    "post_absent": "post",
+    "stale_scout": "stale-scout",
+    "operator": "operator",
+}
+
+
+def _format_age(ts: int | None, now: int | None = None) -> str:
+    """BC-105: render a unix timestamp as a compact age ("3d", "17m")."""
+    if not ts:
+        return "—"
+    if now is None:
+        import time as _time
+
+        now = int(_time.time())
+    delta = max(0, int(now) - int(ts))
+    if delta < 60:
+        return f"{delta}s"
+    if delta < 3600:
+        return f"{delta // 60}m"
+    if delta < 86400:
+        return f"{delta // 3600}h"
+    return f"{delta // 86400}d"
 
 
 def _truncate(value: str, width: int) -> str:
@@ -138,6 +164,17 @@ def load_findings(db_path: Path, status: str | None = None, host: str | None = N
             -(r.get("cvss") or 0.0),
         )
     )
+    # BC-105: derive display cells from the persisted lifecycle columns.
+    import time as _time
+
+    now = int(_time.time())
+    for row in rows:
+        row["found_at_fmt"] = _format_age(row.get("found_at"), now=now)
+        row["last_change_fmt"] = _format_age(row.get("last_status_change_ts"), now=now)
+        reason = row.get("close_reason")
+        if reason and row.get("status") == "auto_fixed":
+            label = _CLOSE_REASON_LABELS.get(reason, reason)
+            row["status"] = f"auto_fixed ({label})"
     return rows
 
 
