@@ -139,6 +139,21 @@ SCOUT_OFFLINE_SWEEP_INTERVAL_S = max(
 )
 AUTO_CLOSE_STALE_SCOUT = os.environ.get("BEACONRY_AUTO_CLOSE_STALE_SCOUT", "1") != "0"
 
+# BC-104: persistent retry queue for failed Telegram deliveries.
+# `MAX_ATTEMPTS` — how many times total we try before giving up (1st try +
+# N-1 retries). 5 is conservative; Telegram outages > 30 min with the
+# default BASE_S become increasingly unlikely signal-to-noise.
+# `BASE_S` — initial back-off in seconds; retries use base × 2^attempt so
+# 30 → 60 → 120 → 240 → 480 (~15 min covered by 5 attempts).
+# `SWEEP_INTERVAL_S` — how often the retry loop wakes to check for due
+# pending rows. 60 s matches the other BC-102 / BC-089 loops; smaller
+# values don't help because the first attempt uses `now + base_s`.
+NOTIFY_RETRY_MAX_ATTEMPTS = max(1, int(os.environ.get("BEACONRY_NOTIFY_RETRY_MAX_ATTEMPTS", "5")))
+NOTIFY_RETRY_BASE_S = max(5, int(os.environ.get("BEACONRY_NOTIFY_RETRY_BASE_S", "30")))
+NOTIFY_RETRY_SWEEP_INTERVAL_S = max(
+    5, int(os.environ.get("BEACONRY_NOTIFY_RETRY_SWEEP_INTERVAL_S", "60"))
+)
+
 
 def _parse_snooze_hours(raw: str) -> list[int]:
     """BC-089: parse `BEACONRY_SNOOZE_DEFAULT_HOURS=1,4,24,168` → [1, 4, 24, 168].
@@ -330,7 +345,7 @@ except ImportError:
 
 HUB_VERSION = SOFTWARE_VERSION  # back-compat alias
 API_VERSION = 1
-EXPECTED_SCHEMA_VERSION = 8
+EXPECTED_SCHEMA_VERSION = 9
 STRICT_API = os.environ.get("BEACONRY_STRICT_API") == "1"
 
 
@@ -610,6 +625,24 @@ def init_db() -> None:
             host         TEXT PRIMARY KEY,
             last_sent_ts INTEGER NOT NULL,
             last_hash    TEXT NOT NULL
+        )
+    """)
+    # BC-104: persistent retry queue for failed Telegram deliveries. Keyed by
+    # (finding_id, kind) so repeat failures on the same alert coalesce
+    # (operator doesn't get N stacked copies of the same message when
+    # Telegram recovers). `payload` holds the JSON-serialised arguments to
+    # the adapter call so retry replays the same body.
+    con.execute("""
+        CREATE TABLE IF NOT EXISTS pending_notifications (
+            id              INTEGER PRIMARY KEY AUTOINCREMENT,
+            finding_id      TEXT,
+            kind            TEXT NOT NULL,
+            payload         TEXT NOT NULL,
+            attempts        INTEGER NOT NULL DEFAULT 0,
+            next_retry_ts   INTEGER NOT NULL,
+            last_error      TEXT,
+            created_at      INTEGER NOT NULL,
+            UNIQUE(finding_id, kind)
         )
     """)
     # BC-061: backfill scouts from findings so pre-BC-061 operators don't
@@ -2213,7 +2246,7 @@ async def on_button_click(update: Update, context: ContextTypes.DEFAULT_TYPE) ->
 
 
 @asynccontextmanager
-async def lifespan(
+async def lifespan(  # noqa: PLR0915 - orchestration function; each background task adds ~3 statements
     app: FastAPI,
 ):  # pragma: no cover - async Telegram startup/shutdown; exercised live via make demo + make test-e2e
     global tg_app, _startup_complete
@@ -2285,26 +2318,29 @@ async def lifespan(
     # BC-035: register the Telegram notification adapter. Future adapters
     # (email, Reddit, SMS, …) register themselves here too, each gated by
     # its own BEACONRY_NOTIFIER_<NAME>_ENABLED env var.
-    _register_adapter(
-        TelegramAdapter(
-            tg_app_getter=lambda: tg_app,
-            chat_id_getter=lambda: TELEGRAM_CHAT_ID,
-            formatters={
-                "notification": format_notification,
-                "regression": format_regression,
-                "heartbeat": format_heartbeat,
-                "digest": format_digest_body,
-                "snooze_expired": format_snooze_expired,
-                "auto_fix_regression": format_auto_fix_regression,
-            },
-            keyboard_builders={
-                "finding": _kb_finding,
-                "regression": _kb_regression,
-                "heartbeat": _kb_finding,  # same actions as a first-fire
-            },
-            mock_renderer=_render_mock_telegram,
-        )
+    _telegram_adapter = TelegramAdapter(
+        tg_app_getter=lambda: tg_app,
+        chat_id_getter=lambda: TELEGRAM_CHAT_ID,
+        formatters={
+            "notification": format_notification,
+            "regression": format_regression,
+            "heartbeat": format_heartbeat,
+            "digest": format_digest_body,
+            "snooze_expired": format_snooze_expired,
+            "auto_fix_regression": format_auto_fix_regression,
+        },
+        keyboard_builders={
+            "finding": _kb_finding,
+            "regression": _kb_regression,
+            "heartbeat": _kb_finding,  # same actions as a first-fire
+        },
+        mock_renderer=_render_mock_telegram,
+        # BC-104: hub-side persistent retry queue.
+        pending_writer=_queue_pending_notification,
     )
+    _register_adapter(_telegram_adapter)
+    # Expose for the retry loop. Module-global so the loop closure can reach it.
+    globals()["_telegram_adapter"] = _telegram_adapter
 
     # BC-035: periodic reminder loop for stale open findings.
     _heartbeat_task = asyncio.create_task(_heartbeat_loop_forever())
@@ -2318,6 +2354,10 @@ async def lifespan(
     # scout's open/regressed/snoozed/accepted findings.
     _scout_offline_task = asyncio.create_task(_scout_offline_sweep_loop_forever())
 
+    # BC-104: periodic retry of Telegram deliveries that failed on first try.
+    # Reads pending_notifications, replays via TelegramAdapter.replay().
+    _notify_retry_task = asyncio.create_task(_notify_retry_loop_forever())
+
     yield
 
     # BC-020: cancel KEV refresh loop on shutdown.
@@ -2325,6 +2365,7 @@ async def lifespan(
     _heartbeat_task.cancel()
     _snooze_task.cancel()
     _scout_offline_task.cancel()
+    _notify_retry_task.cancel()
     with contextlib.suppress(asyncio.CancelledError):
         await _kev_task
     with contextlib.suppress(asyncio.CancelledError):
@@ -2333,6 +2374,8 @@ async def lifespan(
         await _heartbeat_task
     with contextlib.suppress(asyncio.CancelledError):
         await _scout_offline_task
+    with contextlib.suppress(asyncio.CancelledError):
+        await _notify_retry_task
 
     assert tg_app is not None
     assert tg_app.updater is not None
@@ -3459,6 +3502,140 @@ async def _scout_offline_sweep_loop_forever() -> None:  # pragma: no cover - inf
         except Exception as e:  # noqa: BLE001
             log.warning("BC-102: scout offline sweep failed: %s", e)
         await asyncio.sleep(SCOUT_OFFLINE_SWEEP_INTERVAL_S)
+
+
+# ── BC-104: notification retry queue ────────────────────────────────────────
+#
+# When TelegramAdapter._send raises, it calls the hub-registered
+# `_queue_pending_notification(kind, text, reply_markup_json, error)` hook
+# which writes a row to `pending_notifications`. A background loop
+# re-invokes `adapter.replay(text, reply_markup_json)` on due rows; success
+# deletes the row + audit `notify_delivered`; failure bumps `attempts` +
+# exponential-backoff next_retry_ts. After MAX_ATTEMPTS: audit
+# `notify_abandoned` + delete.
+
+
+def _queue_pending_notification(
+    kind: str,
+    text: str,
+    reply_markup_json: str | None,
+    error: str,
+) -> None:
+    """BC-104: persist a failed Telegram delivery to `pending_notifications`.
+
+    Called from TelegramAdapter._send's exception branch. Idempotent on
+    `(finding_id, kind)` — we store None for finding_id when the payload
+    isn't finding-keyed (e.g. scout_offline), so repeat scout_offline
+    failures create one row per transition.
+    """
+    now = int(time.time())
+    try:
+        con = sqlite3.connect(DB_PATH)
+    except sqlite3.OperationalError:
+        log.warning("BC-104: can't open DB to queue pending notification")
+        return
+    try:
+        import json
+
+        payload = json.dumps({"text": text, "reply_markup": reply_markup_json})
+        con.execute(
+            "INSERT OR IGNORE INTO pending_notifications "
+            "(finding_id, kind, payload, attempts, next_retry_ts, last_error, created_at) "
+            "VALUES (NULL, ?, ?, 0, ?, ?, ?)",
+            (kind, payload, now + NOTIFY_RETRY_BASE_S, error[:400], now),
+        )
+        con.commit()
+        _audit.append("notify_queued", kind=kind, error=error[:200])
+    except sqlite3.OperationalError as e:
+        log.warning("BC-104: failed to queue pending notification: %s", e)
+    finally:
+        con.close()
+
+
+async def notify_retry_sweep(*, now_ts: int | None = None) -> dict[str, int]:
+    """BC-104: process due rows in `pending_notifications`.
+
+    For each row with `next_retry_ts <= now`:
+      - call `_telegram_adapter.replay(text, reply_markup_json)`;
+      - on success → DELETE + audit `notify_delivered`;
+      - on failure → bump `attempts`; if `attempts >= MAX_ATTEMPTS`,
+        DELETE + audit `notify_abandoned`; else update `next_retry_ts =
+        now + base × 2^attempts`.
+
+    Returns counts for logging/testing. Pure-ish — calls the adapter
+    (which is a module global) so tests monkeypatch it.
+    """
+    now = now_ts if now_ts is not None else int(time.time())
+    counts = {"delivered": 0, "requeued": 0, "abandoned": 0}
+
+    try:
+        con = sqlite3.connect(DB_PATH)
+    except sqlite3.OperationalError:
+        return counts
+
+    try:
+        rows = con.execute(
+            "SELECT id, kind, payload, attempts FROM pending_notifications "
+            "WHERE next_retry_ts <= ?",
+            (now,),
+        ).fetchall()
+    except sqlite3.OperationalError:
+        con.close()
+        return counts
+
+    import json
+
+    adapter = globals().get("_telegram_adapter")
+    for row_id, kind, payload_json, attempts in rows:
+        try:
+            payload = json.loads(payload_json)
+            text = payload.get("text", "")
+            rm_json = payload.get("reply_markup")
+        except Exception as e:  # noqa: BLE001
+            log.warning("BC-104: payload JSON corrupt for row %d: %s — abandoning", row_id, e)
+            con.execute("DELETE FROM pending_notifications WHERE id=?", (row_id,))
+            _audit.append("notify_abandoned", kind=kind, reason="payload_corrupt")
+            counts["abandoned"] += 1
+            continue
+
+        ok = False
+        if adapter is not None:
+            try:
+                ok = await adapter.replay(text, rm_json)
+            except Exception as e:  # noqa: BLE001
+                log.warning("BC-104: replay raised for row %d: %s", row_id, e)
+
+        if ok:
+            con.execute("DELETE FROM pending_notifications WHERE id=?", (row_id,))
+            _audit.append("notify_delivered", kind=kind, retry_attempts=int(attempts) + 1)
+            counts["delivered"] += 1
+        else:
+            new_attempts = int(attempts) + 1
+            if new_attempts >= NOTIFY_RETRY_MAX_ATTEMPTS:
+                con.execute("DELETE FROM pending_notifications WHERE id=?", (row_id,))
+                _audit.append("notify_abandoned", kind=kind, attempts=new_attempts)
+                counts["abandoned"] += 1
+            else:
+                # Exponential back-off: 30s, 60s, 120s, 240s, 480s.
+                backoff = NOTIFY_RETRY_BASE_S * (2**new_attempts)
+                con.execute(
+                    "UPDATE pending_notifications SET attempts=?, next_retry_ts=? WHERE id=?",
+                    (new_attempts, now + backoff, row_id),
+                )
+                counts["requeued"] += 1
+    con.commit()
+    con.close()
+    return counts
+
+
+async def _notify_retry_loop_forever() -> None:  # pragma: no cover - infinite loop
+    """BC-104: background sweep. Cadence = NOTIFY_RETRY_SWEEP_INTERVAL_S."""
+    while True:
+        try:
+            await notify_retry_sweep()
+        except Exception as e:  # noqa: BLE001
+            log.warning("BC-104: notify retry sweep failed: %s", e)
+        await asyncio.sleep(NOTIFY_RETRY_SWEEP_INTERVAL_S)
 
 
 async def _heartbeat_loop_forever() -> (

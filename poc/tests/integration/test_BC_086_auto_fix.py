@@ -98,7 +98,7 @@ def test_schema_version_is_7(recon_env: Path) -> None:
     con = sqlite3.connect(recon_env / "beaconry.db")
     version = con.execute("PRAGMA user_version").fetchone()[0]
     con.close()
-    assert version == 8  # BC-102 bumped 7 → 8 (scouts.last_offline_alert_ts)
+    assert version == 9  # BC-104 bumped 8 → 9 (pending_notifications table)
 
 
 # ── CAP-T177 threshold ──────────────────────────────────────────────────────

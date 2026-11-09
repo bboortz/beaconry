@@ -1801,6 +1801,15 @@ Enforcement: `poc/scripts/verify_traceability.py` runs as part of `make check`. 
 - **verified by:**
   - `poc/tests/integration/test_BC_093_rescan_hooks.py`
 
+### CAP-T206: Notification retry queue with exponential backoff
+- **type:** technical
+- **status:** active
+- **origin:** BC-104 — pre-BC-104, a transient Telegram outage (API 503, token quota, network partition) during `notify_*` dispatch emitted `notify_sent_failed` audit (BC-060) + the alert was lost forever. No retry; no eventual-delivery guarantee.
+- **description:** New `pending_notifications` table (schema v8 → v9). `TelegramAdapter._send` catches `send_message` exceptions + calls the hub-registered `_queue_pending_notification(kind, text, reply_markup_json, error)` hook to persist a row with `next_retry_ts = now + BASE_S`. Background `_notify_retry_loop_forever` task (cadence `BEACONRY_NOTIFY_RETRY_SWEEP_INTERVAL_S`, default 60s) reads due rows + calls `TelegramAdapter.replay(text, reply_markup_json)`. Success → DELETE + `notify_delivered` audit. Failure → bump `attempts`; if `attempts >= BEACONRY_NOTIFY_RETRY_MAX_ATTEMPTS` (default 5) → DELETE + `notify_abandoned`; else update `next_retry_ts = now + BASE_S × 2^attempts` (30→60→120→240→480s). State survives hub restart.
+- **supports:** CAP-T081, CAP-B023
+- **verified by:**
+  - `poc/tests/unit/test_BC_104_notify_retry.py`
+
 ### CAP-T205: Scout rescans on container/image removal events (BC-103)
 - **type:** technical
 - **status:** active
