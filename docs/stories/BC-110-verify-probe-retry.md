@@ -1,7 +1,7 @@
 ---
 id: BC-110
 title: Verify probe retry — handle post-restart port-binding race
-status: in-progress
+status: shipped
 created: 2026-11-09
 branch: feat/BC-110-verify-probe-retry
 plan: docs/plan/BC-110-verify-probe-retry-plan.md
