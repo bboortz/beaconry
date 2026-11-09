@@ -4,6 +4,24 @@ All notable changes to beaconry are recorded here. The format is based
 on [Keep a Changelog](https://keepachangelog.com/), and this project
 follows [Semantic Versioning](https://semver.org/).
 
+## [v0.20.7] — 2026-11-09
+
+### Fixed (BC-114)
+
+- **Reconcile TOCTOU race — false auto-close under concurrent scans.**
+  Pre-BC-114 `reconcile_scan` used Python sqlite3's default
+  `isolation_level='deferred'`, leaving the SELECT outside any
+  transaction. A concurrent `save_finding` or `bump_last_seen`
+  interleaving between SELECT and the per-row UPDATE could silently
+  auto-close a finding another scan had just observed (fleet-wide
+  cron alignment makes the window exploitable). Reconcile now sets
+  `isolation_level=None` and wraps SELECT + UPDATEs in
+  `BEGIN IMMEDIATE` / `COMMIT`. Concurrent writers block until
+  reconcile commits. On lock-acquisition timeout (SQLite default 5s),
+  reconcile logs a warning and skips the cycle — no partial writes,
+  no misfires.
+- **CAP-T216** registered.
+
 ## [v0.20.6] — 2026-11-09
 
 ### Added (BC-113)

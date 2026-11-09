@@ -1801,6 +1801,15 @@ Enforcement: `poc/scripts/verify_traceability.py` runs as part of `make check`. 
 - **verified by:**
   - `poc/tests/integration/test_BC_093_rescan_hooks.py`
 
+### CAP-T216: Reconcile TOCTOU serialization via BEGIN IMMEDIATE
+- **type:** technical
+- **status:** active
+- **origin:** BC-114 — BC-067 audit flagged the race: `reconcile_scan` opened a connection with Python sqlite3's default `isolation_level='deferred'`, which left the SELECT outside any transaction. A concurrent `save_finding` or `bump_last_seen` could interleave between reconcile's SELECT and its per-row UPDATE, silently auto-closing a finding another scan had just observed. Fleet-wide cron alignment makes the window exploitable in practice.
+- **description:** `poc/hub/hub.py::reconcile_scan` sets `con.isolation_level = None` and issues explicit `BEGIN IMMEDIATE` before the SELECT, `COMMIT` after all UPDATEs. BEGIN IMMEDIATE grabs a reserved (write) lock immediately — other writers block until COMMIT; other readers still see the pre-transaction snapshot. On lock-acquisition timeout (default 5s), reconcile returns `([], [], [])` with a `BC-114: reconcile_scan could not acquire write lock` warning — no partial writes, no auto-close misfire. On exception mid-iteration, ROLLBACK leaves the DB consistent with the pre-reconcile snapshot.
+- **supports:** CAP-T165, CAP-B023
+- **verified by:**
+  - `poc/tests/unit/test_BC_114_reconcile_toctou_lock.py`
+
 ### CAP-T215: /scan payload size guard middleware
 - **type:** technical
 - **status:** active
