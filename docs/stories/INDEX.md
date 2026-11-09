@@ -97,3 +97,4 @@ Lifecycle: `draft → ready → in-progress → shipped`. Status matches each st
 | BC-102 | Hub-side scout-offline Telegram alert + stale-scout findings reconcile  | shipped     | — (merged to dev)                   |
 | BC-103 | Scout rescans on image/container `delete` + `destroy` + `die` events   | shipped     | — (merged to dev)                   |
 | BC-104 | Notification retry queue — Telegram outage no longer drops alerts       | shipped     | — (merged to dev)                   |
+| BC-105 | `make findings` shows FIRST SEEN + LAST CHANGE + auto-close reason     | in-progress | feat/BC-105-findings-cli-lifecycle  |

@@ -102,7 +102,7 @@ def test_schema_v7_adds_role_column(db_env: Path) -> None:
     user_version = con.execute("PRAGMA user_version").fetchone()[0]
     con.close()
     assert "role" in cols
-    assert user_version == 9  # BC-104 bumped 8 → 9 (pending_notifications table)
+    assert user_version == 10  # BC-105 bumped 9 → 10 (close_reason + last_status_change_ts)
 
 
 # ── _normalize_role ─────────────────────────────────────────────────────────

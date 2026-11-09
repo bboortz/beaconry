@@ -345,7 +345,7 @@ except ImportError:
 
 HUB_VERSION = SOFTWARE_VERSION  # back-compat alias
 API_VERSION = 1
-EXPECTED_SCHEMA_VERSION = 9
+EXPECTED_SCHEMA_VERSION = 10
 STRICT_API = os.environ.get("BEACONRY_STRICT_API") == "1"
 
 
@@ -617,6 +617,20 @@ def init_db() -> None:
     # stay snoozed indefinitely (preserves pre-BC-089 operator expectation).
     with contextlib.suppress(sqlite3.OperationalError):
         con.execute("ALTER TABLE findings ADD COLUMN snooze_until_ts INTEGER DEFAULT 0")
+    # BC-105: lifecycle visibility.
+    #   close_reason — populated when an auto-close path transitions the
+    #     finding into a terminal status. Values: `post_absent` (BC-086
+    #     POST-driven reconcile), `stale_scout` (BC-102 time-based
+    #     reconcile), `operator` (manual `make set-status`). NULL for
+    #     open / regressed / snoozed / accepted / first-fire findings.
+    #   last_status_change_ts — unix ts of the most recent status write.
+    #     Zero for pre-BC-105 rows (CLI renders as `—`).
+    with contextlib.suppress(sqlite3.OperationalError):
+        con.execute("ALTER TABLE findings ADD COLUMN close_reason TEXT")
+    with contextlib.suppress(sqlite3.OperationalError):
+        con.execute(
+            "ALTER TABLE findings ADD COLUMN last_status_change_ts INTEGER NOT NULL DEFAULT 0"
+        )
     # BC-036: digest cadence state — per-host last-sent + content hash. Separate
     # table (not a column on `findings`) because the state is per-host, not
     # per-finding.
@@ -775,15 +789,23 @@ def set_status(finding_id: str, status: str, *, source: str = "telegram") -> Non
         if row is None:
             raise FindingNotFound(finding_id)
         host, cve_id, old_status = row
+        now = int(time.time())
         # BC-031: record when the fix landed so reconcile_scan can display
         # "regressed since <date>" if the finding ever reappears.
+        # BC-105: stamp last_status_change_ts + close_reason='operator' when
+        # transitioning to a terminal state (fixed / fixed_verified / accepted).
+        close_reason = "operator" if status in ("fixed", "fixed_verified", "accepted") else None
         if status in ("fixed", "fixed_verified"):
             con.execute(
-                "UPDATE findings SET status=?, last_fixed_ts=? WHERE id=?",
-                (status, int(time.time()), finding_id),
+                "UPDATE findings SET status=?, last_fixed_ts=?, "
+                "close_reason=?, last_status_change_ts=? WHERE id=?",
+                (status, now, close_reason, now, finding_id),
             )
         else:
-            con.execute("UPDATE findings SET status=? WHERE id=?", (status, finding_id))
+            con.execute(
+                "UPDATE findings SET status=?, close_reason=?, last_status_change_ts=? WHERE id=?",
+                (status, close_reason, now, finding_id),
+            )
         con.commit()
     finally:
         con.close()
@@ -961,10 +983,13 @@ def reconcile_scan(
             if status in ("open", "regressed", "snoozed", "accepted") and not in_scan:
                 new_count = absent_count + 1
                 if new_count >= AUTO_FIX_THRESHOLD:
+                    # BC-105: stamp close_reason + last_status_change_ts.
                     con.execute(
                         "UPDATE findings SET status='auto_fixed', "
-                        "auto_fixed_ts=?, absent_count=? WHERE id=?",
-                        (now, new_count, fid),
+                        "auto_fixed_ts=?, absent_count=?, "
+                        "close_reason='post_absent', last_status_change_ts=? "
+                        "WHERE id=?",
+                        (now, new_count, now, fid),
                     )
                     auto_fixed_closes.append(finding)
                     _audit.append(
@@ -3475,10 +3500,12 @@ def _stale_scout_reconcile_tick(
     for fid, cve_id, absent_count in rows:
         new_count = int(absent_count or 0) + 1
         if new_count >= threshold:
+            # BC-105: stamp close_reason='stale_scout' + last_status_change_ts.
             con.execute(
-                "UPDATE findings SET status='auto_fixed', auto_fixed_ts=?, absent_count=? "
+                "UPDATE findings SET status='auto_fixed', auto_fixed_ts=?, absent_count=?, "
+                "close_reason='stale_scout', last_status_change_ts=? "
                 "WHERE id=?",
-                (now, new_count, fid),
+                (now, new_count, now, fid),
             )
             _audit.append(
                 "finding_auto_fixed_stale_scout",

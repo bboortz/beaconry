@@ -4,6 +4,23 @@ All notable changes to beaconry are recorded here. The format is based
 on [Keep a Changelog](https://keepachangelog.com/), and this project
 follows [Semantic Versioning](https://semver.org/).
 
+## [v0.19.1] — 2026-11-09
+
+### Added (BC-105)
+
+- **Findings CLI lifecycle columns** — `make findings` now shows
+  FIRST SEEN + LAST CHANGE (age-formatted) + the auto-close reason
+  as a suffix on `auto_fixed` rows (`auto_fixed (stale-scout)`,
+  `auto_fixed (post)`, `auto_fixed (operator)`). Operators no
+  longer need to grep audit.log to see when a finding appeared,
+  when it last changed state, or why it was auto-closed.
+- Schema v9 → v10: `close_reason TEXT` + `last_status_change_ts
+  INTEGER NOT NULL DEFAULT 0` on `findings`. Three write sites
+  (BC-086 reconcile, BC-102 stale-scout reconcile, operator
+  `set_status`) stamp them. Legacy rows render LAST CHANGE as
+  `—`.
+- **CAP-T207** registered.
+
 ## [v0.19.0] — 2026-11-09
 
 ### Added (BC-104)
