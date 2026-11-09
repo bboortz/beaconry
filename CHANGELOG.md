@@ -4,6 +4,21 @@ All notable changes to beaconry are recorded here. The format is based
 on [Keep a Changelog](https://keepachangelog.com/), and this project
 follows [Semantic Versioning](https://semver.org/).
 
+## [v0.20.6] — 2026-11-09
+
+### Added (BC-113)
+
+- **`/scan` payload size limit — DoS guard.** New middleware
+  `_scan_payload_size_middleware` rejects POSTs with declared
+  Content-Length over `BEACONRY_SCAN_MAX_PAYLOAD_BYTES` (default
+  50 MB = 52 428 800) with 413 Request Entity Too Large before
+  FastAPI parses the body. Prevents hub OOM from a compromised
+  scout posting a crafted million-artifact SBOM (BC-067 security
+  audit finding). Chunked uploads without Content-Length pass
+  through; downstream JSON parser is the backstop. Other
+  endpoints are unaffected — their payloads are tiny by design.
+- **CAP-T215** registered.
+
 ## [v0.20.5] — 2026-11-09
 
 ### Added (BC-112)

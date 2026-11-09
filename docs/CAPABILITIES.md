@@ -1801,6 +1801,15 @@ Enforcement: `poc/scripts/verify_traceability.py` runs as part of `make check`. 
 - **verified by:**
   - `poc/tests/integration/test_BC_093_rescan_hooks.py`
 
+### CAP-T215: /scan payload size guard middleware
+- **type:** technical
+- **status:** active
+- **origin:** BC-113 — BC-067 security audit flagged `receive_scan` had no upfront size check (FastAPI default ~100MB). A compromised scout (via BC-055 token leak) or a `/test/scan` attacker on BEACONRY_TEST_MODE=1 deployments could DoS the hub by posting a hand-crafted million-artifact SBOM; body is loaded into memory before the handler runs, hub RSS balloons, OOM kill lands.
+- **description:** `poc/hub/hub.py` adds `_scan_payload_size_middleware` registered via `@api.middleware("http")`. Only trips on `request.url.path == "/scan"` AND declared Content-Length header > `BEACONRY_SCAN_MAX_PAYLOAD_BYTES` (default 50MB = 52 428 800). Oversize → 413 Request Entity Too Large JSON `{detail, declared_bytes, max_bytes}` before FastAPI parses the body. Chunked transfer (no Content-Length) and malformed header values pass through (downstream JSON parser remains as a backstop). Other endpoints (`/healthz`, `/heartbeat`, `/scan/trigger`, `/findings`) unaffected — their payloads are tiny by design.
+- **supports:** CAP-T023, CAP-B023
+- **verified by:**
+  - `poc/tests/unit/test_BC_113_scan_payload_size.py`
+
 ### CAP-T214: Hub scan-trigger proxy retry with exponential backoff
 - **type:** technical
 - **status:** active

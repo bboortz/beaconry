@@ -113,6 +113,19 @@ def _parse_positive_int_hub(raw: str | None, default: int, name: str) -> int:
     return v
 
 
+# BC-113: /scan payload size limit. Prevents a compromised scout (or a
+# /test/scan attacker) from DoS'ing the hub with a multi-GB SBOM. Default
+# 50MB is a comfortable floor for real SBOMs (typical scout post ~1-5MB
+# per container, 10-50 containers per host). Operators running huge
+# multi-host scouts bump this. 0 disables the check (not recommended in
+# prod). Only `/scan` is gated — other endpoints (heartbeat, trigger,
+# findings) carry tiny payloads.
+SCAN_MAX_PAYLOAD_BYTES = _parse_positive_int_hub(
+    os.environ.get("BEACONRY_SCAN_MAX_PAYLOAD_BYTES"),
+    50 * 1024 * 1024,
+    "BEACONRY_SCAN_MAX_PAYLOAD_BYTES",
+)
+
 # BC-112: scan-trigger proxy retry. `/scan/trigger` hub→scout POST
 # occasionally fails with a transient compose-DNS blip or scout-busy
 # momentary refusal. Pre-BC-112 operator saw 503 on first failure.
@@ -2553,6 +2566,37 @@ async def _api_version_middleware(request: _FastAPIRequest, call_next):  # type:
     response = await call_next(request)
     response.headers["X-Beaconry-API"] = str(API_VERSION)
     return response
+
+
+# BC-113: /scan payload size guard. Inspects Content-Length BEFORE route
+# dispatch — bodies with a declared size over the limit get 413 without
+# the body ever being parsed into memory. Streaming uploads without a
+# Content-Length header are allowed through (chunked transfer); the
+# downstream `payload: dict` parse in receive_scan would still blow up
+# on a genuine attack but the common case (regular scout POST) is covered.
+# Only `/scan` is gated — gating `/healthz` would e.g. make `make status`
+# fail on a tiny GET if the header handling misfires.
+@api.middleware("http")
+async def _scan_payload_size_middleware(request: _FastAPIRequest, call_next):  # type: ignore[no-untyped-def]
+    if SCAN_MAX_PAYLOAD_BYTES > 0 and request.url.path == "/scan":
+        raw = request.headers.get("content-length") or request.headers.get("Content-Length")
+        if raw:
+            try:
+                declared = int(raw)
+            except ValueError:
+                declared = -1
+            if declared > SCAN_MAX_PAYLOAD_BYTES:
+                from fastapi.responses import JSONResponse
+
+                return JSONResponse(
+                    status_code=413,
+                    content={
+                        "detail": "scan payload too large",
+                        "declared_bytes": declared,
+                        "max_bytes": SCAN_MAX_PAYLOAD_BYTES,
+                    },
+                )
+    return await call_next(request)
 
 
 # ── BC-055: Bearer auth + HTTP management surface ─────────────────────────
