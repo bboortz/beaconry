@@ -4,6 +4,30 @@ All notable changes to beaconry are recorded here. The format is based
 on [Keep a Changelog](https://keepachangelog.com/), and this project
 follows [Semantic Versioning](https://semver.org/).
 
+## [v0.21.0] — 2026-11-09
+
+### Added (BC-116)
+
+- **Finding state machine extension.** Two new statuses:
+  `fixing` (transient, in-flight — set before `EXECUTOR.execute`
+  and reverted on any non-success terminal) and `rolled_back`
+  (reserved for a future `ExecutorPlugin.undo()` story). `set_status`
+  now validates against `_VALID_STATUSES` — unknown values raise
+  `ValueError`, closing a long-standing silent-typo bug class.
+- **Stale-fixing sweep.** `_stale_fixing_loop_forever()` runs every
+  `BEACONRY_FIXING_SWEEP_INTERVAL_S` (default 60s). Finds `fixing`
+  rows older than `BEACONRY_FIXING_TIMEOUT_S` (default 10 min),
+  reverts them to `open`, and emits `fix_timeout` audit events
+  with `{finding_id, host, cve_id, stuck_since, reverted_at,
+  timeout_s}`. Guards against hub crashes mid-fix leaving rows
+  stuck in `fixing` forever.
+- `_handle_fix` transitions `open → fixing → terminal`. Operators
+  see "fix in flight" in `make findings` during the ~5-30s window.
+- Two new env vars + **CAP-T218**.
+
+Minor bump (statuses added — downstream consumers may want to be
+aware).
+
 ## [v0.20.8] — 2026-11-09
 
 ### Added (BC-115)

@@ -1,7 +1,7 @@
 ---
 id: BC-115
 title: Audit write failure sticky flag — surface disk-full degradation
-status: in-progress
+status: shipped
 created: 2026-11-09
 branch: feat/BC-115-audit-sticky-flag
 plan: docs/plan/BC-115-audit-sticky-flag-plan.md

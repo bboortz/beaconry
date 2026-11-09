@@ -113,6 +113,22 @@ def _parse_positive_int_hub(raw: str | None, default: int, name: str) -> int:
     return v
 
 
+# BC-116: stale-fixing sweep. A finding briefly transitions through
+# `fixing` during `_handle_fix`; if hub crashes mid-execution the status
+# can stick. This sweep moves `fixing` rows whose last_status_change_ts
+# exceeds BEACONRY_FIXING_TIMEOUT_S back to `open` + audit `fix_timeout`.
+# Default 10 min — longer than any legitimate docker-pull-retry window.
+FIXING_TIMEOUT_S = _parse_positive_int_hub(
+    os.environ.get("BEACONRY_FIXING_TIMEOUT_S"),
+    600,
+    "BEACONRY_FIXING_TIMEOUT_S",
+)
+FIXING_SWEEP_INTERVAL_S = _parse_positive_int_hub(
+    os.environ.get("BEACONRY_FIXING_SWEEP_INTERVAL_S"),
+    60,
+    "BEACONRY_FIXING_SWEEP_INTERVAL_S",
+)
+
 # BC-113: /scan payload size limit. Prevents a compromised scout (or a
 # /test/scan attacker) from DoS'ing the hub with a multi-GB SBOM. Default
 # 50MB is a comfortable floor for real SBOMs (typical scout post ~1-5MB
@@ -882,6 +898,32 @@ class FindingNotFound(Exception):
     """
 
 
+# BC-116: canonical status set — gated by `set_status` and documented
+# here so new values arrive via a story, not a drive-by string literal.
+# - open / snoozed / accepted: operator-visible, awaiting action.
+# - fixing: transient — set before EXECUTOR.execute, cleared after.
+# - fixed / fixed_verified: terminal, operator-driven.
+# - verification_failed: post-fix probe failed; operator action needed.
+# - auto_fixed: terminal, reconcile-driven (BC-086).
+# - regressed: non-terminal, was fixed/auto_fixed + reappeared.
+# - rolled_back: terminal, post-rollback (ExecutorPlugin.undo path —
+#   future BC adds the transition; status is reserved now).
+_VALID_STATUSES: frozenset[str] = frozenset(
+    {
+        "open",
+        "fixing",
+        "fixed",
+        "fixed_verified",
+        "verification_failed",
+        "regressed",
+        "snoozed",
+        "accepted",
+        "auto_fixed",
+        "rolled_back",
+    }
+)
+
+
 def set_status(finding_id: str, status: str, *, source: str = "telegram") -> None:
     """BC-058: mutate a finding's status, emit a rich audit event.
 
@@ -889,8 +931,15 @@ def set_status(finding_id: str, status: str, *, source: str = "telegram") -> Non
     `make audit` enrichment is uniform regardless of mutation path:
     `{finding_id, host, cve_id, old_status, new_status, source}`.
 
+    BC-116: validate `status` against `_VALID_STATUSES` — raise ValueError
+    on an unknown value so a typo in a caller doesn't silently land a
+    nonsense string in the DB.
+
     Raises `FindingNotFound` when the id has no row.
+    Raises `ValueError` when `status` is not in `_VALID_STATUSES`.
     """
+    if status not in _VALID_STATUSES:
+        raise ValueError(f"BC-116: unknown status {status!r}; valid: {sorted(_VALID_STATUSES)}")
     con = sqlite3.connect(DB_PATH)
     try:
         row = con.execute(
@@ -2190,9 +2239,21 @@ async def _handle_fix(query, finding: Finding, finding_id: str, parts: list[str]
         f"⏳ Fixing <code>{_esc(finding.cve_id)}</code> on <code>{_esc(finding.host)}</code>…",
         parse_mode="HTML",
     )
+    # BC-116: flip to transient `fixing` status BEFORE the executor runs so
+    # `make findings` and `/healthz` reflect "fix in flight". If hub crashes
+    # between here and the next set_status, the stale-fixing sweep reverts
+    # to open after BEACONRY_FIXING_TIMEOUT_S. The call is best-effort — a
+    # ValueError (shouldn't happen since "fixing" is in _VALID_STATUSES)
+    # or FindingNotFound shouldn't prevent the fix attempt.
+    with contextlib.suppress(ValueError, FindingNotFound):
+        set_status(finding.id, "fixing", source="telegram")
     result = await EXECUTOR.execute(finding)
 
     if not result.success:
+        # BC-116: revert fixing → open since the executor failed and
+        # operator action is needed again.
+        with contextlib.suppress(ValueError, FindingNotFound):
+            set_status(finding.id, "open", source="telegram")
         await query.edit_message_text(
             f"❌ <b>Fix failed</b>: <code>{_esc(result.message)}</code>\n"
             f"Image unchanged. Rollback tag still exists if you need to inspect.",
@@ -2203,6 +2264,10 @@ async def _handle_fix(query, finding: Finding, finding_id: str, parts: list[str]
     # Non-docker findings: ManualAdapter printed the command; operator runs it,
     # not beaconry. Status stays open (manual action required).
     if finding.source_type != "docker":
+        # BC-116: revert fixing → open — the executor didn't actually
+        # perform the fix; the operator still has to run the command.
+        with contextlib.suppress(ValueError, FindingNotFound):
+            set_status(finding.id, "open", source="telegram")
         await query.edit_message_text(
             f"⚙️ <b>Manual action required</b>\n"
             f"CVE: <code>{_esc(finding.cve_id)}</code>\n"
@@ -2219,6 +2284,10 @@ async def _handle_fix(query, finding: Finding, finding_id: str, parts: list[str]
     clean = await verify_fix(finding)
 
     if not clean:
+        # BC-116: executor ran, but verify_fix says CVE still present →
+        # revert to open (upstream hasn't patched).
+        with contextlib.suppress(ValueError, FindingNotFound):
+            set_status(finding.id, "open", source="telegram")
         await query.edit_message_text(
             f"⚠️ <b>Pulled, but CVE still present upstream</b>\n"
             f"CVE: <code>{_esc(finding.cve_id)}</code> in "
@@ -2536,6 +2605,10 @@ async def lifespan(  # noqa: PLR0915 - orchestration function; each background t
     # Reads pending_notifications, replays via TelegramAdapter.replay().
     _notify_retry_task = asyncio.create_task(_notify_retry_loop_forever())
 
+    # BC-116: revert stuck `fixing` findings (set when hub crashes between
+    # the executor dispatch and the terminal set_status).
+    _stale_fixing_task = asyncio.create_task(_stale_fixing_loop_forever())
+
     yield
 
     # BC-020: cancel KEV refresh loop on shutdown.
@@ -2544,6 +2617,7 @@ async def lifespan(  # noqa: PLR0915 - orchestration function; each background t
     _snooze_task.cancel()
     _scout_offline_task.cancel()
     _notify_retry_task.cancel()
+    _stale_fixing_task.cancel()
     with contextlib.suppress(asyncio.CancelledError):
         await _kev_task
     with contextlib.suppress(asyncio.CancelledError):
@@ -2554,6 +2628,8 @@ async def lifespan(  # noqa: PLR0915 - orchestration function; each background t
         await _scout_offline_task
     with contextlib.suppress(asyncio.CancelledError):
         await _notify_retry_task
+    with contextlib.suppress(asyncio.CancelledError):
+        await _stale_fixing_task
 
     assert tg_app is not None
     assert tg_app.updater is not None
@@ -3972,6 +4048,70 @@ async def _notify_retry_loop_forever() -> None:  # pragma: no cover - infinite l
         except Exception as e:  # noqa: BLE001
             log.warning("BC-104: notify retry sweep failed: %s", e)
         await asyncio.sleep(NOTIFY_RETRY_SWEEP_INTERVAL_S)
+
+
+def stale_fixing_sweep(*, now_ts: int | None = None) -> int:
+    """BC-116: revert `fixing` rows older than FIXING_TIMEOUT_S back to open.
+
+    A hub crash between `set_status("fixing")` and the terminal transition
+    leaves the row stuck. Operators would see `fixing` forever without
+    this sweep. Each flip emits a `fix_timeout` audit event so operators
+    can trace which finding timed out when. Returns the number of rows
+    reverted (for logging/tests).
+    """
+    now = now_ts if now_ts is not None else int(time.time())
+    cutoff = now - FIXING_TIMEOUT_S
+    try:
+        con = sqlite3.connect(DB_PATH)
+    except sqlite3.OperationalError:
+        return 0
+    try:
+        try:
+            stale = con.execute(
+                "SELECT id, host, cve_id, last_status_change_ts "
+                "FROM findings "
+                "WHERE status='fixing' AND last_status_change_ts > 0 "
+                "AND last_status_change_ts < ?",
+                (cutoff,),
+            ).fetchall()
+        except sqlite3.OperationalError:
+            return 0
+        reverted = 0
+        for row_id, host, cve_id, ts in stale:
+            try:
+                con.execute(
+                    "UPDATE findings SET status='open', last_status_change_ts=? "
+                    "WHERE id=? AND status='fixing'",
+                    (now, row_id),
+                )
+                reverted += 1
+                _audit.append(
+                    "fix_timeout",
+                    finding_id=row_id,
+                    host=host,
+                    cve_id=cve_id,
+                    stuck_since=ts,
+                    reverted_at=now,
+                    timeout_s=FIXING_TIMEOUT_S,
+                )
+            except sqlite3.OperationalError as e:
+                log.warning("BC-116: stale-fixing revert failed for %s: %s", row_id, e)
+        con.commit()
+        return reverted
+    finally:
+        con.close()
+
+
+async def _stale_fixing_loop_forever() -> None:  # pragma: no cover - infinite loop
+    """BC-116: background sweep. Cadence = FIXING_SWEEP_INTERVAL_S."""
+    while True:
+        try:
+            n = await asyncio.to_thread(stale_fixing_sweep)
+            if n > 0:
+                log.warning("BC-116: reverted %d stale `fixing` finding(s) to open", n)
+        except Exception as e:  # noqa: BLE001
+            log.warning("BC-116: stale-fixing sweep failed: %s", e)
+        await asyncio.sleep(FIXING_SWEEP_INTERVAL_S)
 
 
 async def _heartbeat_loop_forever() -> (
