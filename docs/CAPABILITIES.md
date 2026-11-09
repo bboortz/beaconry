@@ -1801,6 +1801,15 @@ Enforcement: `poc/scripts/verify_traceability.py` runs as part of `make check`. 
 - **verified by:**
   - `poc/tests/integration/test_BC_093_rescan_hooks.py`
 
+### CAP-T217: Audit log sticky degraded-mode flag
+- **type:** technical
+- **status:** active
+- **origin:** BC-115 — BC-067 audit flagged that `audit.append()` catches `OSError` + logs a warning but has no operator-facing degradation signal. During a critical incident (disk full, permissions, missing mount) the audit trail silently loses events — exactly when forensic value peaks.
+- **description:** `poc/hub/audit.py` adds module-level `_degraded`, `_last_error`, `_write_failures`, `_write_failures_since_degraded`. `append()` calls `_mark_write_succeeded()` after a successful write (clears sticky flag + last_error; `_write_failures_since_degraded` resets) or `_mark_write_failed(exc)` after `OSError` (sets sticky flag; increments both counters; stores stringified exception, truncated to 200c). Cumulative `_write_failures` is intentionally kept across recoveries so operators see historical degradation. Public `status()` returns `{audit_degraded, audit_write_failures, audit_last_error}` — consumed by `poc/hub/hub.py::_hub_healthz_summary` and spread into the `checks` dict. Audit keys are excluded from `bool_checks` so a transient disk full doesn't cascade to "hub-wide degraded" / compose unhealthy / fleet outage. The never-raise fire-and-forget contract from BC-029 is preserved.
+- **supports:** CAP-T065, CAP-B023
+- **verified by:**
+  - `poc/tests/unit/test_BC_115_audit_sticky_flag.py`
+
 ### CAP-T216: Reconcile TOCTOU serialization via BEGIN IMMEDIATE
 - **type:** technical
 - **status:** active

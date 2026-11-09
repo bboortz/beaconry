@@ -4,6 +4,27 @@ All notable changes to beaconry are recorded here. The format is based
 on [Keep a Changelog](https://keepachangelog.com/), and this project
 follows [Semantic Versioning](https://semver.org/).
 
+## [v0.20.8] — 2026-11-09
+
+### Added (BC-115)
+
+- **Audit log sticky degraded-mode flag.** `poc/hub/audit.py`
+  tracks write success/failure in a module-level sticky flag.
+  `/healthz` surfaces `audit_degraded`, `audit_write_failures`,
+  `audit_last_error`. Pre-BC-115 a failed write (disk full,
+  permissions) silently dropped the event and left operators
+  blind during the exact incident windows when audit is most
+  valuable. BC-115 preserves BC-029's never-raise contract —
+  the caller still sees no exception — but the degradation is
+  now visible in `make status` / `/healthz`. First successful
+  write after a failure clears the sticky flag (+ last_error);
+  cumulative counter persists across recoveries. Audit health
+  is intentionally excluded from the aggregate `/healthz`
+  "degraded" calculation so a transient disk full doesn't
+  cascade to compose unhealthy → scout `depends_on` → fleet
+  outage.
+- **CAP-T217** registered.
+
 ## [v0.20.7] — 2026-11-09
 
 ### Fixed (BC-114)
