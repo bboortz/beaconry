@@ -62,6 +62,17 @@ FROM runtime-src AS runtime
 # /usr/local/lib/python${PY_VER}/site-packages — see builder comment.
 COPY --from=builder /stage /
 
+# Strip the /sbom.json that python-scratch-trixie bakes in (forge's FG-020
+# contract). telegram_mock is an externally-sourced test fixture; forge's
+# FG-020 acceptance test asserts that externally-sourced images do NOT
+# carry an embedded SBOM (they go through the image-direct scan fallback).
+# BC-100's move to python-scratch-trixie inadvertently inherited the base's
+# SBOM, breaking FG-020 + FG-032. Remove it to restore the invariant.
+# Base runs as uid 65532; temporarily switch to root to unlink, then back.
+USER 0
+RUN ["/usr/local/bin/python3", "-c", "import os; os.path.exists('/sbom.json') and os.unlink('/sbom.json')"]
+USER 65532:65532
+
 WORKDIR /app
 COPY --from=builder --chown=65532:65532 /app /app
 
