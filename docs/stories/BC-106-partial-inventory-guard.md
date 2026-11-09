@@ -1,7 +1,7 @@
 ---
 id: BC-106
 title: Partial-inventory guard — scout reports expected/collected ratio
-status: in-progress
+status: shipped
 created: 2026-11-09
 branch: feat/BC-106-partial-inventory-guard
 plan: docs/plan/BC-106-partial-inventory-guard-plan.md
