@@ -106,4 +106,4 @@ Lifecycle: `draft → ready → in-progress → shipped`. Status matches each st
 | BC-111 | DockerAdapter pull retry — survive transient registry failures          | shipped     | — (merged to dev)                   |
 | BC-112 | Scan trigger proxy retry — survive transient scout unreachability       | shipped     | — (merged to dev)                   |
 | BC-113 | /scan payload size limit — DoS guard                                    | shipped     | — (merged to dev)                   |
-| BC-114 | Reconcile TOCTOU lock — serialize concurrent writes during auto-close   | in-progress | feat/BC-114-reconcile-toctou-lock   |
+| BC-114 | Reconcile TOCTOU lock — serialize concurrent writes during auto-close   | shipped     | — (merged to dev)                   |

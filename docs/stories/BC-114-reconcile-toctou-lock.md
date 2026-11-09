@@ -1,7 +1,7 @@
 ---
 id: BC-114
 title: Reconcile TOCTOU lock — serialize concurrent writes during auto-close
-status: in-progress
+status: shipped
 created: 2026-11-09
 branch: feat/BC-114-reconcile-toctou-lock
 plan: docs/plan/BC-114-reconcile-toctou-lock-plan.md
