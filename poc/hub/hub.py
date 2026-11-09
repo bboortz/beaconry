@@ -113,6 +113,23 @@ def _parse_positive_int_hub(raw: str | None, default: int, name: str) -> int:
     return v
 
 
+# BC-110: verify-probe retry. Probes that fire immediately after
+# `docker restart` can miss the service during its port-bind / healthcheck
+# `starting → healthy` transition. Pre-BC-110 a single-ms miss flagged
+# `verification_failed`. Now the hub retries the probe N times with
+# exponential backoff before giving up. BASE_S=2 → 2s/4s/8s between
+# attempts (first attempt is immediate).
+VERIFY_PROBE_MAX_ATTEMPTS = _parse_positive_int_hub(
+    os.environ.get("BEACONRY_VERIFY_PROBE_MAX_ATTEMPTS"),
+    3,
+    "BEACONRY_VERIFY_PROBE_MAX_ATTEMPTS",
+)
+VERIFY_PROBE_BASE_S = _parse_positive_int_hub(
+    os.environ.get("BEACONRY_VERIFY_PROBE_BASE_S"),
+    2,
+    "BEACONRY_VERIFY_PROBE_BASE_S",
+)
+
 # BC-109: grype DB update retry — wrap the startup `grype db update` in
 # a retry loop with capped exponential backoff. Pre-BC-109 a transient
 # network failure (timeout, 5xx, incomplete download) logged a warning
@@ -2246,7 +2263,15 @@ async def _handle_verify(query, finding: Finding, finding_id: str, parts: list[s
     # BC-011 fix: use the module-level _waterfall binding (dual-mode import
     # at the top of this file) rather than a fresh `from poc.hub.waterfall ...`
     # which fails inside the container (no `poc` package at /app).
-    result = await _waterfall.run_probe(probe)
+    # BC-110: retry the probe N times with exponential backoff so a
+    # 100ms-off-timing miss right after docker restart doesn't flag
+    # verification_failed. The probe's own timeout (5s for tcp/http)
+    # is unchanged; this just stacks attempts.
+    result = await _waterfall.run_probe_with_retry(
+        probe,
+        max_attempts=VERIFY_PROBE_MAX_ATTEMPTS,
+        base_s=VERIFY_PROBE_BASE_S,
+    )
     if result.ok:
         set_status(finding_id, "fixed_verified")
         await query.edit_message_text(

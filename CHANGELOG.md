@@ -4,6 +4,23 @@ All notable changes to beaconry are recorded here. The format is based
 on [Keep a Changelog](https://keepachangelog.com/), and this project
 follows [Semantic Versioning](https://semver.org/).
 
+## [v0.20.3] — 2026-11-09
+
+### Added (BC-110)
+
+- **Verify probe retry with exponential backoff.** `_handle_verify`
+  now retries the BC-011 health probe up to
+  `BEACONRY_VERIFY_PROBE_MAX_ATTEMPTS` times (default 3) with
+  exponential backoff (`BASE_S × 2^(attempt-1)`: 2s/4s/8s default).
+  Pre-BC-110 a single-shot probe fired immediately after
+  `docker restart` would miss the ~100-500ms port-binding window
+  and flag `verification_failed`; now the retry handles the
+  common race. All-attempts-fail still produces the same
+  terminal state — just after more attempts. `MAX_ATTEMPTS=1`
+  preserves single-shot semantics.
+- New `run_probe_with_retry` helper in `poc/hub/waterfall.py`.
+- Two new env vars + **CAP-T212**.
+
 ## [v0.20.2] — 2026-11-09
 
 ### Added (BC-109)
