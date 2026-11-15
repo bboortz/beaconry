@@ -138,7 +138,12 @@ def format_table(rows: list[dict]) -> str:
     return "\n".join([header, separator, *body_lines])
 
 
-def load_findings(db_path: Path, status: str | None = None, host: str | None = None) -> list[dict]:
+def load_findings(
+    db_path: Path,
+    status: str | None = None,
+    host: str | None = None,
+    cve: str | None = None,
+) -> list[dict]:
     if not db_path.exists():
         return []
     display_columns = [key for key, _, _ in COLUMNS]
@@ -160,6 +165,17 @@ def load_findings(db_path: Path, status: str | None = None, host: str | None = N
         if host:
             conds.append("host = ?")
             params_list.append(host)
+        if cve:
+            # BC-123: match primary CVE id OR cve_alias (BC-043). "GO-2026-X"
+            # might be stored with its CVE alias in `cve_alias`; one arg
+            # finds it either way.
+            if "cve_alias" in schema_cols:
+                conds.append("(cve_id = ? OR cve_alias = ?)")
+                params_list.append(cve)
+                params_list.append(cve)
+            else:
+                conds.append("cve_id = ?")
+                params_list.append(cve)
         if conds:
             sql += " WHERE " + " AND ".join(conds)
         params: tuple[str, ...] = tuple(params_list)
@@ -244,6 +260,9 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     # BC-057: filter by host so operators running multi-host scouts can
     # focus on one source at a time (`make findings HOST=laptop`).
     p.add_argument("--host", default=None, help="filter by host label (BC-057)")
+    # BC-123: filter by CVE id so "did GO-2026-6888 land?" is a single
+    # command, not a pipe through grep. Matches primary id + alias.
+    p.add_argument("--cve", default=None, help="filter by CVE id (BC-123)")
     return p.parse_args(argv)
 
 
@@ -270,14 +289,17 @@ def _running_compose_hub() -> bool:
     return result.returncode == 0 and result.stdout.strip() == "true"
 
 
-def _run_in_container(args: list[str], host: str | None = None) -> int:
+def _run_in_container(args: list[str], host: str | None = None, cve: str | None = None) -> int:
     """Exec findings.py inside the running hub container; stream output to our stdout."""
     import subprocess
 
     # BC-057: HOST filter needs its own placeholder in the inline script.
-    script = _INLINE_FINDINGS_SCRIPT.replace(
-        "##STATUS_FILTER##", repr(args[-1] if args else None)
-    ).replace("##HOST_FILTER##", repr(host))
+    # BC-123: CVE filter placeholder.
+    script = (
+        _INLINE_FINDINGS_SCRIPT.replace("##STATUS_FILTER##", repr(args[-1] if args else None))
+        .replace("##HOST_FILTER##", repr(host))
+        .replace("##CVE_FILTER##", repr(cve))
+    )
     cmd = [
         "docker",
         "exec",
@@ -303,6 +325,7 @@ if not os.path.exists(db):
     print(f'No findings in {db} yet.'); sys.exit(0)
 status = ##STATUS_FILTER##
 host_filter = ##HOST_FILTER##
+cve_filter = ##CVE_FILTER##
 con = sqlite3.connect(f'file:{db}?mode=ro', uri=True)
 cols = {r[1] for r in con.execute('PRAGMA table_info(findings)')}
 tier_sort = ', tier' if 'tier' in cols else ''
@@ -312,6 +335,11 @@ sql = f'SELECT cve_id,severity,cvss,host,source_ref,package,status{tier_sort}{ke
 conds, params = [], []
 if status: conds.append('status=?'); params.append(status)
 if host_filter: conds.append('host=?'); params.append(host_filter)
+if cve_filter:
+    if 'cve_alias' in cols:
+        conds.append('(cve_id=? OR cve_alias=?)'); params.append(cve_filter); params.append(cve_filter)
+    else:
+        conds.append('cve_id=?'); params.append(cve_filter)
 if conds: sql += ' WHERE ' + ' AND '.join(conds)
 rows = con.execute(sql, tuple(params)).fetchall()
 if not rows:
@@ -339,7 +367,9 @@ for r in rows:
 """
 
 
-def _findings_via_http(cfg, status: str | None, host: str | None = None) -> int:  # type: ignore[no-untyped-def]
+def _findings_via_http(  # type: ignore[no-untyped-def]
+    cfg, status: str | None, host: str | None = None, cve: str | None = None
+) -> int:
     """BC-055 HTTP path for remote hubs. Returns the CLI exit code."""
     import urllib.parse
 
@@ -351,6 +381,8 @@ def _findings_via_http(cfg, status: str | None, host: str | None = None) -> int:
         qs["status"] = status
     if host:
         qs["host"] = host
+    if cve:
+        qs["cve_id"] = cve  # BC-123
     if qs:
         url += "?" + urllib.parse.urlencode(qs)
     try:
@@ -385,20 +417,22 @@ def main(argv: list[str] | None = None) -> int:
     )
 
     if source == "http":
-        return _findings_via_http(cfg, args.status, args.host)
+        return _findings_via_http(cfg, args.status, args.host, args.cve)
 
     if source == "local-compose":
-        return _run_in_container([args.status] if args.status else [], host=args.host)
+        return _run_in_container([args.status] if args.status else [], host=args.host, cve=args.cve)
 
     data_dir = Path(os.environ.get("DATA_DIR", ".beaconry-cache"))
     db_path = data_dir / "beaconry.db"
-    rows = load_findings(db_path, status=args.status, host=args.host)
+    rows = load_findings(db_path, status=args.status, host=args.host, cve=args.cve)
     if not rows:
         filter_desc = []
         if args.status:
             filter_desc.append(f"status={args.status!r}")
         if args.host:
             filter_desc.append(f"host={args.host!r}")
+        if args.cve:
+            filter_desc.append(f"cve={args.cve!r}")
         if filter_desc:
             print(f"No findings with {' + '.join(filter_desc)} in {db_path}.")
         else:

@@ -548,7 +548,92 @@ _pipeline_integrity_mismatches: int = 0
 # belief of "last delivered" hashes; hub compares and increments the
 # counter on mismatch — catches silent transport loss where /scan POST
 # never reached the hub (scout thinks it delivered X, hub never saw X).
+# BC-123: hydrated from `integrity_state` table on boot (see
+# load_integrity_persistence) so a hub restart doesn't lose the cache.
 _last_scan_integrity_per_host: dict[str, dict[str, str | None]] = {}
+
+
+def load_integrity_persistence() -> None:
+    """BC-123: hydrate BC-122's in-memory integrity state from SQLite on
+    hub boot. No-op if the tables are absent (pre-migration) or empty."""
+    global _pipeline_integrity_mismatches
+    try:
+        con = sqlite3.connect(DB_PATH)
+    except sqlite3.OperationalError:
+        return
+    try:
+        row = con.execute(
+            "SELECT value FROM integrity_counters WHERE key = 'pipeline_integrity_mismatches'"
+        ).fetchone()
+        if row and isinstance(row[0], int):
+            _pipeline_integrity_mismatches = int(row[0])
+        for host, iteration_hash, transfer_hash, _ in con.execute(
+            "SELECT host, iteration_hash, transfer_hash, last_updated_ts FROM integrity_state"
+        ):
+            _last_scan_integrity_per_host[host] = {
+                "iteration_hash": iteration_hash,
+                "transfer_hash": transfer_hash,
+            }
+    except sqlite3.OperationalError:
+        # Tables don't exist yet (first boot before init_db ran, or an
+        # old DB file that hasn't been migrated). Degrade silently; the
+        # next scan_integrity write populates the state.
+        pass
+    finally:
+        con.close()
+
+
+def _persist_integrity_counter() -> None:
+    """BC-123: flush `_pipeline_integrity_mismatches` to SQLite. Called
+    from every spot that mutates the counter so restart doesn't lose
+    the signal. Fail-open — a DB write failure logs + continues; the
+    in-memory counter is still correct for the live process."""
+    try:
+        con = sqlite3.connect(DB_PATH)
+    except sqlite3.OperationalError:
+        return
+    try:
+        con.execute(
+            "INSERT INTO integrity_counters (key, value) VALUES (?, ?) "
+            "ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+            ("pipeline_integrity_mismatches", _pipeline_integrity_mismatches),
+        )
+        con.commit()
+    except sqlite3.OperationalError as e:
+        log.warning("BC-123: couldn't persist integrity counter: %s", e)
+    finally:
+        con.close()
+
+
+def _persist_integrity_state(
+    host: str, iteration_hash: str | None, transfer_hash: str | None
+) -> None:
+    """BC-123: flush per-host `_last_scan_integrity_per_host[host]` to
+    SQLite. Called at the end of `_ingest_candidates` in lockstep with
+    the audit-event emit so the on-disk copy and the audit stream stay
+    in sync."""
+    if not host:
+        return
+    try:
+        con = sqlite3.connect(DB_PATH)
+    except sqlite3.OperationalError:
+        return
+    try:
+        con.execute(
+            "INSERT INTO integrity_state "
+            "(host, iteration_hash, transfer_hash, last_updated_ts) "
+            "VALUES (?, ?, ?, ?) "
+            "ON CONFLICT(host) DO UPDATE SET "
+            "iteration_hash = excluded.iteration_hash, "
+            "transfer_hash = excluded.transfer_hash, "
+            "last_updated_ts = excluded.last_updated_ts",
+            (host, iteration_hash, transfer_hash, int(time.time())),
+        )
+        con.commit()
+    except sqlite3.OperationalError as e:
+        log.warning("BC-123: couldn't persist integrity state for %s: %s", host, e)
+    finally:
+        con.close()
 
 
 async def _dispatch_integrity_alert(
@@ -667,7 +752,7 @@ except ImportError:
 
 HUB_VERSION = SOFTWARE_VERSION  # back-compat alias
 API_VERSION = 1
-EXPECTED_SCHEMA_VERSION = 11
+EXPECTED_SCHEMA_VERSION = 12  # BC-123: integrity_state + integrity_counters tables
 STRICT_API = os.environ.get("BEACONRY_STRICT_API") == "1"
 
 
@@ -1000,6 +1085,25 @@ def init_db() -> None:
             GROUP BY host
             ON CONFLICT(host) DO NOTHING
         """)
+    # BC-123: durable pipeline-integrity state. Two tables: per-host cache
+    # of the most recent scan_integrity's claimed hashes (survives restart
+    # so the next heartbeat still cross-checks), and a key-value counter
+    # store for `pipeline_integrity_mismatches`. Pure additive; no backfill
+    # needed (counter starts at 0, cache starts empty).
+    con.execute("""
+        CREATE TABLE IF NOT EXISTS integrity_state (
+            host             TEXT PRIMARY KEY,
+            iteration_hash   TEXT,
+            transfer_hash    TEXT,
+            last_updated_ts  INTEGER NOT NULL
+        )
+    """)
+    con.execute("""
+        CREATE TABLE IF NOT EXISTS integrity_counters (
+            key   TEXT PRIMARY KEY,
+            value INTEGER NOT NULL
+        )
+    """)
     # BC-062: stamp the DB with the schema version we just migrated to.
     con.execute(f"PRAGMA user_version = {EXPECTED_SCHEMA_VERSION}")
     con.commit()
@@ -1622,6 +1726,16 @@ async def process_sbom_entry(
         # Filtering by CVSS first would make Tier 0 unreachable below
         # MIN_CVSS, which is the exact bug BC-020 was supposed to prevent.
         if not is_kev and cvss < MIN_CVSS:
+            # BC-123: per-CVE audit event so "where did my CVE go?" is a
+            # grep away. Pre-BC-123 this was `continue` + no artifact.
+            _audit.append(
+                "finding_filtered",
+                host=host,
+                cve_id=cve_id,
+                reason="min_cvss",
+                cvss=cvss,
+                min_cvss=MIN_CVSS,
+            )
             continue
         if is_kev and cvss < MIN_CVSS:
             log.info(
@@ -2196,6 +2310,21 @@ def _snooze_button_label(hours: int) -> str:
     return f"{hours}h"
 
 
+def _snooze_button_label_with_expiry(hours: int, now: int | None = None) -> str:
+    """BC-123: `_snooze_button_label` + ` (→ HH:MM)` suffix so the operator
+    sees when the snooze actually expires in UTC. Prevents the "did that
+    tap work?" anxiety after the message's inline keyboard disappears.
+
+    `now` is injected for deterministic tests. Format is HH:MM UTC —
+    matches the audit-log timezone (no cross-TZ math for the operator)."""
+    import datetime as _dt
+
+    now_ts = now if now is not None else int(time.time())
+    expiry_ts = now_ts + hours * 3600
+    expiry = _dt.datetime.fromtimestamp(expiry_ts, tz=_dt.UTC)
+    return f"{_snooze_button_label(hours)} (→ {expiry.strftime('%H:%M')})"
+
+
 def _kb_finding(finding: Finding) -> "InlineKeyboardMarkup":
     """First-fire + heartbeat buttons — Fix / Snooze(s) / Accept risk.
 
@@ -2204,9 +2333,11 @@ def _kb_finding(finding: Finding) -> "InlineKeyboardMarkup":
     Operator can set the env to a single value (e.g. `4`) to keep the
     original one-button layout.
     """
+    # BC-123: label carries absolute expiry time so operator sees
+    # "⏰ 1h (→ 00:47)" and knows exactly when the snooze lifts.
     snooze_buttons = [
         InlineKeyboardButton(
-            f"⏰ {_snooze_button_label(h)}",
+            f"⏰ {_snooze_button_label_with_expiry(h)}",
             callback_data=_cb_data("snooze", finding, str(h)),
         )
         for h in SNOOZE_DEFAULT_HOURS
@@ -2902,6 +3033,11 @@ async def lifespan(  # noqa: PLR0915 - orchestration function; each background t
 
     init_db()
 
+    # BC-123: hydrate BC-122's integrity state (counter + per-host cache)
+    # from SQLite so a hub restart doesn't lose the mismatch count and the
+    # next scout heartbeat still cross-checks against the right hashes.
+    load_integrity_persistence()
+
     # BC-020: warm KEV in-memory from disk cache so the first scan already has
     # urgency scoring (even if the HTTP fetch is still pending). Also kicks off
     # the hourly refresh loop. Non-blocking: /readyz does NOT wait on KEV.
@@ -3321,9 +3457,14 @@ _FINDINGS_ENDPOINT_COLS = (
 async def http_findings(
     status: str | None = None,
     host: str | None = None,
+    cve_id: str | None = None,
     limit: int = 500,
 ) -> list[dict]:
-    """BC-055: read-only JSON view of findings matching `make findings`."""
+    """BC-055: read-only JSON view of findings matching `make findings`.
+
+    BC-123: `cve_id` filter matches `cve_id` column OR BC-043 `cve_alias`
+    so operators can grep a GO-* / GHSA-* primary and still find its CVE
+    twin in one shot."""
     if not DB_PATH.exists():
         return []
     con = sqlite3.connect(f"file:{DB_PATH}?mode=ro", uri=True)
@@ -3343,6 +3484,14 @@ async def http_findings(
         if host:
             conds.append("host = ?")
             params.append(host)
+        if cve_id:
+            if "cve_alias" in schema_cols:
+                conds.append("(cve_id = ? OR cve_alias = ?)")
+                params.append(cve_id)
+                params.append(cve_id)
+            else:
+                conds.append("cve_id = ?")
+                params.append(cve_id)
         if conds:
             sql += " WHERE " + " AND ".join(conds)
         sql += " LIMIT ?"
@@ -3809,6 +3958,13 @@ def _hub_healthz_summary() -> dict:
         # corruption somewhere on the scout→hub path; audit log has
         # per-event details. `beaconry status` surfaces this in DETAILS.
         "pipeline_integrity_mismatches": _pipeline_integrity_mismatches,
+        # BC-123: policy knobs echoed back so `beaconry status` can show
+        # them in a POLICIES line. Operator sees running config without
+        # `docker exec env` greps. These are config echoes, not health
+        # signals — excluded from the aggregate `degraded` check below.
+        "min_cvss": MIN_CVSS,
+        "max_findings_per_run": int(os.environ.get("BEACONRY_MAX_FINDINGS_PER_RUN", "5")),
+        "scan_interval_s": int(os.environ.get("SCAN_INTERVAL", "300")),
     }
     # KEV is non-fatal — stale/unfetched surface in /healthz but don't flip "degraded".
     # BC-066: executor is a policy label, not a health signal — exclude it too.
@@ -3835,6 +3991,10 @@ def _hub_healthz_summary() -> dict:
             "audit_last_error",
             # BC-122: counter, not a boolish check.
             "pipeline_integrity_mismatches",
+            # BC-123: policy echoes, not health signals.
+            "min_cvss",
+            "max_findings_per_run",
+            "scan_interval_s",
         )
     ]
     degraded = any(v not in ("ok", "polling", "mock") for v in bool_checks)
@@ -4749,6 +4909,21 @@ async def receive_scan(payload: dict, request: _FastAPIRequest) -> dict:
             candidates.extend(await process_sbom_entry(entry, host, port_exposure=port_exposure))
         except Exception as e:  # noqa: BLE001
             log.error("Error processing SBOM entry: %s", e)
+            # BC-123: audit the swallowed exception so operator can see
+            # which SBOM failed (source_ref) + how many of N SBOMs this
+            # scan lost. Pre-BC-123 this was log-only — the scan looked
+            # clean but half the containers may have silently contributed
+            # zero candidates.
+            source_ref_hint = ""
+            if isinstance(entry, dict):
+                meta = entry.get("source") or {}
+                source_ref_hint = (meta.get("image") if isinstance(meta, dict) else None) or ""
+            _audit.append(
+                "sbom_processing_failed",
+                host=host,
+                source_ref=source_ref_hint,
+                error=str(e)[:400],
+            )
 
     # BC-122: pipeline-integrity verification. Scout embeds an
     # `integrity` block with `iteration_hash`, `transfer_hash`, `n_sboms`
@@ -4768,6 +4943,7 @@ async def receive_scan(payload: dict, request: _FastAPIRequest) -> dict:
     if transfer_match is False:
         global _pipeline_integrity_mismatches
         _pipeline_integrity_mismatches += 1
+        _persist_integrity_counter()  # BC-123: survive hub restart
         log.warning(
             "BC-122: transfer_hash MISMATCH on %s iteration=%s claimed=%s computed=%s",
             host,
@@ -4897,6 +5073,7 @@ def _record_heartbeat_mismatch(
     mismatches (both "no record on hub" and "record differs" variants)."""
     global _pipeline_integrity_mismatches
     _pipeline_integrity_mismatches += 1
+    _persist_integrity_counter()  # BC-123: survive hub restart
     log.warning(
         "BC-122: heartbeat integrity MISMATCH host=%s claim_iter=%s claim_xfer=%s "
         "hub_iter=%s hub_xfer=%s",
@@ -5019,6 +5196,18 @@ async def _ingest_candidates(
             await notify(f)
         except Exception as e:  # noqa: BLE001 — one bad notify must not kill the loop
             log.warning("notify failed for %s: %s", f.cve_id, e)
+            # BC-123: persist the exception as an audit event so operators
+            # can see "finding saved but never alerted" — the exact class
+            # we previously missed. The retry queue (BC-104) can't actually
+            # replay this (the formatted text never left the handler), so
+            # audit visibility is the honest signal.
+            _audit.append(
+                "notify_failed",
+                host=host,
+                finding_id=f.id,
+                cve_id=f.cve_id,
+                error=str(e)[:400],
+            )
             continue
         new_findings += 1
         await asyncio.sleep(0.3)  # mild rate-limiting vs. Telegram flood control
@@ -5106,11 +5295,13 @@ async def _ingest_candidates(
     ctx = integrity_ctx
     # BC-122: cache the most recent scan-integrity state per host so the
     # next heartbeat can cross-check scout's claim.
+    # BC-123: and flush to SQLite so the cache survives hub restart.
     if ctx is not None:
         _last_scan_integrity_per_host[host] = {
             "iteration_hash": ctx.iteration_hash,
             "transfer_hash": ctx.transfer_hash_claimed,
         }
+        _persist_integrity_state(host, ctx.iteration_hash, ctx.transfer_hash_claimed)
     _audit.append(
         "scan_integrity",
         host=host,
