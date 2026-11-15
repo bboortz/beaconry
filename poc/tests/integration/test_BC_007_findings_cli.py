@@ -197,7 +197,9 @@ def test_long_fields_truncate_with_ellipsis(tmp_path: Path) -> None:
         # BC-030: NET exposure column added (3 chars + 2-space separator = +5) → 130 chars total.
         # BC-105: Status widened 19→25 to fit "auto_fixed (stale-scout)" (+6); added
         # FIRST SEEN (10 chars + 2) + LAST CHANGE (11 chars + 2) → ~170 chars total.
-        assert len(line) <= 170, f"line too long: {line!r}"
+        # fix/findings-http-missing-timestamp-columns: added LAST SEEN (10 + 2 = +12)
+        # → ~182 chars total. Header line is 173 chars; cap at 185 for breathing room.
+        assert len(line) <= 185, f"line too long: {line!r}"
 
 
 def test_unit_format_table_renders_header_and_rows() -> None:

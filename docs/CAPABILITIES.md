@@ -1937,14 +1937,15 @@ Enforcement: `poc/scripts/verify_traceability.py` runs as part of `make check`. 
 - **verified by:**
   - `poc/tests/unit/test_BC_106_partial_inventory_guard.py`
 
-### CAP-T207: Findings CLI shows FIRST SEEN + LAST CHANGE + auto-close reason
+### CAP-T207: Findings CLI shows FIRST SEEN + LAST CHANGE + LAST SEEN + auto-close reason
 - **type:** technical
 - **status:** active
-- **origin:** BC-105 — pre-BC-105, `make findings` showed status but no *when* info. Three distinct auto-close paths (BC-086 POST / BC-102 stale-scout / operator-manual) all rendered as `status=auto_fixed` with no discriminator. Operators had to grep audit.log to answer "when did this appear?" or "why did the system close this?".
-- **description:** Schema v9 → v10 adds `close_reason TEXT` + `last_status_change_ts INTEGER NOT NULL DEFAULT 0` on findings via idempotent ALTER. Three auto-close write sites stamp them: BC-086 `reconcile_scan` → `close_reason='post_absent'`; BC-102 `_stale_scout_reconcile_tick` → `close_reason='stale_scout'`; `set_status` → `close_reason='operator'` when transitioning to fixed/fixed_verified/accepted. `make findings` gains FIRST SEEN + LAST CHANGE age-formatted columns (via BC-105 `_format_age` helper); the Status cell widens to 25 chars and renders `auto_fixed (<label>)` when `close_reason` is set. Legacy rows (`last_status_change_ts=0`) show `—`.
+- **origin:** BC-105 — pre-BC-105, `make findings` showed status but no *when* info. Three distinct auto-close paths (BC-086 POST / BC-102 stale-scout / operator-manual) all rendered as `status=auto_fixed` with no discriminator. Operators had to grep audit.log to answer "when did this appear?" or "why did the system close this?". Extended by `fix/findings-http-missing-timestamp-columns` (2026-11-15) to also surface a LAST SEEN age column, and to make all three timestamp cells work over the hub's HTTP /findings endpoint (pre-fix: those cells rendered empty on every row because `_FINDINGS_ENDPOINT_COLS` omitted the raw timestamp columns and the CLI's HTTP path skipped the `_fmt` derivation).
+- **description:** Schema v9 → v10 adds `close_reason TEXT` + `last_status_change_ts INTEGER NOT NULL DEFAULT 0` on findings via idempotent ALTER. Three auto-close write sites stamp them: BC-086 `reconcile_scan` → `close_reason='post_absent'`; BC-102 `_stale_scout_reconcile_tick` → `close_reason='stale_scout'`; `set_status` → `close_reason='operator'` when transitioning to fixed/fixed_verified/accepted. `make findings` renders three age-formatted columns via `_format_age`: FIRST SEEN (`found_at`), LAST CHANGE (`last_status_change_ts`), LAST SEEN (`last_seen_ts`). The Status cell widens to 25 chars and renders `auto_fixed (<label>)` when `close_reason` is set. Legacy rows (0/NULL timestamps) show `—`. `poc/scripts/findings.py::_decorate_rows` is the single derivation helper called from both `load_findings` (local DB) and `_findings_via_http` (remote hub). `poc/hub/hub.py::_FINDINGS_ENDPOINT_COLS` now serializes `found_at`, `last_status_change_ts`, `last_seen_ts`, `close_reason`, `cross_repo_hint` so the HTTP path has all the data the formatter needs.
 - **supports:** CAP-T047, CAP-B023
 - **verified by:**
   - `poc/tests/unit/test_BC_105_findings_cli_lifecycle.py`
+  - `poc/tests/unit/test_findings_timestamp_columns.py`
 
 ### CAP-T206: Notification retry queue with exponential backoff
 - **type:** technical
