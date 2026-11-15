@@ -85,6 +85,20 @@ _SUBCOMMANDS: dict[str, tuple[str, str, str]] = {
         "    SOAK_WINDOW_S=1800 beaconry soak   # 30-min window\n"
         "    DATA_DIR=/data beaconry soak        # alt audit log path",
     ),
+    "verify-integrity": (
+        "poc.scripts.verify_integrity",
+        "verify scout→hub pipeline integrity from the audit log (BC-122)",
+        "Usage: beaconry verify-integrity [--since 24h]\n"
+        "\n"
+        "Walks the hub's audit log, verifies every scan_integrity event:\n"
+        "  - transfer_hash claimed by scout == hub's recompute\n"
+        "  - n_candidates == n_persisted + known filter buckets\n"
+        "\n"
+        "Exit codes: 0 all verified (legacy nulls tolerated), 1 mismatch\n"
+        "or unexplained drop, 2 audit log unreadable.\n"
+        "    beaconry verify-integrity\n"
+        "    beaconry verify-integrity --since 24h",
+    ),
     "metrics": (
         "poc.scripts.metrics",
         "beaconry usability + feature-usage metrics (local file or hub /audit) (BC-075/BC-076)",

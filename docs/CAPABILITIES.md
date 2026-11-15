@@ -1801,6 +1801,16 @@ Enforcement: `poc/scripts/verify_traceability.py` runs as part of `make check`. 
 - **verified by:**
   - `poc/tests/integration/test_BC_093_rescan_hooks.py`
 
+### CAP-T223: Pipeline integrity hashes + runtime verifier
+- **type:** technical
+- **status:** active
+- **origin:** BC-122 — operator asked: "how do I know every finding my scouts saw actually made it to the hub and got processed?" Pre-BC-122 the answer was "trust the logs". A scout cycle that silently dropped half its SBOMs (BC-107 retry queue broken pre-BC-120, network flap mid-POST, hub filter edge case) looked identical to a healthy cycle.
+- **description:** Scout computes `iteration_hash` (sha256-trunc16 over `host + "\n" + iteration_ts + "\n" + sorted(image_refs)`) and `transfer_hash` (sha256-trunc16 over the canonicalized JSON body — `sort_keys=True, separators=(",", ":")` — WITHOUT the integrity block itself, to avoid chicken-and-egg). Scout embeds both plus `n_sboms` in the `/scan` body's `"integrity"` key and logs `BC-122: iteration=<h> sboms=N transfer=<h>`. Hub's `receive_scan` strips the integrity block, canonicalizes the remaining payload, and calls `_verify_transfer_hash` which returns `True` (match) / `False` (mismatch — monotonic counter `_pipeline_integrity_mismatches` increments + WARN log) / `None` (legacy scout, no hash sent). After `_ingest_candidates` runs, hub computes `processing_hash` over sorted persisted `finding.id`s and emits a `scan_integrity` audit event: `{host, iteration_hash, transfer_hash_claimed, transfer_hash_computed, transfer_match, n_sboms_claimed, n_sboms_received, n_candidates, n_persisted, n_dedup, n_capped, n_dropped_in_save, n_filtered_other, processing_hash}`. The invariant verifier asserts: `n_candidates == n_persisted + n_dedup + n_capped + n_dropped_in_save + n_filtered_other`. `poc/scripts/verify_integrity.py` + `beaconry verify-integrity [--since 24h]` + `make verify-integrity` walk the audit log and exit 0 iff every event is `transfer_match != False` AND every drop is fully accounted for. Opt-in `BEACONRY_PIPELINE_INTEGRITY_ALERT=1` adds Telegram notification on mismatch (default off until operator baselines false-positive rate). `/healthz.checks.pipeline_integrity_mismatches` surfaces the counter; `poc/scripts/status.py::_hub_details` appends `⚠ integrity: N mismatches` to the DETAILS cell when > 0 so operators see the fault the first time they run `beaconry status`.
+- **supports:** CAP-T207, CAP-T154, CAP-B023
+- **verified by:**
+  - `poc/tests/unit/test_BC_122_pipeline_integrity.py`
+  - `poc/tests/integration/test_BC_122_pipeline_integrity.py`
+
 ### CAP-T222: Scout state DB path degradation + /healthz visibility
 - **type:** technical
 - **status:** active

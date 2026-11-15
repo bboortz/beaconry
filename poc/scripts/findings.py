@@ -53,6 +53,11 @@ COLUMNS: list[tuple[str, str, int]] = [
     ("found_at_fmt", "First seen", 10),  # BC-105
     ("last_change_fmt", "Last change", 11),  # BC-105
     ("last_seen_fmt", "Last seen", 10),  # fix/findings-http-missing-timestamp-columns
+    # BC-122: `absent_count` — scans in a row this finding hasn't appeared.
+    # Operator question "how many runs have missed this?" answered at a glance.
+    # Rendered as "N" (plain int, "0" for fresh); auto_fixed rows carry the final
+    # threshold value from before close.
+    ("absent_count", "Absent", 6),
 ]
 SORT_ONLY_COLUMNS = (
     "tier",

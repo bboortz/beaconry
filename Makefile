@@ -1,4 +1,4 @@
-.PHONY: help lint format type test check check-full demo smoke clean cleanup install-hooks verify-traceability verify-dockerfile-health-copy verify-dockerfile-sources verify-pinned-versions verify-base-images verify-memory-drift verify-compose-env-propagation verify-docs-drift verify-evidence-pointers verify-per-file-coverage verify-variables verify-install-doc verify-version-sync verify-version-bumped verify-changelog verify-feature-complete bump-patch bump-minor bump-major bump-auto changelog findings status audit soak metrics test-e2e live-rebuild live-status scan set-status test-scenarios test-cli dogfood-scan dogfood-sbom test-cold-start
+.PHONY: help lint format type test check check-full demo smoke clean cleanup install-hooks verify-traceability verify-dockerfile-health-copy verify-dockerfile-sources verify-pinned-versions verify-base-images verify-memory-drift verify-compose-env-propagation verify-docs-drift verify-evidence-pointers verify-per-file-coverage verify-variables verify-install-doc verify-version-sync verify-version-bumped verify-changelog verify-feature-complete bump-patch bump-minor bump-major bump-auto changelog findings status audit soak metrics verify-integrity test-e2e live-rebuild live-status scan set-status test-scenarios test-cli dogfood-scan dogfood-sbom test-cold-start
 
 PYTHON ?= python3
 PYTEST_ARGS ?=
@@ -47,6 +47,8 @@ help:
 	@echo "                                  SOAK_WINDOW_S=1800 for 30m; DATA_DIR=/data for alt path"
 	@echo "  make metrics                    usability + feature-usage report from audit.log (BC-075)"
 	@echo "                                  ARGS=\"usability|features|all --since 7d --json\" to drill in"
+	@echo "  make verify-integrity           verify every scout→hub scan iteration is lossless (BC-122)"
+	@echo "                                  ARGS=\"--since 24h\" to narrow window"
 	@echo ""
 	@echo "Tiers:"
 	@echo "  make check         FAST TIER — all gates above (~7s)"
@@ -216,6 +218,12 @@ soak:
 #   make metrics ARGS="features --json --since 24h"
 metrics:
 	$(PYTHON) -m poc.scripts.metrics $(ARGS)
+
+# BC-122: verify every scan iteration transferred and processed losslessly.
+#   make verify-integrity                 # all iterations in the audit log
+#   make verify-integrity ARGS="--since 24h"   # last 24h only
+verify-integrity:
+	$(PYTHON) -m poc.scripts.verify_integrity $(ARGS)
 
 check: lint type test verify-per-file-coverage verify-traceability verify-dockerfile-health-copy verify-dockerfile-sources verify-pinned-versions verify-base-images verify-memory-drift verify-compose-env-propagation verify-docs-drift verify-evidence-pointers verify-variables verify-install-doc verify-version-sync verify-changelog verify-feature-complete smoke
 	@echo ""

@@ -79,6 +79,11 @@ services:
       # BC-117: cross-repo CVE fix policy — route findings whose fix lives
       # in another repo to awaiting_upstream status. Empty = feature off.
       - BEACONRY_CROSSREPO_SOURCES=${BEACONRY_CROSSREPO_SOURCES:-}
+      # BC-122: opt-in Telegram alert on pipeline-integrity mismatch.
+      # 0 = silent (audit always records; /healthz + make status still
+      # surface the counter). Default off until operator's baseline
+      # false-positive rate is known.
+      - BEACONRY_PIPELINE_INTEGRITY_ALERT=${BEACONRY_PIPELINE_INTEGRITY_ALERT:-0}
       # BC-089: snooze buttons + sweep.
       - BEACONRY_SNOOZE_DEFAULT_HOURS=${BEACONRY_SNOOZE_DEFAULT_HOURS:-1,4,24,168}
       - BEACONRY_SNOOZE_SWEEP_INTERVAL_S=${BEACONRY_SNOOZE_SWEEP_INTERVAL_S:-60}
