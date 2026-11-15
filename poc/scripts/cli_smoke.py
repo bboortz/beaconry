@@ -139,8 +139,13 @@ class S02StatusShowsBothServices(CliScenario):
         r = run_make("status")
         if r.returncode != 0:
             raise AssertionError(f"`make status` exited {r.returncode}: {r.stderr[:200]}")
-        assert_contains(r.stdout, HUB_CONTAINER)
-        assert_contains(r.stdout, SCOUT_CONTAINER)
+        # NAME column renders the service's logical name (`status.py` hard-codes
+        # `"beaconry-hub"` / `"beaconry-scout"`), not the dev-compose container
+        # name. Pre-BC-101 the two happened to align; BC-101 renamed containers
+        # to `beaconry-dev-*` while NAME stayed stable — this assertion must
+        # check the NAME values, not HUB_CONTAINER / SCOUT_CONTAINER.
+        assert_contains(r.stdout, "beaconry-hub")
+        assert_contains(r.stdout, "beaconry-scout")
 
 
 class S03AuditLastWithFilter(CliScenario):
