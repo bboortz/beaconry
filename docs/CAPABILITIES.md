@@ -1801,6 +1801,15 @@ Enforcement: `poc/scripts/verify_traceability.py` runs as part of `make check`. 
 - **verified by:**
   - `poc/tests/integration/test_BC_093_rescan_hooks.py`
 
+### CAP-T220: `beaconry status` URL + host + fleet (you) marker display
+- **type:** business
+- **status:** active
+- **origin:** BC-118 — operator on bb-82jq saw `beaconry-scout: down` with no URL / host / linkage context, couldn't tell whether the "down" row referred to the dev-compose scout on localhost:18001 (expected absent on this host) or the systemd scout on :8001 (actually running + healthy, visible as bb-82jq in the FLEET table below). Hub-row had the same ambiguity for its probed URL.
+- **description:** `poc/scripts/status.py` adds `ServiceStatus.probed_url`; `gather_hub_status` and `gather_scout_status` set it on both success + down branches. `_format_table` inserts a `URL` column between `NAME` and `STATE`. New `_scout_down_detail(url)` classifies scout-probe failure into three distinguishable messages: `"down (dev-compose not configured on this host)"` (no `poc/docker-compose.yml` in a reachable repo root), `"down (compose stack not up — try cd poc && docker compose up -d)"` (compose config present but no `beaconry-dev-scout` container), `"down (unreachable at <url>)"` (container present but HTTP probe failed). `main()` prints `Running on: <socket.gethostname()>` as the first line so operators know which machine the CLI ran on. `format_fleet(rows, local_hostname=...)` gains a kwarg; the row whose `host` matches renders as `<host> (you)` so operators see the two-table structure as one coherent thing (`bb-82jq (you)` in FLEET lines up with the running-on header).
+- **supports:** CAP-T046, CAP-B023
+- **verified by:**
+  - `poc/tests/unit/test_BC_118_status_url_host_fleet.py`
+
 ### CAP-T219: Cross-repo CVE fix workflow — `awaiting_upstream` + policy-mapped Telegram hint
 - **type:** business
 - **status:** active

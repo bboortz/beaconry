@@ -109,4 +109,5 @@ Lifecycle: `draft → ready → in-progress → shipped`. Status matches each st
 | BC-114 | Reconcile TOCTOU lock — serialize concurrent writes during auto-close   | shipped     | — (merged to dev)                   |
 | BC-115 | Audit write failure sticky flag — surface disk-full degradation         | shipped     | — (merged to dev)                   |
 | BC-116 | Finding state machine extension — add `fixing` + `rolled_back` statuses | shipped     | — (merged to dev)                   |
-| BC-117 | Cross-repo CVE fix workflow — awaiting_upstream status + Telegram hint  | in-progress | feat/BC-117-cross-repo-cve-fix-workflow |
+| BC-117 | Cross-repo CVE fix workflow — awaiting_upstream status + Telegram hint  | shipped     | — (merged to dev)                   |
+| BC-118 | `beaconry status` — probed URLs + running host + fleet (you) marker     | in-progress | feat/BC-118-status-url-host-fleet-linkage |
