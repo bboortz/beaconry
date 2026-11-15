@@ -3205,6 +3205,16 @@ _FINDINGS_ENDPOINT_COLS = (
     "package",
     "status",
     "tier",
+    # Timestamp columns the CLI formats into First seen / Last change /
+    # Last seen age cells. Pre-this-fix the endpoint omitted them, so
+    # `beaconry findings` on a remote hub rendered those columns empty.
+    "found_at",
+    "last_status_change_ts",
+    "last_seen_ts",
+    # BC-105: close_reason powers the auto_fixed (<reason>) suffix.
+    "close_reason",
+    # BC-117: cross_repo_hint powers the awaiting_upstream (<policy_key>) suffix.
+    "cross_repo_hint",
 )
 
 

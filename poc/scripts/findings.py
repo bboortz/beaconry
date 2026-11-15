@@ -52,11 +52,13 @@ COLUMNS: list[tuple[str, str, int]] = [
     ("status", "Status", 25),  # BC-105 widened to fit `auto_fixed (stale-scout)`
     ("found_at_fmt", "First seen", 10),  # BC-105
     ("last_change_fmt", "Last change", 11),  # BC-105
+    ("last_seen_fmt", "Last seen", 10),  # fix/findings-http-missing-timestamp-columns
 ]
 SORT_ONLY_COLUMNS = (
     "tier",
     "found_at",
     "last_status_change_ts",
+    "last_seen_ts",  # fix/findings-http-missing-timestamp-columns
     "close_reason",
     "cross_repo_hint",  # BC-117
 )
@@ -171,15 +173,27 @@ def load_findings(db_path: Path, status: str | None = None, host: str | None = N
             -(r.get("cvss") or 0.0),
         )
     )
-    # BC-105 / BC-117: derive display cells from the persisted lifecycle columns.
+    _decorate_rows(rows)
+    return rows
+
+
+def _decorate_rows(rows: list[dict]) -> None:
+    """Derive display cells (First seen / Last change / Last seen / status
+    suffix) from the persisted lifecycle columns.
+
+    Shared between the local-DB path (`load_findings`) and the HTTP path
+    (`_findings_via_http`). Before this helper existed only `load_findings`
+    ran the derivation, so `beaconry findings` on a remote hub rendered
+    all three timestamp columns empty.
+    """
     import time as _time
 
     now = int(_time.time())
     for row in rows:
         row["found_at_fmt"] = _format_age(row.get("found_at"), now=now)
         row["last_change_fmt"] = _format_age(row.get("last_status_change_ts"), now=now)
+        row["last_seen_fmt"] = _format_age(row.get("last_seen_ts"), now=now)
         row["status"] = _decorate_status(row)
-    return rows
 
 
 def _decorate_status(row: dict) -> str:
@@ -342,6 +356,10 @@ def _findings_via_http(cfg, status: str | None, host: str | None = None) -> int:
     if not isinstance(rows, list) or not rows:
         print(f"No findings on remote hub {cfg.hub_url}.")
         return 0
+    # Derive display cells (First seen / Last change / Last seen / status
+    # suffix) from the timestamp columns the hub serializes. Pre-this-fix
+    # the HTTP path skipped this and rendered those columns empty.
+    _decorate_rows(rows)
     print(format_table(rows))
     return 0
 
