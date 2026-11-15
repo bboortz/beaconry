@@ -32,6 +32,13 @@ COPY VERSION ./VERSION
 # grype-DB-learned signals).
 RUN syft dir:/install -o syft-json=/sbom.json
 
+# BC-120: pre-create a stage-data dir so the runtime FS has a nonroot-owned
+# /data for scout's BC-107 pending_scans DB. Standalone scout
+# (docker-compose.scout-only.yml on bb-82jq, etc.) mounts no volume to
+# /data — pre-BC-120 the Dockerfile never created /data, nonroot UID
+# couldn't create it at /, and every POST silently dropped on hub outage.
+RUN mkdir -p /stage-data
+
 # BC-098 (pattern) + BC-099 (ABI guard). See hub/Dockerfile for the
 # full rationale + failure wording. Mounts the runtime base's
 # /usr/local/lib via BuildKit, reads the runtime Python minor from
@@ -81,6 +88,9 @@ COPY --from=builder --chown=65532:65532 /app /app
 # BC-096: baked-in SBOM. Served at GET /sbom + consumed by
 # `make dogfood-sbom` (`grype sbom:/sbom.json`).
 COPY --from=builder /sbom.json /sbom.json
+
+# BC-120: nonroot-writable /data. See builder stage for rationale.
+COPY --from=builder --chown=65532:65532 /stage-data /data
 
 ENV PYTHONUNBUFFERED=1
 

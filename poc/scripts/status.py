@@ -259,14 +259,34 @@ def _scout_details(body: dict) -> str:
     checks = body.get("checks", {})
     status = body.get("status", "unknown")
     images = checks.get("images_seen", 0)
+    # BC-120: surface state_db_degraded even when the top-level status is
+    # "ok" — the scan path still works but the retry queue is ephemeral,
+    # which operator must know about to apply the host-side fix.
+    extras = []
+    if checks.get("state_db_degraded"):
+        extras.append("state_db degraded")
     if status == "ok":
-        return f"{images} images · docker_socket ok"
+        base = f"{images} images · docker_socket ok"
+        return " · ".join([base, *extras]) if extras else base
     failed = [
         f"{k} {v}"
         for k, v in checks.items()
-        if k not in ("last_scan_ts", "images_seen", "bytes_posted") and v != "ok"
+        if k
+        not in (
+            "last_scan_ts",
+            "images_seen",
+            "bytes_posted",
+            # BC-120: these two aren't ok/unavailable strings, drop from the generic failed-check list.
+            "state_db_degraded",
+            "state_db_effective_path",
+            "pending_scans_queue_depth",
+            "docker_events_reconnects",
+            "docker_events_last_reconnect_ts",
+        )
+        and v != "ok"
     ]
-    return "degraded: " + ", ".join(failed) if failed else "degraded"
+    body_text = "degraded: " + ", ".join(failed) if failed else "degraded"
+    return " · ".join([body_text, *extras]) if extras else body_text
 
 
 def _format_version_cell(body: dict) -> tuple[str, int | None]:

@@ -1801,6 +1801,16 @@ Enforcement: `poc/scripts/verify_traceability.py` runs as part of `make check`. 
 - **verified by:**
   - `poc/tests/integration/test_BC_093_rescan_hooks.py`
 
+### CAP-T222: Scout state DB path degradation + /healthz visibility
+- **type:** technical
+- **status:** active
+- **origin:** BC-120 — bb-82jq's scout logged `BC-107: can't open scout-state.db at /data/scout-state.db: unable to open database file` continuously on 2026-11-15 because Docker created the named-volume `_data` dir as root:root 755 but scout runs UID 65532 (BC-078 distroless nonroot). Pre-BC-120 the fault silently dropped queued scans; `/healthz.pending_scans_queue_depth` returned 0 (misleading — the table couldn't be counted either), so `make status` showed "healthy".
+- **description:** `poc/scout/scout.py` adds `_state_db_degraded: bool` + `_effective_state_db_path: str` module globals set by `_init_scout_db` at startup. `_try_open_and_create(path)` extracts the sqlite3 connect + `CREATE TABLE pending_scans` happy-path; `_init_scout_db` calls it on `SCOUT_STATE_DB_PATH` first, then on `/tmp/scout-state-<pid>.db` (via `_build_fallback_state_db_path`) if the primary fails, logging a WARN with the `chown 65532:65532 <beaconry-data-volume>` fix recipe. `_effective_scout_state_db_path()` returns the resolved path; `_queue_pending_scan`, `post_retry_sweep`, and `_pending_scans_queue_depth` all call it instead of referencing `SCOUT_STATE_DB_PATH` directly, so the fallback is used everywhere consistently. `_scout_healthz_summary` adds `state_db_degraded` + `state_db_effective_path` keys in `checks`. `poc/scripts/status.py::_scout_details` appends `state_db degraded` to the DETAILS cell when the flag fires (surfaced even when overall status is "ok" since the scan path still works). Ephemeral semantics are intentional — queued rows reset per scout restart; the primary path is restored durably by the homelab ansible chown task (separate PR).
+- **supports:** CAP-T215, CAP-T217, CAP-B023
+- **verified by:**
+  - `poc/tests/unit/test_BC_120_scout_state_db_hardening.py`
+  - `poc/tests/integration/test_BC_120_scout_state_db_hardening.py`
+
 ### CAP-T221: Scout /scan gzip compression — large fleets fit under wire cap without operator tuning
 - **type:** technical
 - **status:** active
