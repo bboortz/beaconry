@@ -111,4 +111,5 @@ Lifecycle: `draft → ready → in-progress → shipped`. Status matches each st
 | BC-116 | Finding state machine extension — add `fixing` + `rolled_back` statuses | shipped     | — (merged to dev)                   |
 | BC-117 | Cross-repo CVE fix workflow — awaiting_upstream status + Telegram hint  | shipped     | — (merged to dev)                   |
 | BC-118 | `beaconry status` — probed URLs + running host + fleet (you) marker     | shipped     | — (merged to dev)                   |
-| BC-119 | Scout /scan gzip compression — fit large fleets without operator tuning | in-progress | feat/BC-119-scout-scan-gzip-compression |
+| BC-119 | Scout /scan gzip compression — fit large fleets without operator tuning | shipped     | — (merged to dev)                   |
+| BC-120 | Scout state DB path hardening — degrade loudly, never drop silently     | in-progress | feat/BC-120-scout-state-db-path-hardening |
