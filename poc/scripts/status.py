@@ -17,11 +17,14 @@ from __future__ import annotations
 
 import json
 import os
+import socket
+import subprocess
 import sys
 import time
 import urllib.error
 import urllib.request
 from dataclasses import dataclass
+from pathlib import Path
 
 from poc.scripts.cli_config import load_cli_config
 from poc.scripts.cli_http import CLIENT_API_VERSION
@@ -56,6 +59,11 @@ class ServiceStatus:
     # BC-062: raw api int if parseable, else None (used to detect mismatch
     # against CLIENT_API_VERSION for the trailing warning line).
     api_version: int | None = None
+    # BC-118: the URL that was probed for this row — surfaced in the
+    # top table so the operator can tell WHICH hub / WHICH scout the
+    # row refers to (dev-compose localhost? remote hetzner? systemd on
+    # port 8001?). Always populated at construction time.
+    probed_url: str = ""
 
 
 def fetch_healthz(url: str, timeout: float = 2.0, token: str = "") -> dict:
@@ -139,7 +147,12 @@ def _format_fleet_health(row: dict) -> str:
     return f"{glyph} {label}"
 
 
-def format_fleet(rows: list[dict], *, hub_api: int | None = None) -> str:
+def format_fleet(
+    rows: list[dict],
+    *,
+    hub_api: int | None = None,
+    local_hostname: str | None = None,
+) -> str:
     """BC-055/BC-061/BC-063: render FLEET section (empty = empty string).
 
     - BC-061: STATUS column (``● active`` / ``⚠ stale`` / ``✗ dead``).
@@ -175,8 +188,14 @@ def format_fleet(rows: list[dict], *, hub_api: int | None = None) -> str:
     body: list[list[str]] = []
     for r in rows:
         heartbeat_ts = r.get("last_heartbeat_ts") or r.get("last_posted_ts") or 0
+        host_label = r.get("host", "?")
+        # BC-118: mark the row whose host matches the CLI's running
+        # hostname with " (you)" so operators understand the
+        # two-table structure as one coherent thing.
+        if local_hostname and host_label == local_hostname:
+            host_label = f"{host_label} (you)"
         cells = [
-            r.get("host", "?"),
+            host_label,
             _format_age(int(heartbeat_ts)),
         ]
         if has_bc063:
@@ -283,6 +302,74 @@ def _down_detail(stack_down_hint: bool) -> str:
     return "container not up"
 
 
+# BC-118: Dev-compose detection. On hosts that only run systemd scouts
+# (port 8001) + never had the dev-compose stack checked out, the
+# `localhost:18001` probe will fail with connection-refused — correctly,
+# but confusingly. We distinguish three down causes:
+#   1. dev-compose not configured on this host (no docker-compose.yml here,
+#      no beaconry-dev-scout container) → inherent, not a problem
+#   2. compose stack not up (docker-compose.yml present, container missing)
+#      → operator should `docker compose up -d` if they want it
+#   3. everything else → genuine down state (unreachable at <url>)
+
+
+def _repo_root() -> Path | None:
+    """BC-118: locate the beaconry repo root (contains poc/docker-compose.yml).
+
+    Walks up from __file__. Returns None if not found. Tests can
+    monkeypatch to point elsewhere.
+    """
+    here = Path(__file__).resolve()
+    for p in [here, *here.parents]:
+        if (p / "poc" / "docker-compose.yml").is_file():
+            return p
+    return None
+
+
+def _dev_compose_configured() -> bool:
+    """BC-118: `poc/docker-compose.yml` exists locally."""
+    root = _repo_root()
+    return root is not None
+
+
+def _dev_scout_container_exists() -> bool:
+    """BC-118: a container named `beaconry-dev-scout` exists (any state).
+
+    Uses `docker ps -a --filter name=beaconry-dev-scout --format {{.Names}}`.
+    Returns False on any docker error (docker not installed, daemon down,
+    etc.) — the caller treats "unknown" as "not up" which matches the
+    operator's experience.
+    """
+    try:
+        out = subprocess.run(
+            [
+                "docker",
+                "ps",
+                "-a",
+                "--filter",
+                "name=beaconry-dev-scout",
+                "--format",
+                "{{.Names}}",
+            ],
+            capture_output=True,
+            text=True,
+            timeout=2.0,
+            check=False,
+        )
+    except (OSError, subprocess.SubprocessError):
+        return False
+    return "beaconry-dev-scout" in out.stdout
+
+
+def _scout_down_detail(url: str) -> str:
+    """BC-118: classify a scout probe failure into one of three messages."""
+    if not _dev_compose_configured():
+        return "down (dev-compose not configured on this host)"
+    if not _dev_scout_container_exists():
+        return "down (compose stack not up — try `cd poc && docker compose up -d`)"
+    return f"down (unreachable at {url})"
+
+
 def gather_hub_status(url: str = HUB_HEALTHZ_URL, token: str = HUB_AUTH_TOKEN) -> ServiceStatus:
     try:
         body = fetch_healthz(url, token=token)
@@ -293,6 +380,7 @@ def gather_hub_status(url: str = HUB_HEALTHZ_URL, token: str = HUB_AUTH_TOKEN) -
             health=HEALTH_NONE,
             last_scan="-",
             details=_down_detail(True),
+            probed_url=url,  # BC-118
         )
     status = body.get("status", "unknown")
     checks = body.get("checks", {})
@@ -305,6 +393,7 @@ def gather_hub_status(url: str = HUB_HEALTHZ_URL, token: str = HUB_AUTH_TOKEN) -
         details=_hub_details(body),
         version=version_cell,
         api_version=api_int,
+        probed_url=url,  # BC-118
     )
 
 
@@ -317,7 +406,8 @@ def gather_scout_status(url: str = SCOUT_HEALTHZ_URL) -> ServiceStatus:
             state=STATE_DOWN,
             health=HEALTH_NONE,
             last_scan="-",
-            details=_down_detail(False),
+            details=_scout_down_detail(url),  # BC-118: contextual message
+            probed_url=url,  # BC-118
         )
     status = body.get("status", "unknown")
     checks = body.get("checks", {})
@@ -330,13 +420,21 @@ def gather_scout_status(url: str = SCOUT_HEALTHZ_URL) -> ServiceStatus:
         details=_scout_details(body),
         version=version_cell,
         api_version=api_int,
+        probed_url=url,  # BC-118
     )
 
 
 def _format_table(statuses: list[ServiceStatus]) -> str:
     # BC-062: VERSION column inserted between HEALTH and LAST SCAN.
-    headers = ["NAME", "STATE", "HEALTH", "VERSION", "LAST SCAN", "DETAILS"]
-    rows = [[s.name, s.state, s.health, s.version, s.last_scan, s.details] for s in statuses]
+    # BC-118: URL column inserted between NAME and STATE so the
+    # operator can see WHICH endpoint each row probed. Rows that
+    # never resolved a URL (shouldn't happen post-BC-118) render as
+    # empty string in the URL cell.
+    headers = ["NAME", "URL", "STATE", "HEALTH", "VERSION", "LAST SCAN", "DETAILS"]
+    rows = [
+        [s.name, s.probed_url, s.state, s.health, s.version, s.last_scan, s.details]
+        for s in statuses
+    ]
     all_rows = [headers, *rows]
     widths = [max(len(row[i]) for row in all_rows) for i in range(len(headers))]
     lines = []
@@ -376,9 +474,16 @@ def main() -> int:
             health=hub.health,
             last_scan=hub.last_scan,
             details=_down_detail(True),
+            probed_url=hub.probed_url,  # BC-118: preserve
         )
         statuses = [hub, scout]
 
+    # BC-118: header line so the operator knows WHICH machine the CLI
+    # is reporting from. `socket.gethostname()` matches scout's
+    # HOST_NAME default — so the FLEET's `(you)` marker lines up.
+    local_hostname = socket.gethostname()
+    print(f"Running on: {local_hostname}")
+    print()
     print(_format_table(statuses))
 
     # BC-062: API-mismatch warning line (empty when all services agree
@@ -390,9 +495,10 @@ def main() -> int:
     # BC-055: FLEET section below services table.
     # BC-063: pass the hub's own api version so per-scout rows can show a
     # trailing ⚠ when a scout's api_version drifts from the hub's.
+    # BC-118: pass local_hostname so the matching row gets a (you) marker.
     fleet_url = _CLI_CFG.hub_url.rstrip("/") + "/fleet"
     fleet_rows = fetch_fleet(fleet_url, token=HUB_AUTH_TOKEN)
-    fleet_text = format_fleet(fleet_rows, hub_api=hub.api_version)
+    fleet_text = format_fleet(fleet_rows, hub_api=hub.api_version, local_hostname=local_hostname)
     if fleet_text:
         print(fleet_text)
 

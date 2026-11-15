@@ -4,6 +4,25 @@ All notable changes to beaconry are recorded here. The format is based
 on [Keep a Changelog](https://keepachangelog.com/), and this project
 follows [Semantic Versioning](https://semver.org/).
 
+## [v0.22.1] — 2026-11-15
+
+### Changed (BC-118)
+
+- **`beaconry status` reveals what each row is actually probing.**
+  Top table gains a `URL` column after `NAME` so operators see
+  which hub + scout URLs the hub-row and scout-row probed. A
+  `Running on: <hostname>` header is printed first so it's clear
+  which machine the CLI reported from. Scout-down now carries a
+  distinguishable detail: `down (dev-compose not configured on
+  this host)` for hosts that never had the dev-compose stack
+  (BC-101's `localhost:18001` probe target), vs. `down (compose
+  stack not up — try cd poc && docker compose up -d)` for hosts
+  where compose config exists but the container isn't up, vs.
+  `down (unreachable at <url>)` for every other case. FLEET gains
+  a `(you)` marker on the row whose `host` matches the CLI's
+  hostname so operators see both tables as one coherent view.
+  CAP-T220 registered.
+
 ## [v0.22.0] — 2026-11-09
 
 ### Added (BC-117)
