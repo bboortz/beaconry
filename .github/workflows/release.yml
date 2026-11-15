@@ -48,21 +48,42 @@ jobs:
           echo "DEV_SHA=$(git rev-parse promote-src)" >> "$GITHUB_ENV"
           echo "VERSION=$(git show promote-src:VERSION)" >> "$GITHUB_ENV"
 
-      - name: Assert CI is green on dev HEAD
+      - name: Wait for CI green on dev HEAD
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
           # The source-of-truth check-run name is "Full check (make check-full)"
-          # per ci.yml. If CI hasn't finished yet, there's no success record and
-          # we abort — operator should wait for the badge to turn green then re-run.
-          STATUS=$(gh api "repos/${{ github.repository }}/commits/${DEV_SHA}/check-runs" \
-            --jq '[.check_runs[] | select(.name == "Full check (make check-full)")] | sort_by(.started_at) | .[-1].conclusion' \
-            2>/dev/null || echo "")
-          if [[ "$STATUS" != "success" ]]; then
-            echo "::error::CI on ${DEV_SHA:0:8} not green (status=${STATUS:-not-yet-run}). Wait for CI to pass before promoting."
-            exit 1
-          fi
-          echo "✓ CI green on ${DEV_SHA:0:8}"
+          # per ci.yml. Poll for up to RELEASE_CI_WAIT_S seconds (default 20 min),
+          # polling every POLL_S (default 20s). The previous snap-check was
+          # racy: operators (or auto-triggered workflow_run dispatches) could
+          # fire release.yml before CI even started, and "not-yet-run"
+          # became a terminal fail. Now we wait for a terminal CI state —
+          # success proceeds, failure/cancelled aborts, still-running after
+          # deadline aborts with a distinct message.
+          RELEASE_CI_WAIT_S=${RELEASE_CI_WAIT_S:-1200}
+          POLL_S=${POLL_S:-20}
+          deadline=$(( $(date +%s) + RELEASE_CI_WAIT_S ))
+          while :; do
+            run=$(gh api "repos/${{ github.repository }}/commits/${DEV_SHA}/check-runs" \
+              --jq '[.check_runs[] | select(.name == "Full check (make check-full)")] | sort_by(.started_at) | .[-1]' \
+              2>/dev/null || echo "null")
+            status=$(jq -r '.status // "not-yet-run"' <<<"$run")
+            concl=$(jq -r '.conclusion // "-"' <<<"$run")
+            echo "  CI poll: status=${status} conclusion=${concl}"
+            if [[ "$status" == "completed" ]]; then
+              if [[ "$concl" == "success" ]]; then
+                echo "✓ CI green on ${DEV_SHA:0:8}"
+                break
+              fi
+              echo "::error::CI on ${DEV_SHA:0:8} is ${concl}; refusing to promote."
+              exit 1
+            fi
+            if (( $(date +%s) > deadline )); then
+              echo "::error::CI on ${DEV_SHA:0:8} still ${status} after ${RELEASE_CI_WAIT_S}s. Investigate CI run before re-dispatching release."
+              exit 1
+            fi
+            sleep "${POLL_S}"
+          done
 
       - name: Fast-forward main from dev
         run: |
