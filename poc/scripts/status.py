@@ -244,15 +244,31 @@ def _hub_details(body: dict) -> str:
     checks = body.get("checks", {})
     status = body.get("status", "unknown")
     telegram = checks.get("telegram", "?")
+    # BC-122: surface the integrity-mismatch counter even on an "ok" hub
+    # — a mismatch doesn't flip the top-level status (pipeline is
+    # fail-open by design) but operator must see it. Mirrors the
+    # BC-120 `state_db degraded` surfacing on the scout side.
+    extras = []
+    mismatches = int(checks.get("pipeline_integrity_mismatches") or 0)
+    if mismatches > 0:
+        extras.append(f"⚠ integrity: {mismatches} mismatches")
     if status == "ok":
-        return f"grype_db ok · telegram {telegram}"
+        base = f"grype_db ok · telegram {telegram}"
+        return " · ".join([base, *extras]) if extras else base
     # Degraded: name the failing checks explicitly.
     failed = [
         f"{k} {v}"
         for k, v in checks.items()
-        if k != "last_scan_ts" and v not in ("ok", "polling", "mock")
+        if k
+        not in (
+            "last_scan_ts",
+            # BC-122: counter, surfaced separately in extras above.
+            "pipeline_integrity_mismatches",
+        )
+        and v not in ("ok", "polling", "mock")
     ]
-    return "degraded: " + ", ".join(failed) if failed else "degraded"
+    body_text = "degraded: " + ", ".join(failed) if failed else "degraded"
+    return " · ".join([body_text, *extras]) if extras else body_text
 
 
 def _scout_details(body: dict) -> str:

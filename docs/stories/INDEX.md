@@ -114,3 +114,4 @@ Lifecycle: `draft → ready → in-progress → shipped`. Status matches each st
 | BC-119 | Scout /scan gzip compression — fit large fleets without operator tuning | shipped     | — (merged to dev)                   |
 | BC-120 | Scout state DB path hardening — degrade loudly, never drop silently     | shipped     | — (merged to dev)                   |
 | BC-121 | Track forge-builder-trixie → forge-builder-python-trixie rename         | shipped     | — (merged to dev)                   |
+| BC-122 | Pipeline integrity hashes + runtime verifier                            | shipped     | — (merged to dev)                   |

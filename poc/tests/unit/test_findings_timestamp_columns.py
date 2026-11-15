@@ -87,6 +87,27 @@ def test_decorate_rows_handles_missing_timestamps() -> None:
 # ── Root-cause regression: hub /findings endpoint serializes the cols ──
 
 
+def test_absent_count_column_present() -> None:
+    """BC-122: Absent column surfaces absent_count — the operator question
+    'how many runs haven't seen this finding?' answered at a glance."""
+    headers = {name for _, name, _ in COLUMNS}
+    assert "Absent" in headers
+
+
+def test_hub_findings_endpoint_includes_absent_count() -> None:
+    """BC-122: hub endpoint serializes absent_count so the CLI can
+    render the Absent column over HTTP."""
+    assert "absent_count" in hub._FINDINGS_ENDPOINT_COLS
+
+
+def test_format_table_renders_absent_count() -> None:
+    row = _base_row(absent_count=2)
+    _decorate_rows([row])
+    table = format_table([row])
+    data_row = table.splitlines()[-1]
+    assert " 2 " in data_row or data_row.endswith("2") or data_row.strip().endswith("2")
+
+
 def test_hub_findings_endpoint_includes_timestamp_columns() -> None:
     """Pre-fix root cause: hub's `_FINDINGS_ENDPOINT_COLS` tuple omitted
     `found_at`, `last_status_change_ts`, `last_seen_ts` entirely — so the

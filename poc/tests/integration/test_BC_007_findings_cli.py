@@ -199,7 +199,8 @@ def test_long_fields_truncate_with_ellipsis(tmp_path: Path) -> None:
         # FIRST SEEN (10 chars + 2) + LAST CHANGE (11 chars + 2) → ~170 chars total.
         # fix/findings-http-missing-timestamp-columns: added LAST SEEN (10 + 2 = +12)
         # → ~182 chars total. Header line is 173 chars; cap at 185 for breathing room.
-        assert len(line) <= 185, f"line too long: {line!r}"
+        # BC-122: added Absent (6 + 2 = +8) → ~190 chars. Cap at 195 for headroom.
+        assert len(line) <= 195, f"line too long: {line!r}"
 
 
 def test_unit_format_table_renders_header_and_rows() -> None:

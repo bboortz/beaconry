@@ -20,6 +20,7 @@ future HTTP-less loop services.
 import asyncio
 import fnmatch
 import gzip
+import hashlib
 import json
 import logging
 import os
@@ -561,9 +562,10 @@ def collect_and_post():  # pragma: no cover - orchestrator; integration-tested l
         log.warning("No SBOMs collected — nothing to send")
         return
 
+    iteration_ts = int(time.time())
     payload = {
         "host": HOST_NAME,
-        "timestamp": int(time.time()),
+        "timestamp": iteration_ts,
         # BC-063: scout self-reports version + health so FLEET rows carry
         # real diagnostic info instead of just "stale 1h ago".
         "software_version": SOFTWARE_VERSION,
@@ -584,6 +586,30 @@ def collect_and_post():  # pragma: no cover - orchestrator; integration-tested l
         "images_collected": _last_scan_images_collected,
         "scan_complete": _last_scan_images_expected == _last_scan_images_collected,
     }
+    # BC-122: embed pipeline integrity hashes so hub can verify lossless
+    # transfer + a verifier CLI can prove the fleet is running clean.
+    # Computed over the canonicalized body WITHOUT the integrity block
+    # itself (chicken-and-egg: transfer_hash hashes the body it appears in).
+    try:
+        canonical_body_pre_integrity = json.dumps(payload, sort_keys=True, separators=(",", ":"))
+    except (TypeError, ValueError) as e:
+        log.error("Failed to canonicalize SBOM payload for integrity: %s", e)
+        return
+    image_refs = [s.get("source_ref", "") for s in sboms if isinstance(s, dict)]
+    integrity = _build_integrity_section(
+        host=HOST_NAME,
+        iteration_ts=iteration_ts,
+        image_refs=image_refs,
+        n_sboms=len(sboms),
+        canonical_body=canonical_body_pre_integrity,
+    )
+    payload["integrity"] = integrity
+    log.info(
+        "BC-122: iteration=%s sboms=%d transfer=%s",
+        integrity["iteration_hash"],
+        integrity["n_sboms"],
+        integrity["transfer_hash"],
+    )
     try:
         body = json.dumps(payload)
     except (TypeError, ValueError) as e:
@@ -720,6 +746,51 @@ _scan_gzip_log_once: bool = False
 # with ~2ms CPU per MB. Higher levels buy ~5% size at 3× CPU; not worth
 # it for 80MB bodies on a scout cycle.
 _SCAN_GZIP_LEVEL: int = 6
+
+
+# ── BC-122: pipeline integrity hashes ──────────────────────────────────────
+
+
+def _compute_iteration_hash(host: str, iteration_ts: int, image_refs: list[str]) -> str:
+    """BC-122: stable identifier for a scout scan cycle.
+
+    Canonicalization: `host \\n ts \\n sorted(image_refs).join("\\n")`.
+    Sorting image_refs makes two scouts seeing the same inventory in
+    different iteration order emit the same hash (cross-scout dedupe
+    friendly); the host + ts qualify it uniquely per cycle.
+
+    Returns the first 16 hex chars of sha256 — same width convention
+    as `finding.id` (BC-005). Collision risk ≈ 2^32 iterations.
+    """
+    payload = host + "\n" + str(iteration_ts) + "\n" + "\n".join(sorted(image_refs))
+    return hashlib.sha256(payload.encode("utf-8")).hexdigest()[:16]
+
+
+def _compute_transfer_hash(canonical_body: str) -> str:
+    """BC-122: hash over the canonicalized /scan body (sort_keys + no
+    whitespace), so hub can recompute from the deserialized payload and
+    verify no accidental mutation en route.
+
+    Deliberately NOT a hash over the gzipped wire bytes (BC-119 made
+    those non-stable across compression libs). The canonical JSON is
+    the invariant we care about."""
+    return hashlib.sha256(canonical_body.encode("utf-8")).hexdigest()[:16]
+
+
+def _build_integrity_section(
+    *,
+    host: str,
+    iteration_ts: int,
+    image_refs: list[str],
+    n_sboms: int,
+    canonical_body: str,
+) -> dict:
+    """BC-122: the three-key integrity block scout embeds in /scan body."""
+    return {
+        "iteration_hash": _compute_iteration_hash(host, iteration_ts, image_refs),
+        "transfer_hash": _compute_transfer_hash(canonical_body),
+        "n_sboms": n_sboms,
+    }
 
 
 def _post_scan_body(body: str) -> tuple[bool, str, object | None]:

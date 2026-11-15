@@ -535,6 +535,93 @@ _scout_sbom_baseline: dict[str, int] = {}
 # half the normal count missing before suspecting a scout glitch.
 _PARTIAL_INVENTORY_THRESHOLD: float = 0.5
 
+# BC-122: monotonic counter — how many /scan POSTs since process start
+# claimed a transfer_hash that didn't match hub's recompute. Surfaced via
+# /healthz and `beaconry status` DETAILS so operators see the fault the
+# first time they run status. Not persisted (audit.log is the durable
+# record); counts since this hub process booted.
+_pipeline_integrity_mismatches: int = 0
+
+
+async def _dispatch_integrity_alert(
+    *,
+    host: str,
+    iteration_hash: str | None,
+    claimed: str | None,
+    computed: str | None,
+) -> None:
+    """BC-122: fire a Telegram alert on transfer-hash mismatch when
+    BEACONRY_PIPELINE_INTEGRITY_ALERT=1. Opt-in because the first-week
+    baseline false-positive rate is unknown. Fire-and-forget: a failed
+    Telegram send must not block the scan response."""
+    if tg_app is None or tg_app.bot is None:
+        return
+    chat_id = os.environ.get("TELEGRAM_CHAT_ID", "")
+    if not chat_id:
+        return
+    text = (
+        "⚠️ *BC-122: pipeline integrity mismatch*\n"
+        f"Host: `{host}`\n"
+        f"Iteration: `{iteration_hash}`\n"
+        f"Claimed: `{claimed}`\n"
+        f"Computed: `{computed}`\n"
+        "Transfer hash didn't verify — scan was processed fail-open."
+    )
+    await tg_app.bot.send_message(chat_id=chat_id, text=text, parse_mode="Markdown")
+
+
+def _verify_transfer_hash(canonical_body: str, claimed: str | None) -> bool | None:
+    """BC-122: returns True on match, False on mismatch, None when
+    claimed is absent (legacy pre-BC-122 scout — transferred without the
+    hash). `canonical_body` must be the canonicalized JSON scout hashed."""
+    if not claimed:
+        return None
+    return _compute_transfer_hash_hub(canonical_body) == claimed
+
+
+def _compute_transfer_hash_hub(canonical_body: str) -> str:
+    """BC-122: hub-side mirror of scout's _compute_transfer_hash. Kept as
+    a separate symbol so test injection / future format tweaks are local."""
+    return hashlib.sha256(canonical_body.encode("utf-8")).hexdigest()[:16]
+
+
+def _compute_processing_hash(finding_ids: list[str]) -> str:
+    """BC-122: deterministic order-independent hash over the set of
+    finding IDs this scan iteration persisted. A verifier can replay
+    this hash offline against the DB to confirm no drift between the
+    audit log and persisted state."""
+    joined = "\n".join(sorted(finding_ids))
+    return hashlib.sha256(joined.encode("utf-8")).hexdigest()[:16]
+
+
+class _ScanIntegrityCtx:
+    """BC-122: context object threading pipeline-integrity data from
+    receive_scan → _ingest_candidates. Keeps _ingest_candidates's
+    signature under the 7-arg lint ceiling (PLR0913)."""
+
+    __slots__ = (
+        "iteration_hash",
+        "transfer_hash_claimed",
+        "transfer_hash_computed",
+        "transfer_match",
+        "n_sboms_claimed",
+    )
+
+    def __init__(
+        self,
+        *,
+        iteration_hash: str | None,
+        transfer_hash_claimed: str | None,
+        transfer_hash_computed: str | None,
+        transfer_match: bool | None,
+        n_sboms_claimed: int | None,
+    ) -> None:
+        self.iteration_hash = iteration_hash
+        self.transfer_hash_claimed = transfer_hash_claimed
+        self.transfer_hash_computed = transfer_hash_computed
+        self.transfer_match = transfer_match
+        self.n_sboms_claimed = n_sboms_claimed
+
 
 def _is_partial_inventory(host: str, sbom_count: int | None) -> bool:
     """BC-067: True iff the scan looks like a partial inventory and
@@ -3215,6 +3302,10 @@ _FINDINGS_ENDPOINT_COLS = (
     "close_reason",
     # BC-117: cross_repo_hint powers the awaiting_upstream (<policy_key>) suffix.
     "cross_repo_hint",
+    # BC-122: absent_count — scans in a row this finding has NOT been
+    # seen since its last sighting. Reaches AUTO_FIX_THRESHOLD → auto_fixed.
+    # Operator question "how many runs haven't seen this?" answered in one cell.
+    "absent_count",
 )
 
 
@@ -3705,6 +3796,11 @@ def _hub_healthz_summary() -> dict:
         # count that stabilizes means the audit layer recovered; a count
         # still climbing means the problem persists (disk full, perms).
         **_audit.status(),
+        # BC-122: monotonic counter of /scan POSTs whose claimed
+        # transfer_hash didn't match hub's recompute. Non-zero = silent
+        # corruption somewhere on the scout→hub path; audit log has
+        # per-event details. `beaconry status` surfaces this in DETAILS.
+        "pipeline_integrity_mismatches": _pipeline_integrity_mismatches,
     }
     # KEV is non-fatal — stale/unfetched surface in /healthz but don't flip "degraded".
     # BC-066: executor is a policy label, not a health signal — exclude it too.
@@ -3729,6 +3825,8 @@ def _hub_healthz_summary() -> dict:
             "audit_degraded",
             "audit_write_failures",
             "audit_last_error",
+            # BC-122: counter, not a boolish check.
+            "pipeline_integrity_mismatches",
         )
     ]
     degraded = any(v not in ("ok", "polling", "mock") for v in bool_checks)
@@ -4644,6 +4742,43 @@ async def receive_scan(payload: dict, request: _FastAPIRequest) -> dict:
         except Exception as e:  # noqa: BLE001
             log.error("Error processing SBOM entry: %s", e)
 
+    # BC-122: pipeline-integrity verification. Scout embeds an
+    # `integrity` block with `iteration_hash`, `transfer_hash`, `n_sboms`
+    # (pre-BC-122 scouts omit it → every field below becomes None, hub
+    # degrades cleanly). We rebuild the canonical body WITHOUT the
+    # integrity block (chicken-and-egg on the scout side) and compare
+    # hashes; a mismatch increments the monotonic counter + surfaces on
+    # /healthz.
+    integrity = payload.get("integrity") or {}
+    claimed_iteration = integrity.get("iteration_hash")
+    claimed_transfer = integrity.get("transfer_hash")
+    claimed_n_sboms = integrity.get("n_sboms")
+    payload_without_integrity = {k: v for k, v in payload.items() if k != "integrity"}
+    canonical = json.dumps(payload_without_integrity, sort_keys=True, separators=(",", ":"))
+    computed_transfer = _compute_transfer_hash_hub(canonical)
+    transfer_match = _verify_transfer_hash(canonical, claimed_transfer)
+    if transfer_match is False:
+        global _pipeline_integrity_mismatches
+        _pipeline_integrity_mismatches += 1
+        log.warning(
+            "BC-122: transfer_hash MISMATCH on %s iteration=%s claimed=%s computed=%s",
+            host,
+            claimed_iteration,
+            claimed_transfer,
+            computed_transfer,
+        )
+        # BC-122: opt-in Telegram alert (default off until operator
+        # baselines false-positive rate). Fire-and-forget — a failed
+        # Telegram send must not block the scan response path.
+        if os.environ.get("BEACONRY_PIPELINE_INTEGRITY_ALERT") == "1":
+            with contextlib.suppress(Exception):
+                await _dispatch_integrity_alert(
+                    host=host,
+                    iteration_hash=claimed_iteration,
+                    claimed=claimed_transfer,
+                    computed=computed_transfer,
+                )
+
     return await _ingest_candidates(
         host,
         candidates,
@@ -4652,6 +4787,14 @@ async def receive_scan(payload: dict, request: _FastAPIRequest) -> dict:
         # BC-106: pass through scout's explicit counts when present.
         images_expected=int(payload.get("images_expected") or 0),
         images_collected=int(payload.get("images_collected") or 0),
+        # BC-122: pipeline integrity context for the scan_integrity audit.
+        integrity_ctx=_ScanIntegrityCtx(
+            iteration_hash=claimed_iteration,
+            transfer_hash_claimed=claimed_transfer,
+            transfer_hash_computed=computed_transfer,
+            transfer_match=transfer_match,
+            n_sboms_claimed=claimed_n_sboms,
+        ),
     )
 
 
@@ -4743,6 +4886,10 @@ async def _ingest_candidates(
     # "scout didn't report" → BC-067 baseline heuristic is the only check.
     images_expected: int = 0,
     images_collected: int = 0,
+    # BC-122: pipeline-integrity context from receive_scan. None =
+    # scenario / test-mode path that bypasses receive_scan — audit event
+    # records pure-processing data with null hash fields.
+    integrity_ctx: _ScanIntegrityCtx | None = None,
 ) -> dict:
     """BC-038: extracted ingest flow — dedup+cap, save+notify, digest, reconcile.
 
@@ -4757,18 +4904,27 @@ async def _ingest_candidates(
     """
     cap = int(os.environ.get("BEACONRY_MAX_FINDINGS_PER_RUN", "5"))
     to_notify, suppressed = dedup_and_cap(candidates, cap)
+    # BC-122: compute the dedup delta — unique CVEs minus candidates
+    # count. Positive means multiple variants of the same CVE collapsed.
+    n_unique_cves = len(to_notify) + len(suppressed)
+    n_dedup = max(0, len(candidates) - n_unique_cves)
     log.info(
         "Scan summary: %d candidate(s), %d unique CVE(s), notifying top %d, suppressing %d",
         len(candidates),
-        len(to_notify) + len(suppressed),
+        n_unique_cves,
         len(to_notify),
         len(suppressed),
     )
 
+    # BC-122: persisted_ids tracks what actually made it to the DB so
+    # processing_hash is a deterministic snapshot of this iteration's
+    # output set.
+    persisted_ids: list[str] = []
     new_findings = 0
     for f in to_notify:
         if not save_finding(f, now_ts=now_ts):
             continue
+        persisted_ids.append(f.id)
         log.info(
             "New finding: %s (%s CVSS %.1f) in %s",
             f.cve_id,
@@ -4856,6 +5012,37 @@ async def _ingest_candidates(
         _update_scout_sbom_baseline(host, sbom_count)
         regressed, auto_fixed, regressed_from_auto_fix = reconcile_scan(host, scanned_ids)
     await _dispatch_regression_notifications(host, regressed, regressed_from_auto_fix, auto_fixed)
+
+    # BC-122: emit scan_integrity audit event with full accounting so
+    # the verifier can prove candidates = persisted + every drop reason.
+    # save_finding can return False (e.g. legacy/invalid rows); track the
+    # delta separately so the sum stays explainable.
+    n_dropped_in_save = len(to_notify) - len(persisted_ids)
+    n_capped = len(suppressed)  # dedup_and_cap's "overflow" goes to digest, not DB
+    processing_hash = _compute_processing_hash(persisted_ids)
+    ctx = integrity_ctx
+    _audit.append(
+        "scan_integrity",
+        host=host,
+        iteration_hash=ctx.iteration_hash if ctx else None,
+        transfer_hash_claimed=ctx.transfer_hash_claimed if ctx else None,
+        transfer_hash_computed=ctx.transfer_hash_computed if ctx else None,
+        transfer_match=ctx.transfer_match if ctx else None,
+        n_sboms_claimed=ctx.n_sboms_claimed if ctx else None,
+        n_sboms_received=sbom_count,
+        n_candidates=len(candidates),
+        n_persisted=len(persisted_ids),
+        # BC-122 accounting: every candidate not persisted falls in one
+        # of these buckets. Verifier asserts the sum matches.
+        n_dedup=n_dedup,
+        n_capped=n_capped,
+        n_dropped_in_save=n_dropped_in_save,
+        n_filtered_other=max(
+            0,
+            len(candidates) - len(persisted_ids) - n_dedup - n_capped - n_dropped_in_save,
+        ),
+        processing_hash=processing_hash,
+    )
 
     return {
         "status": "ok",
