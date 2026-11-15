@@ -1,8 +1,8 @@
-"""BC-095 — Builder stage FROM forge-builder-trixie.
+"""BC-095 — Builder stage FROM forge-builder-python-trixie.
 
 Covers:
     - CAP-T196: both Dockerfiles' builder stage FROM points at
-      ghcr.io/bboortz/forge-builder-trixie:latest; upstream
+      ghcr.io/bboortz/forge-builder-python-trixie:latest; upstream
       python:*-trixie removed; hub still installs grype + docker CLI;
       scout's builder prelude is minimal.
 """
@@ -15,7 +15,7 @@ REPO = Path(__file__).resolve().parents[3]
 HUB_DF = REPO / "poc" / "hub" / "Dockerfile"
 SCOUT_DF = REPO / "poc" / "scout" / "Dockerfile"
 
-EXPECTED_BUILDER = "FROM ghcr.io/bboortz/forge-builder-trixie:latest AS builder"
+EXPECTED_BUILDER = "FROM ghcr.io/bboortz/forge-builder-python-trixie:latest AS builder"
 # BC-097 broadened to :latest (preferred) with :3.13 kept as a rollback path.
 RUNTIME_BASES = (
     "ghcr.io/bboortz/python-scratch-trixie:latest",
@@ -114,7 +114,7 @@ def test_scout_builder_prelude_minimal() -> None:
         (
             i
             for i, ln in enumerate(lines)
-            if ln.strip().startswith("FROM ghcr.io/bboortz/forge-builder-trixie:latest")
+            if ln.strip().startswith("FROM ghcr.io/bboortz/forge-builder-python-trixie:latest")
         ),
         -1,
     )
@@ -140,7 +140,7 @@ def test_scout_does_not_install_syft() -> None:
     body = _scout()
     assert "anchore/syft/main/install.sh" not in body, (
         "scout/Dockerfile still installs syft — delete the line, "
-        "forge-builder-trixie base already ships it"
+        "forge-builder-python-trixie base already ships it"
     )
 
 

@@ -52,10 +52,10 @@ def test_runtime_stage_from_runtime_src() -> None:
 def test_builder_stage_is_forge_builder() -> None:
     body = MOCK_DF.read_text()
     assert re.search(
-        r"^FROM\s+ghcr\.io/bboortz/forge-builder-trixie:latest\s+AS\s+builder\b",
+        r"^FROM\s+ghcr\.io/bboortz/forge-builder-python-trixie:latest\s+AS\s+builder\b",
         body,
         re.MULTILINE,
-    ), "telegram_mock/Dockerfile builder stage must `FROM forge-builder-trixie:latest`"
+    ), "telegram_mock/Dockerfile builder stage must `FROM forge-builder-python-trixie:latest`"
 
 
 # ── G3: BC-099 ABI guard RUN step ───────────────────────────────────────────

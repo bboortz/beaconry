@@ -1,7 +1,7 @@
 ---
 id: BC-118
 title: `beaconry status` — show probed URLs, running host, fleet (you) marker, and explain false-downs
-status: in-progress
+status: shipped
 created: 2026-11-15
 branch: feat/BC-118-status-url-host-fleet-linkage
 plan: docs/plan/BC-118-status-url-host-fleet-linkage-plan.md

@@ -13,11 +13,11 @@
 FROM ghcr.io/bboortz/python-scratch-trixie:latest AS runtime-src
 
 # ── Stage 1: builder ────────────────────────────────────────────────────────
-# BC-095: forge-builder-trixie ships Python + pip + syft + CA certs.
+# BC-095: forge-builder-python-trixie ships Python + pip + syft + CA certs.
 # Python minor is detected at build time (BC-098) and checked against
 # the runtime base (BC-099). Scout needs exactly that set — no extra
 # RUN steps.
-FROM ghcr.io/bboortz/forge-builder-trixie:latest AS builder
+FROM ghcr.io/bboortz/forge-builder-python-trixie:latest AS builder
 
 WORKDIR /app
 COPY scout/requirements.txt .
@@ -31,6 +31,13 @@ COPY VERSION ./VERSION
 # (forge FG-020 pattern — frozen SBOM separates image-regressed from
 # grype-DB-learned signals).
 RUN syft dir:/install -o syft-json=/sbom.json
+
+# BC-120: pre-create a stage-data dir so the runtime FS has a nonroot-owned
+# /data for scout's BC-107 pending_scans DB. Standalone scout
+# (docker-compose.scout-only.yml on bb-82jq, etc.) mounts no volume to
+# /data — pre-BC-120 the Dockerfile never created /data, nonroot UID
+# couldn't create it at /, and every POST silently dropped on hub outage.
+RUN mkdir -p /stage-data
 
 # BC-098 (pattern) + BC-099 (ABI guard). See hub/Dockerfile for the
 # full rationale + failure wording. Mounts the runtime base's
@@ -49,7 +56,7 @@ RUN --mount=from=runtime-src,source=/usr/local/lib,target=/runtime-lib \
  && if [ "$BUILDER_PY_VER" != "$RUNTIME_PY_VER" ]; then \
       echo "" >&2; \
       echo "BC-099 ABI guard tripped: forge base Python minors disagree." >&2; \
-      echo "  forge-builder-trixie:latest  -> Python ${BUILDER_PY_VER}" >&2; \
+      echo "  forge-builder-python-trixie:latest  -> Python ${BUILDER_PY_VER}" >&2; \
       echo "  python-scratch-trixie:latest -> Python ${RUNTIME_PY_VER}" >&2; \
       echo "" >&2; \
       echo "Cause: forge republished one base's :latest tag before the other" >&2; \
@@ -81,6 +88,9 @@ COPY --from=builder --chown=65532:65532 /app /app
 # BC-096: baked-in SBOM. Served at GET /sbom + consumed by
 # `make dogfood-sbom` (`grype sbom:/sbom.json`).
 COPY --from=builder /sbom.json /sbom.json
+
+# BC-120: nonroot-writable /data. See builder stage for rationale.
+COPY --from=builder --chown=65532:65532 /stage-data /data
 
 ENV PYTHONUNBUFFERED=1
 

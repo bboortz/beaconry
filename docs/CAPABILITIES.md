@@ -1801,6 +1801,25 @@ Enforcement: `poc/scripts/verify_traceability.py` runs as part of `make check`. 
 - **verified by:**
   - `poc/tests/integration/test_BC_093_rescan_hooks.py`
 
+### CAP-T222: Scout state DB path degradation + /healthz visibility
+- **type:** technical
+- **status:** active
+- **origin:** BC-120 — bb-82jq's scout logged `BC-107: can't open scout-state.db at /data/scout-state.db: unable to open database file` continuously on 2026-11-15 because Docker created the named-volume `_data` dir as root:root 755 but scout runs UID 65532 (BC-078 distroless nonroot). Pre-BC-120 the fault silently dropped queued scans; `/healthz.pending_scans_queue_depth` returned 0 (misleading — the table couldn't be counted either), so `make status` showed "healthy".
+- **description:** `poc/scout/scout.py` adds `_state_db_degraded: bool` + `_effective_state_db_path: str` module globals set by `_init_scout_db` at startup. `_try_open_and_create(path)` extracts the sqlite3 connect + `CREATE TABLE pending_scans` happy-path; `_init_scout_db` calls it on `SCOUT_STATE_DB_PATH` first, then on `/tmp/scout-state-<pid>.db` (via `_build_fallback_state_db_path`) if the primary fails, logging a WARN with the `chown 65532:65532 <beaconry-data-volume>` fix recipe. `_effective_scout_state_db_path()` returns the resolved path; `_queue_pending_scan`, `post_retry_sweep`, and `_pending_scans_queue_depth` all call it instead of referencing `SCOUT_STATE_DB_PATH` directly, so the fallback is used everywhere consistently. `_scout_healthz_summary` adds `state_db_degraded` + `state_db_effective_path` keys in `checks`. `poc/scripts/status.py::_scout_details` appends `state_db degraded` to the DETAILS cell when the flag fires (surfaced even when overall status is "ok" since the scan path still works). Ephemeral semantics are intentional — queued rows reset per scout restart; the primary path is restored durably by the homelab ansible chown task (separate PR).
+- **supports:** CAP-T215, CAP-T217, CAP-B023
+- **verified by:**
+  - `poc/tests/unit/test_BC_120_scout_state_db_hardening.py`
+  - `poc/tests/integration/test_BC_120_scout_state_db_hardening.py`
+
+### CAP-T221: Scout /scan gzip compression — large fleets fit under wire cap without operator tuning
+- **type:** technical
+- **status:** active
+- **origin:** BC-119 — bb-82jq (64 containers) grew its SBOM JSON to ~80MB, exceeding BC-113's default 50MB wire cap. Every POST 413'd for 30+ min on 2026-11-15; `GO-2026-6888` (brotli 9.8) stayed `open` because BC-086's absent-reconcile never saw a successful scan. Operators shouldn't need to tune the cap per deploy.
+- **description:** `poc/scout/scout.py::_post_scan_body` wraps the JSON body in `gzip.compress(..., compresslevel=6)` (Python stdlib, ~7× ratio on SBOM JSON) and sets `Content-Encoding: gzip`. On compression error it logs a warning and falls back to raw POST (stdlib gzip is defense-in-depth). One-shot `log.info("BC-119: /scan POST uses Content-Encoding: gzip")` at first POST per process. `poc/hub/hub.py::_ScanPayloadMiddleware` is a pure-ASGI middleware (not `BaseHTTPMiddleware` because that doesn't propagate a swapped `receive` through `call_next`): it first re-runs BC-113's wire-cap check against `Content-Length`, then if `Content-Encoding: gzip` drains the body, `gzip.decompress()`es it, checks `len(decoded) ≤ BEACONRY_SCAN_MAX_DECOMPRESSED_BYTES` (new env, default `10 × SCAN_MAX_PAYLOAD_BYTES` = 500MB — rejects classic >1000× zip-bomb ratios while leaving headroom for SBOM's ~7× observed), strips `Content-Encoding` + rewrites `Content-Length` in the scope, and hands a replay-receive to the inner app so `receive_scan(payload: dict)` sees plain JSON unchanged. Legacy pre-BC-119 scouts posting raw JSON keep working (identity path). Returns distinct 413 messages for wire-cap (`"scan payload too large"`) vs. decompressed-cap (`"decompressed scan payload too large"`); 400 for malformed gzip.
+- **supports:** CAP-T215, CAP-B023
+- **verified by:**
+  - `poc/tests/unit/test_BC_119_scout_scan_gzip_compression.py`
+
 ### CAP-T220: `beaconry status` URL + host + fleet (you) marker display
 - **type:** business
 - **status:** active

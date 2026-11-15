@@ -4,6 +4,733 @@ All notable changes to beaconry are recorded here. The format is based
 on [Keep a Changelog](https://keepachangelog.com/), and this project
 follows [Semantic Versioning](https://semver.org/).
 
+## [v0.22.4] — 2026-11-15
+
+### ⚠ Breaking
+- **hub,scout,scripts:** BC-062 versioning (software + API + schema) + SemVer bump + pre-push gate
+- **ci,scripts:** BC-069 release toolchain — CI + make soak + auto-CHANGELOG
+
+### Added
+- **poc:** scout + hub + executor plugins + compose stack
+- **hub,demo:** BC-001 end-to-end mocked POC demo
+- **demo,hub:** BC-002 green — real pipeline on nginx:1.24, shipped
+- **docs,scripts:** BC-004 capabilities + bidirectional traceability
+- **scout,compose,make:** BC-005 multi-image Compose demo
+- **make,docs:** BC-006 fast + full gate tiers
+- **cli:** BC-007 `make findings` — read-only view of CVE state
+- **process:** BC-008 pre-ship audit protocol (DD-TGD step 6a)
+- **hub:** BC-003 Phase 1+2 — callback validation + idempotence
+- **hub:** BC-003 shipped — Phase 3 live tap session complete
+- **hub:** BC-009 shipped — real fix execution via Telegram
+- **hub+scout:** BC-010 shipped — container health observability (4 endpoints)
+- **beaconry_health:** BC-012 shipped — shared package + compiler-enforced trap guard
+- **scout+status:** BC-013 shipped — scout live HTTP probes + Docker-compose-ps-like status table
+- **executor:** BC-014 shipped — DockerAdapter same-track pull (no silent :latest jump)
+- **process:** BC-015 shipped — memory drift regression guard
+- **hub:** BC-011 shipped — target-container health probe (operator-triggered)
+- **process:** BC-016 shipped — docs drift guard (make help + README ↔ code)
+- **e2e:** BC-017 shipped — automated end-to-end BC-011 probe flow (no Telegram)
+- **e2e:** BC-018 shipped — telegram-mock service (supersedes BC-017 test-mode guard)
+- **ci:** BC-019 — grep-verify every shipping-evidence pointer
+- **hub:** BC-020 — KEV ingestion + wire urgency.classify_tier
+- **ci:** BC-021 — Dockerfile sources lint
+- **hub:** BC-022 — digest shows KEV markers for suppressed findings
+- **hub:** BC-023 — KEV findings bypass MIN_CVSS filter
+- **ci:** BC-024 — verify-traceability enforces reverse direction
+- **hub:** BC-028 — KEV lookup resolves grype's relatedVulnerabilities aliases
+- **hub:** BC-029 — append-only audit log of operator-visible state changes
+- **hub:** BC-031 — scan reconciliation + regression detection
+- **hub:** BC-032 — fix viability indicator + fixed-in parity
+- **hub:** BC-033 — verify_fix scans source_ref, not hardcoded :latest
+- **hub:** BC-034 — persist last_seen_ts per finding
+- **hub:** BC-035 notification adapter architecture + heartbeat for stale findings
+- **hub,scout:** BC-030 internet_facing detection → Tier 1 fires
+- **hub:** BC-036 decouple digest cadence from scan cadence
+- **scout:** BC-037 on-demand scan trigger — make scan
+- **hub,scenarios:** BC-038 live-stack scenario harness — make test-scenarios
+- **docs,scripts:** BC-039 docs/VARIABLES.md + verify-variables drift lint
+- **docs,scripts:** BC-040 three-way env sync — VARIABLES.md ↔ .env.example ↔ docker-compose.yml
+- **scripts:** BC-041 verify-evidence-pointers reverse check
+- **scripts,hub:** BC-042 `make audit` CLI + `scan_received` event
+- **hub:** BC-043 CVE alias on non-CVE primary ids — KEV paper trail
+- **scripts:** BC-044 live-smoke CLI harness + autodetected scenario coverage
+- **hub,scripts:** BC-055 HTTP-only CLI → hub (no SSH)
+- **docs,scripts:** BC-056 INSTALL.md + verify-install-doc (short-name reshape)
+- **scripts,hub:** BC-057 make findings HOST= + 🖥️ multi-host notification lead
+- **hub:** BC-058 mutation + audit cleanup
+- **hub:** BC-059 callback_data carries CVE id
+- **hub:** BC-060 notify_sent_failed audit symmetry
+- **hub,scripts:** BC-061 scout fleet registry with liveness status
+- **hub,scout,scripts:** BC-062 versioning (software + API + schema) + SemVer bump + pre-push gate
+- **hub,scout,scripts:** BC-063 fleet health visibility + scout heartbeat
+- **hub,scripts:** BC-064 FLEET LAST HEARTBEAT + stale-heartbeat unknown health
+- **hub:** BC-066 manual executor as default + configurable adapter + 1h reminder loop
+- **ci,scripts:** BC-069 release toolchain — CI + make soak + auto-CHANGELOG
+- **scripts,build:** BC-070 operator CLI install — `pip install -e . → beaconry …`
+- **ci,scripts:** BC-074 release automation + 24h soak + feature-complete lint + CI-failure log
+- **scripts,hub,scout:** BC-075 metrics + soak threshold signals + privacy-first opt-in
+- **scripts:** BC-076 beaconry metrics --remote reads from hub /audit over HTTP
+- **docker,scout,hub:** BC-077 non-root hub + scout containers
+- **docker,hub,scout:** BC-078 distroless runtime for hub + scout
+- **ci,make,tests:** BC-079 pre-push runs full container verification
+- **make,scripts:** BC-080 make cleanup — teardown + image removal after tests
+- **ci,docker,python:** BC-082 homelab-deployment coverage + base bumps
+- **docker,ci,tests:** BC-083 forge base image + verify-base-images preflight
+- **hub,notify:** BC-086 auto-fix status + counter threshold + regressed-from-auto-fix
+- **hub,notify:** BC-087 wire last_seen into notifications + BEACONRY_LOG_LEVEL
+- **hub,notify:** BC-089 snooze with real expiry + configurable buttons
+- **hub,notify:** BC-090 auto-fix regression body actually reaches Telegram
+- **hub,scout:** BC-092 canary ring — production fixes gated on staging
+- **scout:** BC-093 rescan triggers — daily + docker events + pacman hook
+- **deploy:** BC-094 opt-in ghcr override compose files
+- **docker:** BC-095 builder stage FROM forge-builder-trixie
+- **docker:** BC-096 baked-in SBOM at builder + /sbom + dogfood-sbom
+- **docker:** BC-097 compose healthchecks use /hc; runtime tracks :latest (#17)
+- **docker:** BC-098 stage-at-runtime-path — detect Python minor at build (#18)
+- **docker:** BC-099 build-time ABI guard + baked HEALTHCHECK (BuildKit) (#19)
+- **docker:** BC-100 telegram_mock on forge-signed scratch base (#20)
+- **hub:** BC-102 scout-offline Telegram alerts + stale-scout reconcile (#22)
+- **scout:** BC-103 rescan on docker image/container removal events (#23)
+- **hub:** BC-104 notification retry queue with exponential backoff (#24)
+- **cli:** BC-105 findings CLI shows FIRST SEEN + LAST CHANGE + auto-close reason (#25)
+- **scout,hub:** BC-106 scout-reported partial-inventory guard (#26)
+- **scout:** BC-107 scout POST retry queue — mirrors BC-104 on scout→hub wire (#27)
+- **scout:** BC-108 docker events watchdog — reconnect on daemon restart (#28)
+- **hub:** BC-109 grype DB update retry with capped exponential backoff (#29)
+- **hub:** BC-110 verify probe retry with exponential backoff (#30)
+- **executor:** BC-111 DockerAdapter pull retry with exponential backoff (#31)
+- **hub:** BC-112 scan-trigger proxy retry on transient scout failures (#32)
+- **hub:** BC-113 /scan payload size limit — DoS guard (#33)
+- **audit:** BC-115 sticky degraded-mode flag for /healthz visibility (#35)
+- **hub:** BC-116 finding state machine extension (fixing + rolled_back) (#36)
+- **hub:** BC-117 cross-repo CVE fix workflow — awaiting_upstream (#38)
+- **cli:** BC-118 beaconry status URL + host + fleet (you) marker (#41)
+- **hub,scout:** BC-119 scout /scan gzip compression — large fleets fit under wire cap (#42)
+- **scout,hub:** BC-120 scout state DB path hardening — degrade loudly, never drop (#44)
+
+### Fixed
+- **hub,demo:** BC-002 robust-notify — HTML parse mode, cap, dedup, digest
+- **docs,scripts:** BC-004 close-gaps — CAP-B/T prefix, required fields, hook, self-consistency
+- **scripts:** BC-004 design-link + origin-story validation
+- **scripts:** BC-004 enforce description as required field
+- **hub:** BC-005 close two in-container regressions found by make demo
+- BC-005 close-gaps — tests + story self-consistency + lessons
+- **scripts:** enforce plan doc on fix/* and feat/* branches
+- smoke mode broken + CAP-id regex truncates at hyphens
+- BC-006 close-gaps — test graceful-skip + README skip-note
+- BC-007 close-gaps — tier in sort key, schema migration, docs
+- BC-007 load_finding reads tier + migration + round-trip tests
+- **scripts:** BC-008 automate-audit — Shipping evidence enforced on shipped stories
+- BC-003 close-gaps — run real_tools, add missing row, warn on scenario-count
+- **beaconry_health:** BC-012 close-gap — pyright actually enforces the trap guard
+- **hub+findings:** BC-011 close-gaps — findings CLI accepts new statuses + button-attach test
+- **compose:** BC-011 env propagation — BEACONRY_HEALTH_PROBES/FIX_ENABLED/MOCK now actually propagate
+- **findings:** BC-007 close-gap — auto-route to compose hub's volume DB
+- **hub:** BC-011 close-gap — use module-level _waterfall binding in verify branch
+- **tests:** BC-018 close-gap — unit coverage for telegram-mock + hub env dials
+- **hub:** BC-020 close-gap — ship kev.py + urgency.py in the image
+- **memory:** BC-020 close-gap — add memory drift ban
+- **hub:** BC-020 close-gap — treat empty BEACONRY_KEV_FEED_URL as unset
+- **docs:** BC-023 close-gap — Covers block + design-decisions annotation
+- **docs:** BC-029 close-gap — add Gherkin block + gitignore audit.log
+- **hub:** BC-032 close-gap — handle grype's 'not available' sentinel
+- **docs:** BC-033 close-gap — add Scenario 3 test coverage
+- **hub:** BC-035 — tolerate empty-string env vars from compose \${VAR:-}
+- **hub:** BC-035/BC-030 close-gap — notify path works inside container
+- **scenarios:** BC-038 close-gap — live-run fixes
+- **audit:** BC-043 close-gap — make audit CVE=X matches alias too
+- **audit:** FOLLOW output buffering + inline-script error handling
+- **hub:** BC-065 digest content-change bypass is now opt-out via env
+- **hub,executor,audit:** BC-067 quality sweep — 5 severity-1 bugs
+- **hub:** BC-068 defensive cleanup — reconcile FD-leak + fix_version blank sanitize
+- **ci,tests:** BC-071 CI env leak — BEACONRY_SKIP_VERSION_BUMP leaked into pytest
+- **build:** explicit packages list to bypass flat-layout detection
+- **hooks:** use .venv/bin/pytest instead of system pytest
+- **deps:** BC-072 pytest 8.3.3 → 9.0.3 + pytest-asyncio 0.24.0 → 1.4.1.post1
+- **deps:** BC-073 python-dotenv 1.0.1 → 1.2.2 + requests 2.32.3 → 2.33.0
+- **docker:** BC-081 bump docker CLI 27.5.1 → 29.9.2 for Go stdlib ≥1.26.9
+- **kev:** BC-091 identifiable User-Agent — CISA stops 403'ing
+- **docker:** hub Dockerfile — pull grype from Docker Hub (bypass GH release CDN) (#16)
+- **compose:** BC-101 rename dev containers to avoid systemd scout collision (#21)
+- **hub:** BC-114 reconcile TOCTOU lock — serialize concurrent writes (#34)
+- **telegram-mock:** strip inherited /sbom.json to restore forge FG-020 invariant (#37)
+- **docker:** BC-121 track Forge's forge-builder-trixie → forge-builder-python-trixie rename
+
+### Changed
+- initial commit (gitignore only; main is CI-promoted)
+- **build:** Makefile, pyproject, pre-commit, dev requirements
+- **poc:** pytest pyramid skeleton + sanity test
+- **build:** lint + type cleanup, lower coverage floor until BC-001
+- **poc:** BC-001 red integration test + plan doc
+- **poc,hub:** BC-002 red state — tests + dispatch stubs + plan
+- **poc:** BC-004 red state — traceability enforcement scenarios
+- **poc:** BC-005 red — scout glob filter stubs + Compose demo plan
+- **e2e:** use hub.save_finding instead of raw INSERT for seeding
+- **ci:** run test-e2e as part of make check-full
+- **ci:** complexity gates + 85/65% coverage floors
+- **scout:** extract parse_ss_output; pragma subprocess shells; un-omit from coverage
+- **hub:** on_button_click → dispatch dict of per-action handlers
+- **ci:** verify_traceability.run → gates registry
+- **make:** fix 3 polish issues surfaced by running all make targets
+- **ops:** live-stack rebuild discipline — make live-rebuild + live-status
+- **process:** breaking-change-in-planning discipline + BC-031 close-gap
+- **hub:** BC-035 close-gap — cover migration backfill, format_heartbeat, mock-print
+- **hub:** BC-030 close-gap — audit event carries internet_facing + .env.example
+- **docker:** remove BC-083 librt.so.1 workaround — forge v3 bundles it
+- **hub,scripts:** BC-086 close-gaps — CLI auto_fixed + digest host + reconcile diag
+- **format:** ruff 0.17 format sweep on 11 pre-existing markdown docs
+- **ci:** reverse-check deterministic plan resolution + allowlist BC-007 CLI self-tests (#39)
+- **release:** poll-wait for CI instead of snap-check (#40)
+
+### Documentation
+- **design:** product design + locked decisions
+- **process:** DD-TGD process, stories, plan docs (BC-000)
+- **stories:** mark BC-000 shipped
+- **stories:** add BC-001 end-to-end mocked POC demo (ready)
+- **stories:** mark BC-001 shipped
+- **process:** add IDEAS backlog + wire it into DD-TGD
+- **stories:** BC-003 draft + note BC-002 audit gaps in IDEAS
+- **ideas:** capture CAP-T026 staleness as fix-opportunistically
+- **memory:** BC-013 close-gap — scout migrated to HTTP; memory files updated
+- **memory:** BC-014 close-gap — design-decisions.md matches same-track pull reality
+- close BC-015 self-consistency gap + refresh make help
+- **memory:** BC-016 close-gap — gate table lists all shipped drift guards
+- **ideas:** log audit-protocol upgrade — grep-verify evidence pointers
+- **ideas:** park BC-020 — dividend overlaps existing demo modes
+- **ideas:** log 2 lint gaps surfaced by BC-020 live-smoke
+- **ideas:** KEV lookup should resolve CVE aliases via grype 'related' field
+- **ideas:** BC-025/026/027 close the big refactor entries
+- **stories:** draft BC-030 (internet_facing detection) as ready
+- **ideas:** log AVG-2909 operator action + promote BC-031 KEV-alias context
+- **stories:** BC-031 draft — scan reconciliation + regression detection
+- **plan:** BC-031 close-gap evidence rows for backfill tests
+- **ideas:** verify-evidence-pointers should catch missing rows too
+- **ideas:** log 3 BC-034 consumer candidates (heartbeat / digest refresh / purge)
+- **stories:** mark BC-035 shipped
+- **stories:** mark BC-030 shipped
+- **bc-037:** post-ship audit — record scout-down verification date
+- **bc-038:** post-ship audit — .env.example + check-full inclusion
+- **bc-039:** post-ship audit — IDEAS followup for three-way sync
+- **bc-040:** post-ship audit — Makefile wording + IDEAS cleanup
+- **bc-041:** post-ship audit — remove stale IDEAS entry (shipped)
+- **bc-042:** post-ship audit — remove stale IDEAS entry
+- **stories:** mark BC-062 shipped in INDEX
+- **lifecycle:** BC-088 add docs/LIFECYCLE.md + flaw inventory
+- **lifecycle:** BC-088 fix state diagram — show OPEN → AUTO_FIXED edge
+- **lifecycle:** BC-089 updates — snooze expiry paths
+- **lifecycle:** BC-090/091/092/093 updates
+- **status:** BC-096 shipped — flip INDEX + story frontmatter
+- **status:** BC-097 shipped — flip INDEX + story frontmatter
+- **status:** BC-098 shipped — flip INDEX + story frontmatter
+- **status:** BC-099 shipped — flip INDEX + story frontmatter
+- **story:** BC-100 telegram_mock forge-base migration (draft)
+- **status:** BC-100 shipped — flip INDEX + story frontmatter
+- **story:** BC-101 dev-compose container rename (draft)
+- **status:** BC-101 shipped — flip INDEX + story frontmatter
+- **story:** BC-102 scout-offline alerts + stale-scout reconcile (draft)
+- **status:** BC-102 shipped — flip INDEX + story frontmatter
+- **status:** BC-103 shipped — flip INDEX + story frontmatter
+- **status:** BC-104 shipped
+- **status:** BC-105 shipped
+- **status:** BC-106 shipped
+- **status:** BC-107 shipped
+- **status:** BC-108 shipped
+- **status:** BC-108 story frontmatter → shipped
+- **status:** BC-109 shipped
+- **status:** BC-110 shipped
+- **status:** BC-111 shipped
+- **status:** BC-112 shipped
+- **status:** BC-113 shipped
+- **status:** BC-114 shipped
+- **status:** BC-116 shipped
+
+### Other
+- Initial commit
+
+## [v0.22.3] — 2026-11-15
+
+### ⚠ Breaking
+- **hub,scout,scripts:** BC-062 versioning (software + API + schema) + SemVer bump + pre-push gate
+- **ci,scripts:** BC-069 release toolchain — CI + make soak + auto-CHANGELOG
+
+### Added
+- **poc:** scout + hub + executor plugins + compose stack
+- **hub,demo:** BC-001 end-to-end mocked POC demo
+- **demo,hub:** BC-002 green — real pipeline on nginx:1.24, shipped
+- **docs,scripts:** BC-004 capabilities + bidirectional traceability
+- **scout,compose,make:** BC-005 multi-image Compose demo
+- **make,docs:** BC-006 fast + full gate tiers
+- **cli:** BC-007 `make findings` — read-only view of CVE state
+- **process:** BC-008 pre-ship audit protocol (DD-TGD step 6a)
+- **hub:** BC-003 Phase 1+2 — callback validation + idempotence
+- **hub:** BC-003 shipped — Phase 3 live tap session complete
+- **hub:** BC-009 shipped — real fix execution via Telegram
+- **hub+scout:** BC-010 shipped — container health observability (4 endpoints)
+- **beaconry_health:** BC-012 shipped — shared package + compiler-enforced trap guard
+- **scout+status:** BC-013 shipped — scout live HTTP probes + Docker-compose-ps-like status table
+- **executor:** BC-014 shipped — DockerAdapter same-track pull (no silent :latest jump)
+- **process:** BC-015 shipped — memory drift regression guard
+- **hub:** BC-011 shipped — target-container health probe (operator-triggered)
+- **process:** BC-016 shipped — docs drift guard (make help + README ↔ code)
+- **e2e:** BC-017 shipped — automated end-to-end BC-011 probe flow (no Telegram)
+- **e2e:** BC-018 shipped — telegram-mock service (supersedes BC-017 test-mode guard)
+- **ci:** BC-019 — grep-verify every shipping-evidence pointer
+- **hub:** BC-020 — KEV ingestion + wire urgency.classify_tier
+- **ci:** BC-021 — Dockerfile sources lint
+- **hub:** BC-022 — digest shows KEV markers for suppressed findings
+- **hub:** BC-023 — KEV findings bypass MIN_CVSS filter
+- **ci:** BC-024 — verify-traceability enforces reverse direction
+- **hub:** BC-028 — KEV lookup resolves grype's relatedVulnerabilities aliases
+- **hub:** BC-029 — append-only audit log of operator-visible state changes
+- **hub:** BC-031 — scan reconciliation + regression detection
+- **hub:** BC-032 — fix viability indicator + fixed-in parity
+- **hub:** BC-033 — verify_fix scans source_ref, not hardcoded :latest
+- **hub:** BC-034 — persist last_seen_ts per finding
+- **hub:** BC-035 notification adapter architecture + heartbeat for stale findings
+- **hub,scout:** BC-030 internet_facing detection → Tier 1 fires
+- **hub:** BC-036 decouple digest cadence from scan cadence
+- **scout:** BC-037 on-demand scan trigger — make scan
+- **hub,scenarios:** BC-038 live-stack scenario harness — make test-scenarios
+- **docs,scripts:** BC-039 docs/VARIABLES.md + verify-variables drift lint
+- **docs,scripts:** BC-040 three-way env sync — VARIABLES.md ↔ .env.example ↔ docker-compose.yml
+- **scripts:** BC-041 verify-evidence-pointers reverse check
+- **scripts,hub:** BC-042 `make audit` CLI + `scan_received` event
+- **hub:** BC-043 CVE alias on non-CVE primary ids — KEV paper trail
+- **scripts:** BC-044 live-smoke CLI harness + autodetected scenario coverage
+- **hub,scripts:** BC-055 HTTP-only CLI → hub (no SSH)
+- **docs,scripts:** BC-056 INSTALL.md + verify-install-doc (short-name reshape)
+- **scripts,hub:** BC-057 make findings HOST= + 🖥️ multi-host notification lead
+- **hub:** BC-058 mutation + audit cleanup
+- **hub:** BC-059 callback_data carries CVE id
+- **hub:** BC-060 notify_sent_failed audit symmetry
+- **hub,scripts:** BC-061 scout fleet registry with liveness status
+- **hub,scout,scripts:** BC-062 versioning (software + API + schema) + SemVer bump + pre-push gate
+- **hub,scout,scripts:** BC-063 fleet health visibility + scout heartbeat
+- **hub,scripts:** BC-064 FLEET LAST HEARTBEAT + stale-heartbeat unknown health
+- **hub:** BC-066 manual executor as default + configurable adapter + 1h reminder loop
+- **ci,scripts:** BC-069 release toolchain — CI + make soak + auto-CHANGELOG
+- **scripts,build:** BC-070 operator CLI install — `pip install -e . → beaconry …`
+- **ci,scripts:** BC-074 release automation + 24h soak + feature-complete lint + CI-failure log
+- **scripts,hub,scout:** BC-075 metrics + soak threshold signals + privacy-first opt-in
+- **scripts:** BC-076 beaconry metrics --remote reads from hub /audit over HTTP
+- **docker,scout,hub:** BC-077 non-root hub + scout containers
+- **docker,hub,scout:** BC-078 distroless runtime for hub + scout
+- **ci,make,tests:** BC-079 pre-push runs full container verification
+- **make,scripts:** BC-080 make cleanup — teardown + image removal after tests
+- **ci,docker,python:** BC-082 homelab-deployment coverage + base bumps
+- **docker,ci,tests:** BC-083 forge base image + verify-base-images preflight
+- **hub,notify:** BC-086 auto-fix status + counter threshold + regressed-from-auto-fix
+- **hub,notify:** BC-087 wire last_seen into notifications + BEACONRY_LOG_LEVEL
+- **hub,notify:** BC-089 snooze with real expiry + configurable buttons
+- **hub,notify:** BC-090 auto-fix regression body actually reaches Telegram
+- **hub,scout:** BC-092 canary ring — production fixes gated on staging
+- **scout:** BC-093 rescan triggers — daily + docker events + pacman hook
+- **deploy:** BC-094 opt-in ghcr override compose files
+- **docker:** BC-095 builder stage FROM forge-builder-trixie
+- **docker:** BC-096 baked-in SBOM at builder + /sbom + dogfood-sbom
+- **docker:** BC-097 compose healthchecks use /hc; runtime tracks :latest (#17)
+- **docker:** BC-098 stage-at-runtime-path — detect Python minor at build (#18)
+- **docker:** BC-099 build-time ABI guard + baked HEALTHCHECK (BuildKit) (#19)
+- **docker:** BC-100 telegram_mock on forge-signed scratch base (#20)
+- **hub:** BC-102 scout-offline Telegram alerts + stale-scout reconcile (#22)
+- **scout:** BC-103 rescan on docker image/container removal events (#23)
+- **hub:** BC-104 notification retry queue with exponential backoff (#24)
+- **cli:** BC-105 findings CLI shows FIRST SEEN + LAST CHANGE + auto-close reason (#25)
+- **scout,hub:** BC-106 scout-reported partial-inventory guard (#26)
+- **scout:** BC-107 scout POST retry queue — mirrors BC-104 on scout→hub wire (#27)
+- **scout:** BC-108 docker events watchdog — reconnect on daemon restart (#28)
+- **hub:** BC-109 grype DB update retry with capped exponential backoff (#29)
+- **hub:** BC-110 verify probe retry with exponential backoff (#30)
+- **executor:** BC-111 DockerAdapter pull retry with exponential backoff (#31)
+- **hub:** BC-112 scan-trigger proxy retry on transient scout failures (#32)
+- **hub:** BC-113 /scan payload size limit — DoS guard (#33)
+- **audit:** BC-115 sticky degraded-mode flag for /healthz visibility (#35)
+- **hub:** BC-116 finding state machine extension (fixing + rolled_back) (#36)
+- **hub:** BC-117 cross-repo CVE fix workflow — awaiting_upstream (#38)
+- **cli:** BC-118 beaconry status URL + host + fleet (you) marker (#41)
+- **hub,scout:** BC-119 scout /scan gzip compression — large fleets fit under wire cap (#42)
+- **scout,hub:** BC-120 scout state DB path hardening — degrade loudly, never drop
+
+### Fixed
+- **hub,demo:** BC-002 robust-notify — HTML parse mode, cap, dedup, digest
+- **docs,scripts:** BC-004 close-gaps — CAP-B/T prefix, required fields, hook, self-consistency
+- **scripts:** BC-004 design-link + origin-story validation
+- **scripts:** BC-004 enforce description as required field
+- **hub:** BC-005 close two in-container regressions found by make demo
+- BC-005 close-gaps — tests + story self-consistency + lessons
+- **scripts:** enforce plan doc on fix/* and feat/* branches
+- smoke mode broken + CAP-id regex truncates at hyphens
+- BC-006 close-gaps — test graceful-skip + README skip-note
+- BC-007 close-gaps — tier in sort key, schema migration, docs
+- BC-007 load_finding reads tier + migration + round-trip tests
+- **scripts:** BC-008 automate-audit — Shipping evidence enforced on shipped stories
+- BC-003 close-gaps — run real_tools, add missing row, warn on scenario-count
+- **beaconry_health:** BC-012 close-gap — pyright actually enforces the trap guard
+- **hub+findings:** BC-011 close-gaps — findings CLI accepts new statuses + button-attach test
+- **compose:** BC-011 env propagation — BEACONRY_HEALTH_PROBES/FIX_ENABLED/MOCK now actually propagate
+- **findings:** BC-007 close-gap — auto-route to compose hub's volume DB
+- **hub:** BC-011 close-gap — use module-level _waterfall binding in verify branch
+- **tests:** BC-018 close-gap — unit coverage for telegram-mock + hub env dials
+- **hub:** BC-020 close-gap — ship kev.py + urgency.py in the image
+- **memory:** BC-020 close-gap — add memory drift ban
+- **hub:** BC-020 close-gap — treat empty BEACONRY_KEV_FEED_URL as unset
+- **docs:** BC-023 close-gap — Covers block + design-decisions annotation
+- **docs:** BC-029 close-gap — add Gherkin block + gitignore audit.log
+- **hub:** BC-032 close-gap — handle grype's 'not available' sentinel
+- **docs:** BC-033 close-gap — add Scenario 3 test coverage
+- **hub:** BC-035 — tolerate empty-string env vars from compose \${VAR:-}
+- **hub:** BC-035/BC-030 close-gap — notify path works inside container
+- **scenarios:** BC-038 close-gap — live-run fixes
+- **audit:** BC-043 close-gap — make audit CVE=X matches alias too
+- **audit:** FOLLOW output buffering + inline-script error handling
+- **hub:** BC-065 digest content-change bypass is now opt-out via env
+- **hub,executor,audit:** BC-067 quality sweep — 5 severity-1 bugs
+- **hub:** BC-068 defensive cleanup — reconcile FD-leak + fix_version blank sanitize
+- **ci,tests:** BC-071 CI env leak — BEACONRY_SKIP_VERSION_BUMP leaked into pytest
+- **build:** explicit packages list to bypass flat-layout detection
+- **hooks:** use .venv/bin/pytest instead of system pytest
+- **deps:** BC-072 pytest 8.3.3 → 9.0.3 + pytest-asyncio 0.24.0 → 1.4.1.post1
+- **deps:** BC-073 python-dotenv 1.0.1 → 1.2.2 + requests 2.32.3 → 2.33.0
+- **docker:** BC-081 bump docker CLI 27.5.1 → 29.9.2 for Go stdlib ≥1.26.9
+- **kev:** BC-091 identifiable User-Agent — CISA stops 403'ing
+- **docker:** hub Dockerfile — pull grype from Docker Hub (bypass GH release CDN) (#16)
+- **compose:** BC-101 rename dev containers to avoid systemd scout collision (#21)
+- **hub:** BC-114 reconcile TOCTOU lock — serialize concurrent writes (#34)
+- **telegram-mock:** strip inherited /sbom.json to restore forge FG-020 invariant (#37)
+- **scout:** BC-120 ultrareview findings — real write probe + broader exception catch + integration test
+
+### Changed
+- initial commit (gitignore only; main is CI-promoted)
+- **build:** Makefile, pyproject, pre-commit, dev requirements
+- **poc:** pytest pyramid skeleton + sanity test
+- **build:** lint + type cleanup, lower coverage floor until BC-001
+- **poc:** BC-001 red integration test + plan doc
+- **poc,hub:** BC-002 red state — tests + dispatch stubs + plan
+- **poc:** BC-004 red state — traceability enforcement scenarios
+- **poc:** BC-005 red — scout glob filter stubs + Compose demo plan
+- **e2e:** use hub.save_finding instead of raw INSERT for seeding
+- **ci:** run test-e2e as part of make check-full
+- **ci:** complexity gates + 85/65% coverage floors
+- **scout:** extract parse_ss_output; pragma subprocess shells; un-omit from coverage
+- **hub:** on_button_click → dispatch dict of per-action handlers
+- **ci:** verify_traceability.run → gates registry
+- **make:** fix 3 polish issues surfaced by running all make targets
+- **ops:** live-stack rebuild discipline — make live-rebuild + live-status
+- **process:** breaking-change-in-planning discipline + BC-031 close-gap
+- **hub:** BC-035 close-gap — cover migration backfill, format_heartbeat, mock-print
+- **hub:** BC-030 close-gap — audit event carries internet_facing + .env.example
+- **docker:** remove BC-083 librt.so.1 workaround — forge v3 bundles it
+- **hub,scripts:** BC-086 close-gaps — CLI auto_fixed + digest host + reconcile diag
+- **format:** ruff 0.17 format sweep on 11 pre-existing markdown docs
+- **ci:** reverse-check deterministic plan resolution + allowlist BC-007 CLI self-tests (#39)
+- **release:** poll-wait for CI instead of snap-check (#40)
+
+### Documentation
+- **design:** product design + locked decisions
+- **process:** DD-TGD process, stories, plan docs (BC-000)
+- **stories:** mark BC-000 shipped
+- **stories:** add BC-001 end-to-end mocked POC demo (ready)
+- **stories:** mark BC-001 shipped
+- **process:** add IDEAS backlog + wire it into DD-TGD
+- **stories:** BC-003 draft + note BC-002 audit gaps in IDEAS
+- **ideas:** capture CAP-T026 staleness as fix-opportunistically
+- **memory:** BC-013 close-gap — scout migrated to HTTP; memory files updated
+- **memory:** BC-014 close-gap — design-decisions.md matches same-track pull reality
+- close BC-015 self-consistency gap + refresh make help
+- **memory:** BC-016 close-gap — gate table lists all shipped drift guards
+- **ideas:** log audit-protocol upgrade — grep-verify evidence pointers
+- **ideas:** park BC-020 — dividend overlaps existing demo modes
+- **ideas:** log 2 lint gaps surfaced by BC-020 live-smoke
+- **ideas:** KEV lookup should resolve CVE aliases via grype 'related' field
+- **ideas:** BC-025/026/027 close the big refactor entries
+- **stories:** draft BC-030 (internet_facing detection) as ready
+- **ideas:** log AVG-2909 operator action + promote BC-031 KEV-alias context
+- **stories:** BC-031 draft — scan reconciliation + regression detection
+- **plan:** BC-031 close-gap evidence rows for backfill tests
+- **ideas:** verify-evidence-pointers should catch missing rows too
+- **ideas:** log 3 BC-034 consumer candidates (heartbeat / digest refresh / purge)
+- **stories:** mark BC-035 shipped
+- **stories:** mark BC-030 shipped
+- **bc-037:** post-ship audit — record scout-down verification date
+- **bc-038:** post-ship audit — .env.example + check-full inclusion
+- **bc-039:** post-ship audit — IDEAS followup for three-way sync
+- **bc-040:** post-ship audit — Makefile wording + IDEAS cleanup
+- **bc-041:** post-ship audit — remove stale IDEAS entry (shipped)
+- **bc-042:** post-ship audit — remove stale IDEAS entry
+- **stories:** mark BC-062 shipped in INDEX
+- **lifecycle:** BC-088 add docs/LIFECYCLE.md + flaw inventory
+- **lifecycle:** BC-088 fix state diagram — show OPEN → AUTO_FIXED edge
+- **lifecycle:** BC-089 updates — snooze expiry paths
+- **lifecycle:** BC-090/091/092/093 updates
+- **status:** BC-096 shipped — flip INDEX + story frontmatter
+- **status:** BC-097 shipped — flip INDEX + story frontmatter
+- **status:** BC-098 shipped — flip INDEX + story frontmatter
+- **status:** BC-099 shipped — flip INDEX + story frontmatter
+- **story:** BC-100 telegram_mock forge-base migration (draft)
+- **status:** BC-100 shipped — flip INDEX + story frontmatter
+- **story:** BC-101 dev-compose container rename (draft)
+- **status:** BC-101 shipped — flip INDEX + story frontmatter
+- **story:** BC-102 scout-offline alerts + stale-scout reconcile (draft)
+- **status:** BC-102 shipped — flip INDEX + story frontmatter
+- **status:** BC-103 shipped — flip INDEX + story frontmatter
+- **status:** BC-104 shipped
+- **status:** BC-105 shipped
+- **status:** BC-106 shipped
+- **status:** BC-107 shipped
+- **status:** BC-108 shipped
+- **status:** BC-108 story frontmatter → shipped
+- **status:** BC-109 shipped
+- **status:** BC-110 shipped
+- **status:** BC-111 shipped
+- **status:** BC-112 shipped
+- **status:** BC-113 shipped
+- **status:** BC-114 shipped
+- **status:** BC-116 shipped
+
+### Other
+- Initial commit
+
+## [v0.22.2] — 2026-11-15
+
+### ⚠ Breaking
+- **hub,scout,scripts:** BC-062 versioning (software + API + schema) + SemVer bump + pre-push gate
+- **ci,scripts:** BC-069 release toolchain — CI + make soak + auto-CHANGELOG
+
+### Added
+- **poc:** scout + hub + executor plugins + compose stack
+- **hub,demo:** BC-001 end-to-end mocked POC demo
+- **demo,hub:** BC-002 green — real pipeline on nginx:1.24, shipped
+- **docs,scripts:** BC-004 capabilities + bidirectional traceability
+- **scout,compose,make:** BC-005 multi-image Compose demo
+- **make,docs:** BC-006 fast + full gate tiers
+- **cli:** BC-007 `make findings` — read-only view of CVE state
+- **process:** BC-008 pre-ship audit protocol (DD-TGD step 6a)
+- **hub:** BC-003 Phase 1+2 — callback validation + idempotence
+- **hub:** BC-003 shipped — Phase 3 live tap session complete
+- **hub:** BC-009 shipped — real fix execution via Telegram
+- **hub+scout:** BC-010 shipped — container health observability (4 endpoints)
+- **beaconry_health:** BC-012 shipped — shared package + compiler-enforced trap guard
+- **scout+status:** BC-013 shipped — scout live HTTP probes + Docker-compose-ps-like status table
+- **executor:** BC-014 shipped — DockerAdapter same-track pull (no silent :latest jump)
+- **process:** BC-015 shipped — memory drift regression guard
+- **hub:** BC-011 shipped — target-container health probe (operator-triggered)
+- **process:** BC-016 shipped — docs drift guard (make help + README ↔ code)
+- **e2e:** BC-017 shipped — automated end-to-end BC-011 probe flow (no Telegram)
+- **e2e:** BC-018 shipped — telegram-mock service (supersedes BC-017 test-mode guard)
+- **ci:** BC-019 — grep-verify every shipping-evidence pointer
+- **hub:** BC-020 — KEV ingestion + wire urgency.classify_tier
+- **ci:** BC-021 — Dockerfile sources lint
+- **hub:** BC-022 — digest shows KEV markers for suppressed findings
+- **hub:** BC-023 — KEV findings bypass MIN_CVSS filter
+- **ci:** BC-024 — verify-traceability enforces reverse direction
+- **hub:** BC-028 — KEV lookup resolves grype's relatedVulnerabilities aliases
+- **hub:** BC-029 — append-only audit log of operator-visible state changes
+- **hub:** BC-031 — scan reconciliation + regression detection
+- **hub:** BC-032 — fix viability indicator + fixed-in parity
+- **hub:** BC-033 — verify_fix scans source_ref, not hardcoded :latest
+- **hub:** BC-034 — persist last_seen_ts per finding
+- **hub:** BC-035 notification adapter architecture + heartbeat for stale findings
+- **hub,scout:** BC-030 internet_facing detection → Tier 1 fires
+- **hub:** BC-036 decouple digest cadence from scan cadence
+- **scout:** BC-037 on-demand scan trigger — make scan
+- **hub,scenarios:** BC-038 live-stack scenario harness — make test-scenarios
+- **docs,scripts:** BC-039 docs/VARIABLES.md + verify-variables drift lint
+- **docs,scripts:** BC-040 three-way env sync — VARIABLES.md ↔ .env.example ↔ docker-compose.yml
+- **scripts:** BC-041 verify-evidence-pointers reverse check
+- **scripts,hub:** BC-042 `make audit` CLI + `scan_received` event
+- **hub:** BC-043 CVE alias on non-CVE primary ids — KEV paper trail
+- **scripts:** BC-044 live-smoke CLI harness + autodetected scenario coverage
+- **hub,scripts:** BC-055 HTTP-only CLI → hub (no SSH)
+- **docs,scripts:** BC-056 INSTALL.md + verify-install-doc (short-name reshape)
+- **scripts,hub:** BC-057 make findings HOST= + 🖥️ multi-host notification lead
+- **hub:** BC-058 mutation + audit cleanup
+- **hub:** BC-059 callback_data carries CVE id
+- **hub:** BC-060 notify_sent_failed audit symmetry
+- **hub,scripts:** BC-061 scout fleet registry with liveness status
+- **hub,scout,scripts:** BC-062 versioning (software + API + schema) + SemVer bump + pre-push gate
+- **hub,scout,scripts:** BC-063 fleet health visibility + scout heartbeat
+- **hub,scripts:** BC-064 FLEET LAST HEARTBEAT + stale-heartbeat unknown health
+- **hub:** BC-066 manual executor as default + configurable adapter + 1h reminder loop
+- **ci,scripts:** BC-069 release toolchain — CI + make soak + auto-CHANGELOG
+- **scripts,build:** BC-070 operator CLI install — `pip install -e . → beaconry …`
+- **ci,scripts:** BC-074 release automation + 24h soak + feature-complete lint + CI-failure log
+- **scripts,hub,scout:** BC-075 metrics + soak threshold signals + privacy-first opt-in
+- **scripts:** BC-076 beaconry metrics --remote reads from hub /audit over HTTP
+- **docker,scout,hub:** BC-077 non-root hub + scout containers
+- **docker,hub,scout:** BC-078 distroless runtime for hub + scout
+- **ci,make,tests:** BC-079 pre-push runs full container verification
+- **make,scripts:** BC-080 make cleanup — teardown + image removal after tests
+- **ci,docker,python:** BC-082 homelab-deployment coverage + base bumps
+- **docker,ci,tests:** BC-083 forge base image + verify-base-images preflight
+- **hub,notify:** BC-086 auto-fix status + counter threshold + regressed-from-auto-fix
+- **hub,notify:** BC-087 wire last_seen into notifications + BEACONRY_LOG_LEVEL
+- **hub,notify:** BC-089 snooze with real expiry + configurable buttons
+- **hub,notify:** BC-090 auto-fix regression body actually reaches Telegram
+- **hub,scout:** BC-092 canary ring — production fixes gated on staging
+- **scout:** BC-093 rescan triggers — daily + docker events + pacman hook
+- **deploy:** BC-094 opt-in ghcr override compose files
+- **docker:** BC-095 builder stage FROM forge-builder-trixie
+- **docker:** BC-096 baked-in SBOM at builder + /sbom + dogfood-sbom
+- **docker:** BC-097 compose healthchecks use /hc; runtime tracks :latest (#17)
+- **docker:** BC-098 stage-at-runtime-path — detect Python minor at build (#18)
+- **docker:** BC-099 build-time ABI guard + baked HEALTHCHECK (BuildKit) (#19)
+- **docker:** BC-100 telegram_mock on forge-signed scratch base (#20)
+- **hub:** BC-102 scout-offline Telegram alerts + stale-scout reconcile (#22)
+- **scout:** BC-103 rescan on docker image/container removal events (#23)
+- **hub:** BC-104 notification retry queue with exponential backoff (#24)
+- **cli:** BC-105 findings CLI shows FIRST SEEN + LAST CHANGE + auto-close reason (#25)
+- **scout,hub:** BC-106 scout-reported partial-inventory guard (#26)
+- **scout:** BC-107 scout POST retry queue — mirrors BC-104 on scout→hub wire (#27)
+- **scout:** BC-108 docker events watchdog — reconnect on daemon restart (#28)
+- **hub:** BC-109 grype DB update retry with capped exponential backoff (#29)
+- **hub:** BC-110 verify probe retry with exponential backoff (#30)
+- **executor:** BC-111 DockerAdapter pull retry with exponential backoff (#31)
+- **hub:** BC-112 scan-trigger proxy retry on transient scout failures (#32)
+- **hub:** BC-113 /scan payload size limit — DoS guard (#33)
+- **audit:** BC-115 sticky degraded-mode flag for /healthz visibility (#35)
+- **hub:** BC-116 finding state machine extension (fixing + rolled_back) (#36)
+- **hub:** BC-117 cross-repo CVE fix workflow — awaiting_upstream (#38)
+- **cli:** BC-118 beaconry status URL + host + fleet (you) marker (#41)
+- **hub,scout:** BC-119 scout gzips /scan POST body; hub decompresses transparently
+
+### Fixed
+- **hub,demo:** BC-002 robust-notify — HTML parse mode, cap, dedup, digest
+- **docs,scripts:** BC-004 close-gaps — CAP-B/T prefix, required fields, hook, self-consistency
+- **scripts:** BC-004 design-link + origin-story validation
+- **scripts:** BC-004 enforce description as required field
+- **hub:** BC-005 close two in-container regressions found by make demo
+- BC-005 close-gaps — tests + story self-consistency + lessons
+- **scripts:** enforce plan doc on fix/* and feat/* branches
+- smoke mode broken + CAP-id regex truncates at hyphens
+- BC-006 close-gaps — test graceful-skip + README skip-note
+- BC-007 close-gaps — tier in sort key, schema migration, docs
+- BC-007 load_finding reads tier + migration + round-trip tests
+- **scripts:** BC-008 automate-audit — Shipping evidence enforced on shipped stories
+- BC-003 close-gaps — run real_tools, add missing row, warn on scenario-count
+- **beaconry_health:** BC-012 close-gap — pyright actually enforces the trap guard
+- **hub+findings:** BC-011 close-gaps — findings CLI accepts new statuses + button-attach test
+- **compose:** BC-011 env propagation — BEACONRY_HEALTH_PROBES/FIX_ENABLED/MOCK now actually propagate
+- **findings:** BC-007 close-gap — auto-route to compose hub's volume DB
+- **hub:** BC-011 close-gap — use module-level _waterfall binding in verify branch
+- **tests:** BC-018 close-gap — unit coverage for telegram-mock + hub env dials
+- **hub:** BC-020 close-gap — ship kev.py + urgency.py in the image
+- **memory:** BC-020 close-gap — add memory drift ban
+- **hub:** BC-020 close-gap — treat empty BEACONRY_KEV_FEED_URL as unset
+- **docs:** BC-023 close-gap — Covers block + design-decisions annotation
+- **docs:** BC-029 close-gap — add Gherkin block + gitignore audit.log
+- **hub:** BC-032 close-gap — handle grype's 'not available' sentinel
+- **docs:** BC-033 close-gap — add Scenario 3 test coverage
+- **hub:** BC-035 — tolerate empty-string env vars from compose \${VAR:-}
+- **hub:** BC-035/BC-030 close-gap — notify path works inside container
+- **scenarios:** BC-038 close-gap — live-run fixes
+- **audit:** BC-043 close-gap — make audit CVE=X matches alias too
+- **audit:** FOLLOW output buffering + inline-script error handling
+- **hub:** BC-065 digest content-change bypass is now opt-out via env
+- **hub,executor,audit:** BC-067 quality sweep — 5 severity-1 bugs
+- **hub:** BC-068 defensive cleanup — reconcile FD-leak + fix_version blank sanitize
+- **ci,tests:** BC-071 CI env leak — BEACONRY_SKIP_VERSION_BUMP leaked into pytest
+- **build:** explicit packages list to bypass flat-layout detection
+- **hooks:** use .venv/bin/pytest instead of system pytest
+- **deps:** BC-072 pytest 8.3.3 → 9.0.3 + pytest-asyncio 0.24.0 → 1.4.1.post1
+- **deps:** BC-073 python-dotenv 1.0.1 → 1.2.2 + requests 2.32.3 → 2.33.0
+- **docker:** BC-081 bump docker CLI 27.5.1 → 29.9.2 for Go stdlib ≥1.26.9
+- **kev:** BC-091 identifiable User-Agent — CISA stops 403'ing
+- **docker:** hub Dockerfile — pull grype from Docker Hub (bypass GH release CDN) (#16)
+- **compose:** BC-101 rename dev containers to avoid systemd scout collision (#21)
+- **hub:** BC-114 reconcile TOCTOU lock — serialize concurrent writes (#34)
+- **telegram-mock:** strip inherited /sbom.json to restore forge FG-020 invariant (#37)
+
+### Changed
+- initial commit (gitignore only; main is CI-promoted)
+- **build:** Makefile, pyproject, pre-commit, dev requirements
+- **poc:** pytest pyramid skeleton + sanity test
+- **build:** lint + type cleanup, lower coverage floor until BC-001
+- **poc:** BC-001 red integration test + plan doc
+- **poc,hub:** BC-002 red state — tests + dispatch stubs + plan
+- **poc:** BC-004 red state — traceability enforcement scenarios
+- **poc:** BC-005 red — scout glob filter stubs + Compose demo plan
+- **e2e:** use hub.save_finding instead of raw INSERT for seeding
+- **ci:** run test-e2e as part of make check-full
+- **ci:** complexity gates + 85/65% coverage floors
+- **scout:** extract parse_ss_output; pragma subprocess shells; un-omit from coverage
+- **hub:** on_button_click → dispatch dict of per-action handlers
+- **ci:** verify_traceability.run → gates registry
+- **make:** fix 3 polish issues surfaced by running all make targets
+- **ops:** live-stack rebuild discipline — make live-rebuild + live-status
+- **process:** breaking-change-in-planning discipline + BC-031 close-gap
+- **hub:** BC-035 close-gap — cover migration backfill, format_heartbeat, mock-print
+- **hub:** BC-030 close-gap — audit event carries internet_facing + .env.example
+- **docker:** remove BC-083 librt.so.1 workaround — forge v3 bundles it
+- **hub,scripts:** BC-086 close-gaps — CLI auto_fixed + digest host + reconcile diag
+- **format:** ruff 0.17 format sweep on 11 pre-existing markdown docs
+- **ci:** reverse-check deterministic plan resolution + allowlist BC-007 CLI self-tests (#39)
+- **release:** poll-wait for CI instead of snap-check (#40)
+
+### Documentation
+- **design:** product design + locked decisions
+- **process:** DD-TGD process, stories, plan docs (BC-000)
+- **stories:** mark BC-000 shipped
+- **stories:** add BC-001 end-to-end mocked POC demo (ready)
+- **stories:** mark BC-001 shipped
+- **process:** add IDEAS backlog + wire it into DD-TGD
+- **stories:** BC-003 draft + note BC-002 audit gaps in IDEAS
+- **ideas:** capture CAP-T026 staleness as fix-opportunistically
+- **memory:** BC-013 close-gap — scout migrated to HTTP; memory files updated
+- **memory:** BC-014 close-gap — design-decisions.md matches same-track pull reality
+- close BC-015 self-consistency gap + refresh make help
+- **memory:** BC-016 close-gap — gate table lists all shipped drift guards
+- **ideas:** log audit-protocol upgrade — grep-verify evidence pointers
+- **ideas:** park BC-020 — dividend overlaps existing demo modes
+- **ideas:** log 2 lint gaps surfaced by BC-020 live-smoke
+- **ideas:** KEV lookup should resolve CVE aliases via grype 'related' field
+- **ideas:** BC-025/026/027 close the big refactor entries
+- **stories:** draft BC-030 (internet_facing detection) as ready
+- **ideas:** log AVG-2909 operator action + promote BC-031 KEV-alias context
+- **stories:** BC-031 draft — scan reconciliation + regression detection
+- **plan:** BC-031 close-gap evidence rows for backfill tests
+- **ideas:** verify-evidence-pointers should catch missing rows too
+- **ideas:** log 3 BC-034 consumer candidates (heartbeat / digest refresh / purge)
+- **stories:** mark BC-035 shipped
+- **stories:** mark BC-030 shipped
+- **bc-037:** post-ship audit — record scout-down verification date
+- **bc-038:** post-ship audit — .env.example + check-full inclusion
+- **bc-039:** post-ship audit — IDEAS followup for three-way sync
+- **bc-040:** post-ship audit — Makefile wording + IDEAS cleanup
+- **bc-041:** post-ship audit — remove stale IDEAS entry (shipped)
+- **bc-042:** post-ship audit — remove stale IDEAS entry
+- **stories:** mark BC-062 shipped in INDEX
+- **lifecycle:** BC-088 add docs/LIFECYCLE.md + flaw inventory
+- **lifecycle:** BC-088 fix state diagram — show OPEN → AUTO_FIXED edge
+- **lifecycle:** BC-089 updates — snooze expiry paths
+- **lifecycle:** BC-090/091/092/093 updates
+- **status:** BC-096 shipped — flip INDEX + story frontmatter
+- **status:** BC-097 shipped — flip INDEX + story frontmatter
+- **status:** BC-098 shipped — flip INDEX + story frontmatter
+- **status:** BC-099 shipped — flip INDEX + story frontmatter
+- **story:** BC-100 telegram_mock forge-base migration (draft)
+- **status:** BC-100 shipped — flip INDEX + story frontmatter
+- **story:** BC-101 dev-compose container rename (draft)
+- **status:** BC-101 shipped — flip INDEX + story frontmatter
+- **story:** BC-102 scout-offline alerts + stale-scout reconcile (draft)
+- **status:** BC-102 shipped — flip INDEX + story frontmatter
+- **status:** BC-103 shipped — flip INDEX + story frontmatter
+- **status:** BC-104 shipped
+- **status:** BC-105 shipped
+- **status:** BC-106 shipped
+- **status:** BC-107 shipped
+- **status:** BC-108 shipped
+- **status:** BC-108 story frontmatter → shipped
+- **status:** BC-109 shipped
+- **status:** BC-110 shipped
+- **status:** BC-111 shipped
+- **status:** BC-112 shipped
+- **status:** BC-113 shipped
+- **status:** BC-114 shipped
+- **status:** BC-116 shipped
+
+### Other
+- Initial commit
+
 ## [v0.22.1] — 2026-11-15
 
 ### Changed (BC-118)

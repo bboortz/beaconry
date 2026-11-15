@@ -19,6 +19,7 @@ future HTTP-less loop services.
 
 import asyncio
 import fnmatch
+import gzip
 import json
 import logging
 import os
@@ -142,6 +143,30 @@ DOCKER_EVENTS_BACKOFF_MAX_S = max(
 # `MAX_ATTEMPTS=1` effectively disables retry (one try then drop — matches
 # pre-BC-107 behavior for operators who want air-gap sim).
 SCOUT_STATE_DB_PATH = os.environ.get("BEACONRY_SCOUT_STATE_DB", "/data/scout-state.db")
+
+# BC-120: writability fault state. Set once by _init_scout_db(). If the
+# primary SCOUT_STATE_DB_PATH can't be opened + table-created at startup,
+# scout falls back to an ephemeral /tmp DB and flips _state_db_degraded
+# so /healthz surfaces the degradation. All subsequent pending_scans
+# touches route through _effective_scout_state_db_path(), not
+# SCOUT_STATE_DB_PATH directly.
+_state_db_degraded: bool = False
+_effective_state_db_path: str = SCOUT_STATE_DB_PATH
+# Separable constant so tests can monkeypatch without needing /tmp.
+_FALLBACK_STATE_DB_PATH: str = ""  # set in _build_fallback_state_db_path()
+
+
+def _build_fallback_state_db_path() -> str:
+    """BC-120: pid-suffixed /tmp path. Separate from the module-level
+    constant so monkeypatch tests can preempt it."""
+    return f"/tmp/scout-state-{os.getpid()}.db"
+
+
+def _effective_scout_state_db_path() -> str:
+    """BC-120: single source of truth for the DB path used by every
+    pending_scans operation. Returns the primary path when healthy, the
+    fallback when _init_scout_db flagged it degraded."""
+    return _effective_state_db_path
 
 
 def _parse_positive_int(raw: str | None, default: int, name: str) -> int:
@@ -580,49 +605,137 @@ def collect_and_post():  # pragma: no cover - orchestrator; integration-tested l
 # ── BC-107 — Scout POST retry queue ──────────────────────────────────────────
 
 
-def _init_scout_db() -> None:
-    """BC-107: ensure `scout-state.db` exists with the `pending_scans` table.
+_CREATE_PENDING_SCANS_SQL = """
+    CREATE TABLE IF NOT EXISTS pending_scans (
+        id              INTEGER PRIMARY KEY AUTOINCREMENT,
+        payload_json    TEXT NOT NULL,
+        created_ts      INTEGER NOT NULL,
+        attempts        INTEGER NOT NULL DEFAULT 0,
+        next_attempt_ts INTEGER NOT NULL,
+        last_error      TEXT
+    )
+"""
 
-    Called once from lifespan. Safe to re-run (CREATE TABLE IF NOT EXISTS).
-    If the DB can't be opened (read-only mount, permission denied), scout
-    continues — retry queue is best-effort; without it we degrade to
-    pre-BC-107 behavior (log + drop).
+
+def _try_open_and_create(path: str) -> bool:
+    """BC-120: attempt a real write probe at `path`. Returns True iff
+    scout can both open the file AND write to it.
+
+    `CREATE TABLE IF NOT EXISTS` is a no-op when the table already
+    exists — a read-only-but-populated DB file (root-owned restore,
+    `:ro` mount, writable file in a read-only directory where sqlite
+    can't create its journal) passes a bare CREATE check. Caller then
+    believes the primary path works; every later INSERT silently fails
+    and the retry queue drops scans — the exact silent-drop BC-120 is
+    meant to prevent (ultrareview finding).
+
+    Probe: open the connection, ensure the table shape via CREATE TABLE
+    IF NOT EXISTS, then execute an INSERT inside a transaction and
+    ROLLBACK. The INSERT exercises the real write path (including
+    journal creation); the ROLLBACK leaves the DB byte-identical.
+
+    Catches `sqlite3.Error` (the parent class) so corrupt-file errors
+    (`sqlite3.DatabaseError: file is not a database`) also fall back
+    rather than crash-loop the scout — second ultrareview finding.
     """
     import sqlite3
 
-    db_dir = os.path.dirname(SCOUT_STATE_DB_PATH)
+    db_dir = os.path.dirname(path)
     if db_dir:
         with suppress(OSError):
             os.makedirs(db_dir, exist_ok=True)
     try:
-        con = sqlite3.connect(SCOUT_STATE_DB_PATH)
-    except sqlite3.OperationalError as e:
-        log.warning("BC-107: can't open scout-state.db at %s: %s", SCOUT_STATE_DB_PATH, e)
-        return
+        con = sqlite3.connect(path)
+    except sqlite3.Error:
+        return False
     try:
-        con.execute("""
-            CREATE TABLE IF NOT EXISTS pending_scans (
-                id              INTEGER PRIMARY KEY AUTOINCREMENT,
-                payload_json    TEXT NOT NULL,
-                created_ts      INTEGER NOT NULL,
-                attempts        INTEGER NOT NULL DEFAULT 0,
-                next_attempt_ts INTEGER NOT NULL,
-                last_error      TEXT
-            )
-        """)
+        con.execute(_CREATE_PENDING_SCANS_SQL)
         con.commit()
+        # Real write probe: INSERT + ROLLBACK. Exercises journal + write
+        # perms; leaves the DB unchanged on success.
+        con.execute("BEGIN")
+        con.execute(
+            "INSERT INTO pending_scans "
+            "(payload_json, created_ts, attempts, next_attempt_ts, last_error) "
+            "VALUES (?, ?, 0, ?, ?)",
+            ("__bc120_probe__", 0, 0, ""),
+        )
+        con.rollback()
+    except sqlite3.Error:
+        with suppress(sqlite3.Error):
+            con.close()
+        return False
     finally:
-        con.close()
+        with suppress(sqlite3.Error):
+            con.close()
+    return True
+
+
+def _init_scout_db() -> None:
+    """BC-107 + BC-120: ensure `scout-state.db` exists with the
+    `pending_scans` table. Called once from lifespan. Safe to re-run
+    (CREATE TABLE IF NOT EXISTS).
+
+    BC-120: if the primary path can't be opened + table-created,
+    degrade to an ephemeral `/tmp/scout-state-<pid>.db` fallback and
+    flip `_state_db_degraded` so `/healthz` surfaces the fault.
+    """
+    global _state_db_degraded, _effective_state_db_path, _FALLBACK_STATE_DB_PATH
+
+    if _try_open_and_create(SCOUT_STATE_DB_PATH):
+        _state_db_degraded = False
+        _effective_state_db_path = SCOUT_STATE_DB_PATH
+        return
+
+    # Primary unwritable — pick the fallback (monkeypatchable in tests).
+    fallback = _FALLBACK_STATE_DB_PATH or _build_fallback_state_db_path()
+    _FALLBACK_STATE_DB_PATH = fallback
+    log.warning(
+        "BC-120: scout-state DB path %s is unwritable; falling back to %s "
+        "(ephemeral — rows reset on restart) — fix: `chown 65532:65532 "
+        "<beaconry-data-volume>` on the host",
+        SCOUT_STATE_DB_PATH,
+        fallback,
+    )
+    if _try_open_and_create(fallback):
+        _state_db_degraded = True
+        _effective_state_db_path = fallback
+        return
+
+    # Both paths failed — last-resort "pretend it's degraded"; subsequent
+    # DB ops will keep returning sqlite errors, but scanning + POST path
+    # still runs. This should be impossible in practice (/tmp writable).
+    log.error(
+        "BC-120: fallback DB path %s is ALSO unwritable; retry queue disabled "
+        "— scans will be dropped on hub outage (pre-BC-107 behavior)",
+        fallback,
+    )
+    _state_db_degraded = True
+    _effective_state_db_path = fallback
+
+
+# BC-119: one-shot log flag so scout announces gzip once per process run.
+_scan_gzip_log_once: bool = False
+# Compression level 6 is Python's gzip default — ~7× ratio on SBOM JSON
+# with ~2ms CPU per MB. Higher levels buy ~5% size at 3× CPU; not worth
+# it for 80MB bodies on a scout cycle.
+_SCAN_GZIP_LEVEL: int = 6
 
 
 def _post_scan_body(body: str) -> tuple[bool, str, object | None]:
-    """BC-107: single-attempt POST to hub /scan.
+    """BC-107 + BC-119: single-attempt gzipped POST to hub /scan.
 
     Returns `(ok, error_message, response_body_or_None)`. Pulled out of
     `collect_and_post` so the retry sweep replays through the same code
     path — same headers, token, URL, timeout. Any divergence between
     first-try and retry path is a bug magnet.
+
+    BC-119: body is gzip-compressed; sets `Content-Encoding: gzip`.
+    SBOM JSON compresses 4-10× — large fleets fit under BC-113's wire
+    cap without operator tuning. Falls back to raw POST if gzip fails
+    (should not happen in practice; stdlib defense-in-depth).
     """
+    global _scan_gzip_log_once
     headers = {
         "Content-Type": "application/json",
         "X-Beaconry-API-Expect": str(CLIENT_API_VERSION),
@@ -632,8 +745,20 @@ def _post_scan_body(body: str) -> tuple[bool, str, object | None]:
     token = os.environ.get("HUB_TOKEN", "")
     if token:
         headers["Authorization"] = f"Bearer {token}"
+
+    payload: bytes | str = body
     try:
-        resp = requests.post(f"{HUB_URL}/scan", data=body, headers=headers, timeout=1800)
+        payload = gzip.compress(body.encode("utf-8"), compresslevel=_SCAN_GZIP_LEVEL)
+        headers["Content-Encoding"] = "gzip"
+        if not _scan_gzip_log_once:
+            log.info("BC-119: /scan POST uses Content-Encoding: gzip")
+            _scan_gzip_log_once = True
+    except Exception as e:  # noqa: BLE001 — stdlib gzip should never fail; fall back.
+        log.warning("BC-119: gzip compression failed, posting raw: %s", e)
+        payload = body  # revert header absence implicit above
+
+    try:
+        resp = requests.post(f"{HUB_URL}/scan", data=payload, headers=headers, timeout=1800)
         resp.raise_for_status()
         try:
             data = resp.json()
@@ -654,7 +779,7 @@ def _queue_pending_scan(payload_json: str, error: str) -> None:
 
     now = int(time.time())
     try:
-        con = sqlite3.connect(SCOUT_STATE_DB_PATH)
+        con = sqlite3.connect(_effective_scout_state_db_path())
     except sqlite3.OperationalError:
         log.warning("BC-107: can't open DB to queue pending scan")
         return
@@ -691,7 +816,7 @@ def post_retry_sweep(now_ts: int | None = None) -> dict[str, int]:
     now = now_ts if now_ts is not None else int(time.time())
     counts = {"delivered": 0, "requeued": 0, "abandoned": 0}
     try:
-        con = sqlite3.connect(SCOUT_STATE_DB_PATH)
+        con = sqlite3.connect(_effective_scout_state_db_path())
     except sqlite3.OperationalError:
         return counts
     try:
@@ -755,7 +880,7 @@ def _pending_scans_queue_depth() -> int:
     import sqlite3
 
     try:
-        con = sqlite3.connect(SCOUT_STATE_DB_PATH)
+        con = sqlite3.connect(_effective_scout_state_db_path())
     except sqlite3.OperationalError:
         return 0
     try:
@@ -789,6 +914,11 @@ def _scout_healthz_summary() -> dict:
         # steadily growing count should investigate daemon health.
         "docker_events_reconnects": _docker_events_reconnects,
         "docker_events_last_reconnect_ts": _docker_events_last_reconnect_ts,
+        # BC-120: true = primary SCOUT_STATE_DB_PATH was unwritable at
+        # startup; scout fell back to an ephemeral /tmp DB. Operator
+        # fix recipe is in the scout WARN log at boot.
+        "state_db_degraded": _state_db_degraded,
+        "state_db_effective_path": _effective_state_db_path,
     }
     degraded = not _docker_socket_ok
     return {
