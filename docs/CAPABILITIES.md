@@ -1801,6 +1801,24 @@ Enforcement: `poc/scripts/verify_traceability.py` runs as part of `make check`. 
 - **verified by:**
   - `poc/tests/integration/test_BC_093_rescan_hooks.py`
 
+### CAP-T227: Hub HTTP port env knob
+- **type:** technical
+- **status:** active
+- **origin:** BC-124 — scout has `SCOUT_HTTP_PORT`; hub had its uvicorn bind port hardcoded to 8000 in `__main__`. Operators running parallel hubs on one host (shadow instance, test harness, multi-tenant dev) had no env knob.
+- **description:** `poc/hub/hub.py::__main__` now reads `HUB_HTTP_PORT` env (default `"8000"`, int-parsed) and passes it to `uvicorn.run(port=…)`. Default 8000 matches pre-BC-124 behavior; container `EXPOSE` + compose `ports:` mapping stay 8000 (env knob is for the uvicorn bind only, not the Dockerfile).
+- **supports:** CAP-B023
+- **verified by:**
+  - `poc/tests/unit/test_BC_124_heartbeat_retry_and_port.py`
+
+### CAP-T226: Heartbeat retry with capped exponential backoff
+- **type:** technical
+- **status:** active
+- **origin:** BC-124 — `/scan` got BC-107's persistent retry queue; `/heartbeat` stayed 1-shot. A transient network blip during the 60s heartbeat tick dropped the keepalive silently; hub thought the scout was stale until the next tick.
+- **description:** `poc/scout/scout.py::_heartbeat_with_retry` wraps the existing `heartbeat_once` with a loop that catches `requests.RequestException` (via `heartbeat_once` returning False), sleeps `BEACONRY_HEARTBEAT_RETRY_BASE_S × 2^attempt` (default 2s → 4s → 8s), and gives up after `BEACONRY_HEARTBEAT_RETRY_MAX_ATTEMPTS` (default 3). In-memory only — payload is tiny + stateless, unlike `/scan` which needs BC-107's SQLite queue. Total worst-case wait: ~14s before the next 60s tick covers the gap. `_heartbeat_loop_forever` calls the retry wrapper instead of `heartbeat_once` directly.
+- **supports:** CAP-T153, CAP-B023
+- **verified by:**
+  - `poc/tests/unit/test_BC_124_heartbeat_retry_and_port.py`
+
 ### CAP-T225: Durable pipeline-integrity state across hub restart
 - **type:** technical
 - **status:** active
@@ -1847,6 +1865,7 @@ Enforcement: `poc/scripts/verify_traceability.py` runs as part of `make check`. 
 - **supports:** CAP-T215, CAP-B023
 - **verified by:**
   - `poc/tests/unit/test_BC_119_scout_scan_gzip_compression.py`
+  - `poc/tests/integration/test_BC_119_scout_scan_gzip_compression.py`
 
 ### CAP-T220: `beaconry status` URL + host + fleet (you) marker display
 - **type:** business
@@ -1865,6 +1884,7 @@ Enforcement: `poc/scripts/verify_traceability.py` runs as part of `make check`. 
 - **supports:** CAP-T218, CAP-T165, CAP-T047, CAP-B023
 - **verified by:**
   - `poc/tests/unit/test_BC_117_cross_repo_cve_fix_workflow.py`
+  - `poc/tests/integration/test_BC_117_cross_repo_cve_fix_workflow.py`
 
 ### CAP-T218: Finding state machine extension (`fixing` + `rolled_back`) + validation + stale sweep
 - **type:** technical

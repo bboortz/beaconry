@@ -165,6 +165,10 @@ when every row below has non-empty evidence.
 | Env default resolution: `SCAN_MAX_DECOMPRESSED_BYTES = 10 × wire cap` | unit | `test_env_defaults_decompressed_cap_to_10x_wire` + `test_env_decompressed_cap_override` | ✓ |
 | Three-way env docs sync (VARIABLES.md ↔ .env.example ↔ docker-compose.yml) | unit | `poc/tests/unit/test_verify_variables_documented.py::test_shipped_repo_passes` (passes with the new row) | ✓ |
 | Live-stack propagation of `BEACONRY_SCAN_MAX_DECOMPRESSED_BYTES` | live | `docker inspect beaconry-dev-hub` on 2026-11-15 shows `BEACONRY_SCAN_MAX_DECOMPRESSED_BYTES=524288000` | ✓ |
+| BC-124 backfill: integration — real gzipped body round-trips through hub | integration | `test_BC_119_scout_scan_gzip_compression.py::test_gzip_body_round_trip` | ✓ |
+| BC-124 backfill: integration — legacy identity body still processes | integration | `test_BC_119_scout_scan_gzip_compression.py::test_identity_body_still_works` | ✓ |
+| BC-124 backfill: integration — zip-bomb rejected post-decompress | integration | `test_BC_119_scout_scan_gzip_compression.py::test_gzip_body_decompressed_cap_rejected` | ✓ |
+| BC-124 backfill: integration — malformed gzip returns 400 | integration | `test_BC_119_scout_scan_gzip_compression.py::test_malformed_gzip_body_returns_400` | ✓ |
 | Memory drift pattern added if this story deprecates documented behavior | N/A | no documented behavior deprecated — pure additive | N/A |
 
 Legend: ✓ covered · ⚠️ partial (notes required) · ❌ open (blocks shipping).

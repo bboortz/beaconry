@@ -1228,6 +1228,40 @@ async def _docker_events_loop_forever() -> None:  # pragma: no cover - infinite 
         )
 
 
+# BC-124: heartbeat retry policy. In-memory (vs BC-107's SQLite queue)
+# because the payload is tiny + stateless — persistence would be overkill.
+# Default 3 attempts × 2s base = ~14s worst-case before the next 60s tick.
+HEARTBEAT_RETRY_MAX_ATTEMPTS = int(os.environ.get("BEACONRY_HEARTBEAT_RETRY_MAX_ATTEMPTS", "3"))
+HEARTBEAT_RETRY_BASE_S = int(os.environ.get("BEACONRY_HEARTBEAT_RETRY_BASE_S", "2"))
+
+
+def _heartbeat_with_retry(sleep=time.sleep) -> bool:  # type: ignore[no-untyped-def]
+    """BC-124: wrap `heartbeat_once` with capped exponential backoff so
+    a transient network blip during the 60s heartbeat tick doesn't
+    silently drop the keepalive. `sleep` injected for deterministic tests.
+
+    Returns True on first 2xx; False if every attempt failed.
+    """
+    for attempt in range(HEARTBEAT_RETRY_MAX_ATTEMPTS):
+        if heartbeat_once():
+            return True
+        if attempt < HEARTBEAT_RETRY_MAX_ATTEMPTS - 1:
+            backoff = HEARTBEAT_RETRY_BASE_S * (2**attempt)
+            log.warning(
+                "BC-124: heartbeat attempt %d/%d failed, sleeping %ds",
+                attempt + 1,
+                HEARTBEAT_RETRY_MAX_ATTEMPTS,
+                backoff,
+            )
+            sleep(backoff)
+    log.warning(
+        "BC-124: heartbeat gave up after %d attempts; next tick in %ds",
+        HEARTBEAT_RETRY_MAX_ATTEMPTS,
+        SCOUT_HEARTBEAT_INTERVAL_S,
+    )
+    return False
+
+
 def heartbeat_once() -> bool:
     """BC-063: POST /heartbeat with host + version + health.
 
@@ -1278,9 +1312,13 @@ def heartbeat_once() -> bool:
 async def _heartbeat_loop_forever() -> None:  # pragma: no cover - infinite async loop
     """Fire a heartbeat once immediately on startup, then every
     SCOUT_HEARTBEAT_INTERVAL_S. Interval=0 disables the loop (caller
-    does not spawn the task)."""
+    does not spawn the task).
+
+    BC-124: routes through `_heartbeat_with_retry` so a transient
+    network failure during the tick gets 3 retries with exponential
+    backoff instead of waiting 60s for the next tick."""
     while True:
-        await asyncio.to_thread(heartbeat_once)
+        await asyncio.to_thread(_heartbeat_with_retry)
         await asyncio.sleep(SCOUT_HEARTBEAT_INTERVAL_S)
 
 

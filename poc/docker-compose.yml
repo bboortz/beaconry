@@ -125,6 +125,9 @@ services:
       - HUB_CLI_TOKEN=${HUB_CLI_TOKEN:-}
       # BC-055: hub reads its own publish addr to warn on unauthenticated LAN exposure.
       - HUB_PUBLISH_ADDR=${HUB_PUBLISH_ADDR:-127.0.0.1}
+      # BC-124: optional uvicorn bind port. Default 8000 matches pre-BC-124
+      # behavior; container `ports:` mapping stays 8000 (Dockerfile EXPOSE too).
+      - HUB_HTTP_PORT=${HUB_HTTP_PORT:-8000}
     volumes:
       - beaconry-data:/data
       - /var/run/docker.sock:/var/run/docker.sock
@@ -191,6 +194,10 @@ services:
       # exponential backoff so daemon restart doesn't silently kill it.
       - BEACONRY_DOCKER_EVENTS_BACKOFF_MIN_S=${BEACONRY_DOCKER_EVENTS_BACKOFF_MIN_S:-1}
       - BEACONRY_DOCKER_EVENTS_BACKOFF_MAX_S=${BEACONRY_DOCKER_EVENTS_BACKOFF_MAX_S:-60}
+      # BC-124: in-memory retry on /heartbeat failure. Capped expo backoff
+      # (default 3 × 2s = ~14s worst case before the next 60s tick).
+      - BEACONRY_HEARTBEAT_RETRY_MAX_ATTEMPTS=${BEACONRY_HEARTBEAT_RETRY_MAX_ATTEMPTS:-3}
+      - BEACONRY_HEARTBEAT_RETRY_BASE_S=${BEACONRY_HEARTBEAT_RETRY_BASE_S:-2}
     volumes:
       - /var/run/docker.sock:/var/run/docker.sock:ro
       - /var/lib/pacman:/host/var/lib/pacman:ro
