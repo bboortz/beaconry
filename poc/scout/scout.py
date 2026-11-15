@@ -19,6 +19,7 @@ future HTTP-less loop services.
 
 import asyncio
 import fnmatch
+import gzip
 import json
 import logging
 import os
@@ -615,14 +616,28 @@ def _init_scout_db() -> None:
         con.close()
 
 
+# BC-119: one-shot log flag so scout announces gzip once per process run.
+_scan_gzip_log_once: bool = False
+# Compression level 6 is Python's gzip default — ~7× ratio on SBOM JSON
+# with ~2ms CPU per MB. Higher levels buy ~5% size at 3× CPU; not worth
+# it for 80MB bodies on a scout cycle.
+_SCAN_GZIP_LEVEL: int = 6
+
+
 def _post_scan_body(body: str) -> tuple[bool, str, object | None]:
-    """BC-107: single-attempt POST to hub /scan.
+    """BC-107 + BC-119: single-attempt gzipped POST to hub /scan.
 
     Returns `(ok, error_message, response_body_or_None)`. Pulled out of
     `collect_and_post` so the retry sweep replays through the same code
     path — same headers, token, URL, timeout. Any divergence between
     first-try and retry path is a bug magnet.
+
+    BC-119: body is gzip-compressed; sets `Content-Encoding: gzip`.
+    SBOM JSON compresses 4-10× — large fleets fit under BC-113's wire
+    cap without operator tuning. Falls back to raw POST if gzip fails
+    (should not happen in practice; stdlib defense-in-depth).
     """
+    global _scan_gzip_log_once
     headers = {
         "Content-Type": "application/json",
         "X-Beaconry-API-Expect": str(CLIENT_API_VERSION),
@@ -632,8 +647,20 @@ def _post_scan_body(body: str) -> tuple[bool, str, object | None]:
     token = os.environ.get("HUB_TOKEN", "")
     if token:
         headers["Authorization"] = f"Bearer {token}"
+
+    payload: bytes | str = body
     try:
-        resp = requests.post(f"{HUB_URL}/scan", data=body, headers=headers, timeout=1800)
+        payload = gzip.compress(body.encode("utf-8"), compresslevel=_SCAN_GZIP_LEVEL)
+        headers["Content-Encoding"] = "gzip"
+        if not _scan_gzip_log_once:
+            log.info("BC-119: /scan POST uses Content-Encoding: gzip")
+            _scan_gzip_log_once = True
+    except Exception as e:  # noqa: BLE001 — stdlib gzip should never fail; fall back.
+        log.warning("BC-119: gzip compression failed, posting raw: %s", e)
+        payload = body  # revert header absence implicit above
+
+    try:
+        resp = requests.post(f"{HUB_URL}/scan", data=payload, headers=headers, timeout=1800)
         resp.raise_for_status()
         try:
             data = resp.json()

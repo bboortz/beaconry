@@ -9,6 +9,7 @@ dispatches to executor adapters on approval, verifies fix via re-scan.
 import asyncio
 import contextlib
 import fnmatch
+import gzip
 import hashlib
 import json
 import logging
@@ -228,6 +229,17 @@ SCAN_MAX_PAYLOAD_BYTES = _parse_positive_int_hub(
     os.environ.get("BEACONRY_SCAN_MAX_PAYLOAD_BYTES"),
     50 * 1024 * 1024,
     "BEACONRY_SCAN_MAX_PAYLOAD_BYTES",
+)
+
+# BC-119: decompressed-size cap for gzipped /scan bodies. Wire cap above
+# prevents a classic flood; this prevents zip-bomb amplification (small
+# wire body → multi-GB RAM). Default is 10× wire cap — SBOM JSON
+# compresses ~7× in practice, so the ceiling sits above legitimate use
+# while rejecting the >1000× ratios typical of zip-bombs.
+SCAN_MAX_DECOMPRESSED_BYTES = _parse_positive_int_hub(
+    os.environ.get("BEACONRY_SCAN_MAX_DECOMPRESSED_BYTES"),
+    10 * SCAN_MAX_PAYLOAD_BYTES,
+    "BEACONRY_SCAN_MAX_DECOMPRESSED_BYTES",
 )
 
 # BC-112: scan-trigger proxy retry. `/scan/trigger` hub→scout POST
@@ -2974,35 +2986,157 @@ async def _api_version_middleware(request: _FastAPIRequest, call_next):  # type:
     return response
 
 
-# BC-113: /scan payload size guard. Inspects Content-Length BEFORE route
-# dispatch — bodies with a declared size over the limit get 413 without
-# the body ever being parsed into memory. Streaming uploads without a
-# Content-Length header are allowed through (chunked transfer); the
-# downstream `payload: dict` parse in receive_scan would still blow up
-# on a genuine attack but the common case (regular scout POST) is covered.
+# BC-113 + BC-119: /scan payload guard. Two-layer:
+#   1. Wire cap — BC-113. Reject if the on-the-wire Content-Length
+#      exceeds BEACONRY_SCAN_MAX_PAYLOAD_BYTES, before the body is read.
+#   2. Decompression cap — BC-119. If Content-Encoding: gzip, read the
+#      wire body (bounded by cap 1), decompress, and reject if the
+#      decoded size exceeds BEACONRY_SCAN_MAX_DECOMPRESSED_BYTES.
+# Decompressed bodies replace the ASGI `receive` callable so the
+# downstream `receive_scan(payload: dict)` sees plain JSON — no code
+# change needed in the handler.
+#
+# Implemented as a pure ASGI middleware (not BaseHTTPMiddleware) because
+# BaseHTTPMiddleware doesn't propagate a swapped receive through
+# `call_next` — the downstream Request reads from the original ASGI
+# scope, not the mutated middleware-local Request. Pure-ASGI lets us
+# hand a replacement receive to the inner app directly.
+#
 # Only `/scan` is gated — gating `/healthz` would e.g. make `make status`
-# fail on a tiny GET if the header handling misfires.
-@api.middleware("http")
-async def _scan_payload_size_middleware(request: _FastAPIRequest, call_next):  # type: ignore[no-untyped-def]
-    if SCAN_MAX_PAYLOAD_BYTES > 0 and request.url.path == "/scan":
-        raw = request.headers.get("content-length") or request.headers.get("Content-Length")
-        if raw:
-            try:
-                declared = int(raw)
-            except ValueError:
-                declared = -1
-            if declared > SCAN_MAX_PAYLOAD_BYTES:
-                from fastapi.responses import JSONResponse
+# fail on a tiny GET if header handling misfires.
+def _scope_headers_lower(scope) -> dict[str, str]:  # type: ignore[no-untyped-def]
+    """Flatten ASGI scope headers (list[(bytes, bytes)]) to a lowercase dict."""
+    out: dict[str, str] = {}
+    for raw_k, raw_v in scope.get("headers", []):
+        key = raw_k.decode("latin-1").lower()
+        if key not in out:
+            out[key] = raw_v.decode("latin-1")
+    return out
 
-                return JSONResponse(
-                    status_code=413,
-                    content={
-                        "detail": "scan payload too large",
-                        "declared_bytes": declared,
-                        "max_bytes": SCAN_MAX_PAYLOAD_BYTES,
-                    },
-                )
-    return await call_next(request)
+
+def _check_wire_cap(content_length_raw: str | None):  # type: ignore[no-untyped-def]
+    """BC-113 cap. Returns a JSONResponse to send if over, else None."""
+    if SCAN_MAX_PAYLOAD_BYTES <= 0 or not content_length_raw:
+        return None
+    try:
+        declared = int(content_length_raw)
+    except ValueError:
+        declared = -1
+    if declared <= SCAN_MAX_PAYLOAD_BYTES:
+        return None
+    from fastapi.responses import JSONResponse
+
+    return JSONResponse(
+        status_code=413,
+        content={
+            "detail": "scan payload too large",
+            "declared_bytes": declared,
+            "max_bytes": SCAN_MAX_PAYLOAD_BYTES,
+        },
+    )
+
+
+async def _drain_body(receive) -> bytes | None:  # type: ignore[no-untyped-def]
+    """Collect all http.request chunks. Returns None on disconnect."""
+    body = b""
+    more_body = True
+    while more_body:
+        msg = await receive()
+        if msg["type"] != "http.request":
+            return None
+        body += msg.get("body", b"")
+        more_body = msg.get("more_body", False)
+    return body
+
+
+def _decode_gzip_or_error(body: bytes):  # type: ignore[no-untyped-def]
+    """Returns (decoded_bytes, error_response_or_None)."""
+    from fastapi.responses import JSONResponse
+
+    try:
+        decoded = gzip.decompress(body)
+    except (OSError, EOFError, gzip.BadGzipFile) as exc:
+        return b"", JSONResponse(
+            status_code=400,
+            content={"detail": f"gzip decode failed: {exc}"},
+        )
+    if SCAN_MAX_DECOMPRESSED_BYTES > 0 and len(decoded) > SCAN_MAX_DECOMPRESSED_BYTES:
+        return b"", JSONResponse(
+            status_code=413,
+            content={
+                "detail": "decompressed scan payload too large",
+                "decoded_bytes": len(decoded),
+                "max_bytes": SCAN_MAX_DECOMPRESSED_BYTES,
+            },
+        )
+    return decoded, None
+
+
+def _scope_with_decoded_body(scope, decoded_len: int):  # type: ignore[no-untyped-def]
+    """Strip Content-Encoding + rewrite Content-Length so downstream sees
+    the decoded body as a plain identity-encoded request."""
+    new_headers = [
+        (raw_k, raw_v)
+        for raw_k, raw_v in scope.get("headers", [])
+        if raw_k.decode("latin-1").lower() not in ("content-encoding", "content-length")
+    ]
+    new_headers.append((b"content-length", str(decoded_len).encode("latin-1")))
+    new_scope = dict(scope)
+    new_scope["headers"] = new_headers
+    return new_scope
+
+
+def _make_replay_receive(decoded: bytes):  # type: ignore[no-untyped-def]
+    """Return an ASGI receive callable emitting `decoded` once, then empty
+    frames (NOT http.disconnect, which Starlette raises as ClientDisconnect)."""
+    delivered = False
+
+    async def receive() -> dict:
+        nonlocal delivered
+        if delivered:
+            return {"type": "http.request", "body": b"", "more_body": False}
+        delivered = True
+        return {"type": "http.request", "body": decoded, "more_body": False}
+
+    return receive
+
+
+class _ScanPayloadMiddleware:
+    def __init__(self, app):  # type: ignore[no-untyped-def]
+        self.app = app
+
+    async def __call__(self, scope, receive, send):  # type: ignore[no-untyped-def]
+        if scope.get("type") != "http" or scope.get("path") != "/scan":
+            await self.app(scope, receive, send)
+            return
+
+        headers_lower = _scope_headers_lower(scope)
+
+        wire_reject = _check_wire_cap(headers_lower.get("content-length"))
+        if wire_reject is not None:
+            await wire_reject(scope, receive, send)
+            return
+
+        encoding = (headers_lower.get("content-encoding") or "").strip().lower()
+        if encoding != "gzip":
+            await self.app(scope, receive, send)
+            return
+
+        body = await _drain_body(receive)
+        if body is None:
+            await self.app(scope, receive, send)
+            return
+
+        decoded, error = _decode_gzip_or_error(body)
+        if error is not None:
+            await error(scope, receive, send)
+            return
+
+        new_scope = _scope_with_decoded_body(scope, len(decoded))
+        await self.app(new_scope, _make_replay_receive(decoded), send)
+
+
+api.add_middleware(_ScanPayloadMiddleware)
 
 
 # ── BC-055: Bearer auth + HTTP management surface ─────────────────────────
