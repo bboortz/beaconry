@@ -85,7 +85,7 @@ def test_schema_v10_adds_close_reason_and_change_ts(db_env: Path) -> None:
         con.close()
     assert "close_reason" in cols
     assert "last_status_change_ts" in cols
-    assert version == 11  # BC-117 bumped 10 → 11 (cross_repo_hint)
+    assert version == 12  # BC-123 bumped 11 → 12 (integrity_state + integrity_counters)
 
 
 # ── Write sites stamp close_reason + last_status_change_ts ─────────────────

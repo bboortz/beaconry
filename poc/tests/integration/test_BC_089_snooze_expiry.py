@@ -207,30 +207,42 @@ def test_keyboard_renders_env_hours_default(db_env: Path) -> None:
     rows = kb.inline_keyboard
     assert len(rows) == 3
     assert "Fix now" in rows[0][0].text
+    # BC-123: labels gained a `(→ HH:MM)` suffix (absolute expiry time)
+    # alongside the original duration label. Match the leading duration
+    # prefix only — the HH:MM is now-dependent and tested separately.
     snooze_texts = [b.text for b in rows[1]]
-    assert snooze_texts == ["⏰ 1h", "⏰ 4h", "⏰ 1d", "⏰ 1w"]
+    assert len(snooze_texts) == 4
+    assert all(" (→ " in t for t in snooze_texts)
+    assert snooze_texts[0].startswith("⏰ 1h ")
+    assert snooze_texts[1].startswith("⏰ 4h ")
+    assert snooze_texts[2].startswith("⏰ 1d ")
+    assert snooze_texts[3].startswith("⏰ 1w ")
     assert "Accept risk" in rows[2][0].text
 
 
 @pytest.mark.parametrize(
-    "env_value,expected_labels",
+    "env_value,expected_prefixes",
     [
-        ("4", ["⏰ 4h"]),
-        ("1,4", ["⏰ 1h", "⏰ 4h"]),
-        ("36", ["⏰ 36h"]),  # non-multiple-of-24 stays as Nh
-        ("48", ["⏰ 2d"]),
-        ("336", ["⏰ 2w"]),
+        ("4", ["⏰ 4h "]),
+        ("1,4", ["⏰ 1h ", "⏰ 4h "]),
+        ("36", ["⏰ 36h "]),  # non-multiple-of-24 stays as Nh
+        ("48", ["⏰ 2d "]),
+        ("336", ["⏰ 2w "]),
     ],
 )
 def test_keyboard_renders_env_hours_custom(
-    monkeypatch: pytest.MonkeyPatch, env_value: str, expected_labels: list[str]
+    monkeypatch: pytest.MonkeyPatch, env_value: str, expected_prefixes: list[str]
 ) -> None:
     monkeypatch.setenv("BEACONRY_SNOOZE_DEFAULT_HOURS", env_value)
     importlib.reload(hub)
     f = _finding()
     kb = hub._kb_finding(f)
     snooze_texts = [b.text for b in kb.inline_keyboard[1]]
-    assert snooze_texts == expected_labels
+    # BC-123: duration prefix + absolute (→ HH:MM) suffix; match prefix.
+    assert len(snooze_texts) == len(expected_prefixes)
+    for text, prefix in zip(snooze_texts, expected_prefixes, strict=True):
+        assert text.startswith(prefix)
+        assert " (→ " in text
     # Reset for subsequent tests.
     monkeypatch.delenv("BEACONRY_SNOOZE_DEFAULT_HOURS")
     importlib.reload(hub)

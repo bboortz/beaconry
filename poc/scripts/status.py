@@ -64,6 +64,10 @@ class ServiceStatus:
     # row refers to (dev-compose localhost? remote hetzner? systemd on
     # port 8001?). Always populated at construction time.
     probed_url: str = ""
+    # BC-123: raw /healthz.checks block cached on the hub status so the
+    # POLICIES line below the table can read operator-tunable knobs
+    # (MIN_CVSS, MAX_FINDINGS_PER_RUN, etc.) without an extra fetch.
+    healthz_checks: dict | None = None
 
 
 def fetch_healthz(url: str, timeout: float = 2.0, token: str = "") -> dict:
@@ -430,6 +434,7 @@ def gather_hub_status(url: str = HUB_HEALTHZ_URL, token: str = HUB_AUTH_TOKEN) -
         version=version_cell,
         api_version=api_int,
         probed_url=url,  # BC-118
+        healthz_checks=checks,  # BC-123: let POLICIES line read policy knobs
     )
 
 
@@ -538,11 +543,43 @@ def main() -> int:
     if fleet_text:
         print(fleet_text)
 
+    # BC-123: POLICIES line surfaces the hub's running policy knobs so
+    # the operator sees the config that's actually in effect without
+    # grep'ing env. Reads from /healthz.checks echoes (BC-123 added
+    # min_cvss, max_findings_per_run, scan_interval_s). Only prints
+    # when at least one of the fields is populated (legacy hub = silent).
+    policies_line = _format_policies_line(hub)
+    if policies_line:
+        print()
+        print(policies_line)
+
     if any(s.state == STATE_DOWN for s in statuses):
         return 2
     if any(s.health == HEALTH_DEGRADED for s in statuses):
         return 1
     return 0
+
+
+def _format_policies_line(hub: ServiceStatus) -> str:
+    """BC-123: `POLICIES: MIN_CVSS=… MAX_FINDINGS_PER_RUN=…` etc.
+    Read from the raw /healthz checks block cached on ServiceStatus.
+    Returns empty string on legacy hubs that don't echo any of these
+    fields (so pre-BC-123 operators see no change)."""
+    checks = getattr(hub, "healthz_checks", None) or {}
+    bits: list[str] = []
+    if "min_cvss" in checks:
+        bits.append(f"MIN_CVSS={checks['min_cvss']}")
+    if "max_findings_per_run" in checks:
+        bits.append(f"MAX_FINDINGS_PER_RUN={checks['max_findings_per_run']}")
+    if "auto_fix_threshold" in checks:
+        bits.append(f"AUTO_FIX_THRESHOLD={checks['auto_fix_threshold']}")
+    if "scan_interval_s" in checks:
+        bits.append(f"SCAN_INTERVAL={checks['scan_interval_s']}s")
+    if "executor" in checks:
+        bits.append(f"EXECUTOR={checks['executor']}")
+    if not bits:
+        return ""
+    return "POLICIES: " + " · ".join(bits)
 
 
 if __name__ == "__main__":

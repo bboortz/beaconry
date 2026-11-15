@@ -1801,6 +1801,24 @@ Enforcement: `poc/scripts/verify_traceability.py` runs as part of `make check`. 
 - **verified by:**
   - `poc/tests/integration/test_BC_093_rescan_hooks.py`
 
+### CAP-T225: Durable pipeline-integrity state across hub restart
+- **type:** technical
+- **status:** active
+- **origin:** BC-123 — BC-122 shipped `_pipeline_integrity_mismatches` and `_last_scan_integrity_per_host` as in-memory module globals. Hub restart (operator `make live-rebuild`, GHCR pull, host reboot) reset both to zero, losing both the forensic signal and the next-heartbeat cross-check anchor.
+- **description:** Schema v11 → v12 adds two tables via idempotent `CREATE TABLE IF NOT EXISTS`. `integrity_counters (key TEXT PRIMARY KEY, value INTEGER NOT NULL)` holds the monotonic mismatch count; `integrity_state (host TEXT PRIMARY KEY, iteration_hash TEXT, transfer_hash TEXT, last_updated_ts INTEGER)` holds the per-host "last seen" cache. `load_integrity_persistence()` is called from the hub lifespan right after `init_db()` and hydrates both module globals. `_persist_integrity_counter()` is invoked on every counter bump (scan-side mismatch + heartbeat-side mismatch). `_persist_integrity_state(host, iter_h, xfer_h)` is invoked in lockstep with the `scan_integrity` audit emit so audit log and SQLite stay synchronized. Fail-open on write errors (log + continue; in-memory state is still correct for the live process).
+- **supports:** CAP-T223, CAP-B023
+- **verified by:**
+  - `poc/tests/unit/test_BC_123_operator_trust_bundle.py`
+
+### CAP-T224: Operator trust bundle — audit every drop + policy surface + CVE filter + snooze-expiry labels
+- **type:** technical
+- **status:** active
+- **origin:** BC-123 — forensic walk through server2 on 2026-11-15 found 48 CVSS≥9.0 CVEs per scan silently dropped by the `BEACONRY_MAX_FINDINGS_PER_RUN=5` cap. The cap was invisible in `beaconry status`, the drops left no audit trail (just `continue` + a log line), and the CLI had no `--cve` filter for forensic grep-replacement. This story closes the "operator can't see what the pipeline is doing" class of bug.
+- **description:** `poc/hub/hub.py::process_sbom_entry` now emits a per-CVE `finding_filtered` audit event when a candidate is dropped below MIN_CVSS (`reason=min_cvss, cvss, min_cvss, cve_id, host`). `receive_scan`'s SBOM-processing exception branch emits `sbom_processing_failed` (host, source_ref, error). `_ingest_candidates`'s notify exception branch emits `notify_failed` (host, finding_id, cve_id, error). `/healthz.checks` echoes three new policy knobs: `min_cvss`, `max_findings_per_run`, `scan_interval_s` (excluded from the aggregate degraded check — they're config echoes, not health signals). `poc/scripts/status.py::_format_policies_line` renders a `POLICIES: MIN_CVSS=… · MAX_FINDINGS_PER_RUN=… · AUTO_FIX_THRESHOLD=… · SCAN_INTERVAL=…s · EXECUTOR=…` line below FLEET; silent on legacy hubs that don't echo the keys. `poc/scripts/findings.py` + `http_findings` endpoint gain a `--cve` / `cve_id` query param that matches `cve_id` OR `cve_alias` (BC-043) so one filter finds both the primary id and its CVE twin. Makefile: `make findings CVE=<id>`. `poc/hub/hub.py::_snooze_button_label_with_expiry` renders `(→ HH:MM)` UTC suffix on every snooze button so operator sees absolute expiry, not just "⏰ 1h".
+- **supports:** CAP-T207, CAP-T223, CAP-T154, CAP-B023
+- **verified by:**
+  - `poc/tests/unit/test_BC_123_operator_trust_bundle.py`
+
 ### CAP-T223: Pipeline integrity hashes + runtime verifier
 - **type:** technical
 - **status:** active

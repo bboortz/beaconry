@@ -198,7 +198,7 @@ No surprise for legacy state (§2 above).
 | Schema PRAGMA user_version ≥ 6 (BC-089 floor; later BCs bump further) | integration | `test_BC_089_snooze_expiry.py::test_schema_version_at_least_6` | ✓ |
 | `_parse_snooze_hours` dedupes + rejects garbage | integration | `test_BC_089_snooze_expiry.py::test_parse_snooze_hours[-expected0]` | ✓ |
 | Keyboard renders default 1,4,24,168 → 1h/4h/1d/1w | integration | `test_BC_089_snooze_expiry.py::test_keyboard_renders_env_hours_default` | ✓ |
-| Keyboard renders custom env hours | integration | `test_BC_089_snooze_expiry.py::test_keyboard_renders_env_hours_custom[4-expected_labels0]` | ✓ |
+| Keyboard renders custom env hours | integration | `test_BC_089_snooze_expiry.py::test_keyboard_renders_env_hours_custom[4-expected_prefixes0]` | ✓ |
 | Env var defaults | integration | `test_BC_089_snooze_expiry.py::test_env_defaults_when_unset` | ✓ |
 | Sweep writes audit event | integration | `test_BC_089_snooze_expiry.py::test_sweep_writes_audit_event` | ✓ |
 | Distinct expiry notification body | integration | `test_BC_089_snooze_expiry.py::test_expiry_notification_distinct_body` | ✓ |

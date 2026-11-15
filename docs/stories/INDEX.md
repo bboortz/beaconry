@@ -115,3 +115,4 @@ Lifecycle: `draft → ready → in-progress → shipped`. Status matches each st
 | BC-120 | Scout state DB path hardening — degrade loudly, never drop silently     | shipped     | — (merged to dev)                   |
 | BC-121 | Track forge-builder-trixie → forge-builder-python-trixie rename         | shipped     | — (merged to dev)                   |
 | BC-122 | Pipeline integrity hashes + runtime verifier                            | shipped     | — (merged to dev)                   |
+| BC-123 | Operator trust bundle — audit every silent drop + policies + CVE filter | shipped     | — (merged to dev)                   |
