@@ -138,6 +138,13 @@ class TelegramAdapter(NotificationAdapter):
         kb = self._kb["regression"](finding)
         await self._send(text, reply_markup=kb, kind="auto_fix_regression")
 
+    async def send_awaiting_upstream(self, finding: Finding, hint: dict) -> None:
+        """BC-117: '🤝 Awaiting upstream' body with [Open issue] / [Accept risk]
+        keyboard. No [Fix now] — operator can't fix this; upstream must."""
+        text = self._fmt["awaiting_upstream"](finding, hint)
+        kb = self._kb["awaiting_upstream"](finding, hint)
+        await self._send(text, reply_markup=kb, kind="awaiting_upstream")
+
     async def send_scout_offline(
         self,
         host: str,

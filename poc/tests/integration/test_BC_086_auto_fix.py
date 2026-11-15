@@ -98,7 +98,7 @@ def test_schema_version_is_7(recon_env: Path) -> None:
     con = sqlite3.connect(recon_env / "beaconry.db")
     version = con.execute("PRAGMA user_version").fetchone()[0]
     con.close()
-    assert version == 10  # BC-105 bumped 9 → 10 (close_reason + last_status_change_ts)
+    assert version == 11  # BC-117 bumped 10 → 11 (cross_repo_hint)
 
 
 # ── CAP-T177 threshold ──────────────────────────────────────────────────────

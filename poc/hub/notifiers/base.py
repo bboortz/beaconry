@@ -83,3 +83,15 @@ class NotificationAdapter(ABC):
         self, host: str, offline_duration_s: int
     ) -> None:
         """BC-102 scout-recovery alert — '✓ Scout on <host> back online'."""
+
+    # BC-117: distinct awaiting-upstream path. Default no-op so out-of-tree
+    # adapters keep booting; TelegramAdapter overrides with the real body
+    # and the [Open issue] / [Accept risk] keyboard.
+    async def send_awaiting_upstream(  # noqa: B027
+        self, finding: Finding, hint: dict
+    ) -> None:
+        """BC-117 awaiting-upstream — '🤝 Awaiting upstream' + repo link.
+
+        `hint` carries `{repo, issue_url, policy_key}` from the finding's
+        `cross_repo_hint` column.
+        """

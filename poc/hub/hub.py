@@ -8,6 +8,7 @@ dispatches to executor adapters on approval, verifies fix via re-scan.
 
 import asyncio
 import contextlib
+import fnmatch
 import hashlib
 import json
 import logging
@@ -39,6 +40,7 @@ try:
     from beaconry_health import build_router, check_binary, check_db, check_dir_populated
     from notifiers import TelegramAdapter, notify_scout_offline, notify_scout_online
     from notifiers import notify_auto_fix_regression as _dispatch_auto_fix_regression
+    from notifiers import notify_awaiting_upstream as _dispatch_awaiting_upstream
     from notifiers import notify_digest as _dispatch_digest
     from notifiers import notify_finding as _dispatch_finding
     from notifiers import notify_heartbeat as _dispatch_heartbeat
@@ -56,6 +58,9 @@ except ImportError:
     from poc.hub.notifiers import TelegramAdapter, notify_scout_offline, notify_scout_online
     from poc.hub.notifiers import (
         notify_auto_fix_regression as _dispatch_auto_fix_regression,
+    )
+    from poc.hub.notifiers import (
+        notify_awaiting_upstream as _dispatch_awaiting_upstream,
     )
     from poc.hub.notifiers import notify_digest as _dispatch_digest
     from poc.hub.notifiers import notify_finding as _dispatch_finding
@@ -111,6 +116,89 @@ def _parse_positive_int_hub(raw: str | None, default: int, name: str) -> int:
         log.warning("%s=%d must be >= 1; using %d", name, v, default)
         return default
     return v
+
+
+# BC-117: cross-repo CVE fix policy. Maps `source_ref` glob patterns to
+# upstream repo + issue URL templates. When a finding's source_ref matches,
+# hub ingests it at status='awaiting_upstream' and the Telegram body
+# reflects "fix lives in another repo" instead of offering [Fix now].
+# Format (semicolon-separated entries):
+#   <glob>=<repo>|<issue_url_template>;<glob>=<repo>|<issue_url_template>
+# Example:
+#   BEACONRY_CROSSREPO_SOURCES="nginx:*=docker-library/official-images|\
+#     https://github.com/docker-library/official-images/issues/new?\
+#     template=cve.md&title=CVE+in+nginx+%7B%7Bcve_id%7D%7D;\
+#     postgres:*=docker-library/postgres|\
+#     https://github.com/docker-library/postgres/issues/new"
+# Placeholders in the issue_url_template:
+#   {{cve_id}}  — URL-encoded CVE id
+#   {{package}} — URL-encoded package name
+#   {{source_ref}} — URL-encoded image/source reference
+# Empty / unset = feature off (every finding follows the pre-BC-117 path).
+CROSSREPO_SOURCES_RAW = os.environ.get("BEACONRY_CROSSREPO_SOURCES", "")
+
+
+def _parse_crossrepo_policy(raw: str) -> list[dict]:
+    """BC-117: parse BEACONRY_CROSSREPO_SOURCES into a list of policy entries.
+
+    Returns `[{glob, repo, issue_template}, ...]`. Malformed entries are
+    logged + skipped — we don't fail hub startup on a typo. Empty raw
+    returns an empty list (feature off)."""
+    if not raw:
+        return []
+    out: list[dict] = []
+    for raw_entry in raw.split(";"):
+        entry = raw_entry.strip()
+        if not entry:
+            continue
+        if "=" not in entry:
+            log.warning("BC-117: crossrepo entry missing '=': %r — skipping", entry)
+            continue
+        glob, rhs = entry.split("=", 1)
+        glob = glob.strip()
+        rhs = rhs.strip()
+        if "|" in rhs:
+            repo, issue_template = rhs.split("|", 1)
+        else:
+            repo, issue_template = rhs, ""
+        repo = repo.strip()
+        issue_template = issue_template.strip()
+        if not glob or not repo:
+            log.warning("BC-117: crossrepo entry has empty glob or repo: %r — skipping", entry)
+            continue
+        out.append({"glob": glob, "repo": repo, "issue_template": issue_template})
+    return out
+
+
+CROSSREPO_POLICY: list[dict] = _parse_crossrepo_policy(CROSSREPO_SOURCES_RAW)
+
+
+def _match_crossrepo_policy(source_ref: str) -> dict | None:
+    """BC-117: return the FIRST matching policy entry for `source_ref`, or None.
+
+    Matching uses fnmatch. First-match-wins so operators can order
+    specific-before-general in the env var (e.g. `nginx:1.24*` before `nginx:*`).
+    """
+    if not CROSSREPO_POLICY or not source_ref:
+        return None
+    for entry in CROSSREPO_POLICY:
+        if fnmatch.fnmatch(source_ref, entry["glob"]):
+            return entry
+    return None
+
+
+def _build_issue_url(template: str, *, cve_id: str, package: str, source_ref: str) -> str:
+    """BC-117: substitute placeholders in the issue URL template. Empty
+    template → empty URL (operator still sees the repo name in the alert)."""
+    if not template:
+        return ""
+    import urllib.parse as _up
+
+    return (
+        template.replace("{{cve_id}}", _up.quote(cve_id, safe=""))
+        .replace("{{package}}", _up.quote(package, safe=""))
+        .replace("{{source_ref}}", _up.quote(source_ref, safe=""))
+    )
 
 
 # BC-116: stale-fixing sweep. A finding briefly transitions through
@@ -472,7 +560,7 @@ except ImportError:
 
 HUB_VERSION = SOFTWARE_VERSION  # back-compat alias
 API_VERSION = 1
-EXPECTED_SCHEMA_VERSION = 10
+EXPECTED_SCHEMA_VERSION = 11
 STRICT_API = os.environ.get("BEACONRY_STRICT_API") == "1"
 
 
@@ -758,6 +846,13 @@ def init_db() -> None:
         con.execute(
             "ALTER TABLE findings ADD COLUMN last_status_change_ts INTEGER NOT NULL DEFAULT 0"
         )
+    # BC-117: cross_repo_hint carries the awaiting_upstream metadata when a
+    # finding's source_ref matches BEACONRY_CROSSREPO_SOURCES. JSON blob
+    # stored as TEXT: {"repo": "...", "issue_url": "...", "policy_key": "..."}.
+    # NULL for findings that aren't awaiting_upstream — including legacy rows
+    # from pre-BC-117 hubs.
+    with contextlib.suppress(sqlite3.OperationalError):
+        con.execute("ALTER TABLE findings ADD COLUMN cross_repo_hint TEXT")
     # BC-036: digest cadence state — per-host last-sent + content hash. Separate
     # table (not a column on `findings`) because the state is per-host, not
     # per-finding.
@@ -807,16 +902,44 @@ def init_db() -> None:
 def save_finding(f: Finding, *, now_ts: int | None = None) -> bool:
     """Insert finding. Returns True if new (not a duplicate).
 
-    `now_ts` injected for BC-038 scenarios; defaults to real clock."""
+    `now_ts` injected for BC-038 scenarios; defaults to real clock.
+
+    BC-117: if `f.source_ref` matches a `BEACONRY_CROSSREPO_SOURCES`
+    policy entry, the insert lands with `status='awaiting_upstream'` +
+    `cross_repo_hint` JSON instead of the default `open`. Caller can
+    check the hint via `load_cross_repo_hint(f.id)` to route the
+    Telegram body. No policy match → pre-BC-117 path, unchanged.
+    """
     ts = now_ts if now_ts is not None else int(time.time())
+    # BC-117: check cross-repo policy. First-match-wins (operator orders
+    # specific-before-general in the env var).
+    policy = _match_crossrepo_policy(f.source_ref)
+    if policy is not None:
+        status = "awaiting_upstream"
+        issue_url = _build_issue_url(
+            policy["issue_template"],
+            cve_id=f.cve_id,
+            package=f.package,
+            source_ref=f.source_ref,
+        )
+        hint = {
+            "repo": policy["repo"],
+            "issue_url": issue_url,
+            "policy_key": policy["glob"],
+        }
+        hint_json: str | None = json.dumps(hint, sort_keys=True)
+    else:
+        status = "open"
+        hint_json = None
     con = sqlite3.connect(DB_PATH)
     try:
         con.execute(
             """INSERT OR IGNORE INTO findings
                (id, host, cve_id, package, version, fixed_version, severity,
                 cvss, source_type, source_ref, description, found_at, tier, kev,
-                internet_facing, last_seen_ts, last_notified_ts, cve_alias)
-               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
+                internet_facing, last_seen_ts, last_notified_ts, cve_alias,
+                status, cross_repo_hint, last_status_change_ts)
+               VALUES (?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?,?)""",
             (
                 f.id,
                 f.host,
@@ -843,6 +966,9 @@ def save_finding(f: Finding, *, now_ts: int | None = None) -> bool:
                 ts,
                 ts,
                 f.cve_alias,  # BC-043
+                status,  # BC-117
+                hint_json,  # BC-117
+                ts,  # BC-105 last_status_change_ts seeded on insert
             ),
         )
         new_row = con.execute("SELECT changes()").fetchone()[0] > 0
@@ -851,19 +977,46 @@ def save_finding(f: Finding, *, now_ts: int | None = None) -> bool:
         con.close()
     # BC-029: new finding → audit entry. Idempotent inserts don't double-log.
     if new_row:
-        _audit.append(
-            "finding_ingested",
-            finding_id=f.id,
-            cve_id=f.cve_id,
-            host=f.host,
-            source_ref=f.source_ref,
-            tier=f.tier,
-            kev=f.kev,
-            cvss=f.cvss,
-            internet_facing=f.internet_facing,  # BC-030
-            cve_alias=f.cve_alias,  # BC-043
-        )
+        audit_details = {
+            "finding_id": f.id,
+            "cve_id": f.cve_id,
+            "host": f.host,
+            "source_ref": f.source_ref,
+            "tier": f.tier,
+            "kev": f.kev,
+            "cvss": f.cvss,
+            "internet_facing": f.internet_facing,  # BC-030
+            "cve_alias": f.cve_alias,  # BC-043
+        }
+        # BC-117: enrich audit with policy_key on cross-repo matches.
+        if policy is not None:
+            audit_details["cross_repo_policy_key"] = policy["glob"]
+            audit_details["cross_repo_repo"] = policy["repo"]
+        _audit.append("finding_ingested", **audit_details)
     return new_row
+
+
+def load_cross_repo_hint(finding_id: str) -> dict | None:
+    """BC-117: return the `cross_repo_hint` JSON payload for a finding,
+    or None if the finding has no hint (default path) / doesn't exist."""
+    con = sqlite3.connect(DB_PATH)
+    try:
+        try:
+            row = con.execute(
+                "SELECT cross_repo_hint FROM findings WHERE id=?",
+                (finding_id,),
+            ).fetchone()
+        except sqlite3.OperationalError:
+            return None
+    finally:
+        con.close()
+    if row is None or row[0] is None:
+        return None
+    try:
+        parsed = json.loads(row[0])
+    except (json.JSONDecodeError, TypeError):
+        return None
+    return parsed if isinstance(parsed, dict) else None
 
 
 def load_finding(finding_id: str) -> Finding | None:
@@ -908,6 +1061,9 @@ class FindingNotFound(Exception):
 # - regressed: non-terminal, was fixed/auto_fixed + reappeared.
 # - rolled_back: terminal, post-rollback (ExecutorPlugin.undo path —
 #   future BC adds the transition; status is reserved now).
+# - awaiting_upstream: non-terminal (BC-117), source_ref matched a
+#   BEACONRY_CROSSREPO_SOURCES policy entry. Fix lives in another
+#   repo; BC-086 absent-reconcile closes when operator re-pulls.
 _VALID_STATUSES: frozenset[str] = frozenset(
     {
         "open",
@@ -920,6 +1076,7 @@ _VALID_STATUSES: frozenset[str] = frozenset(
         "accepted",
         "auto_fixed",
         "rolled_back",
+        "awaiting_upstream",
     }
 )
 
@@ -1108,12 +1265,16 @@ def reconcile_scan(
         try:
             # BC-086: widen scope to snoozed + accepted; add
             # absent_count + auto_fixed_ts columns to the row payload.
+            # BC-117: awaiting_upstream findings also participate — when
+            # the operator re-pulls the fixed upstream image, absent
+            # reconcile closes them via the same post_absent path.
             rows = con.execute(
                 "SELECT id, host, cve_id, package, version, fixed_version, severity, cvss, "
                 "source_type, source_ref, description, tier, kev, status, last_fixed_ts, "
                 "absent_count, auto_fixed_ts "
                 "FROM findings WHERE host=? AND status IN "
-                "('open', 'fixed', 'fixed_verified', 'regressed', 'snoozed', 'accepted', 'auto_fixed')",
+                "('open', 'fixed', 'fixed_verified', 'regressed', 'snoozed', "
+                "'accepted', 'auto_fixed', 'awaiting_upstream')",
                 (host,),
             ).fetchall()
         except sqlite3.OperationalError:
@@ -1162,7 +1323,13 @@ def reconcile_scan(
             )
 
             # BC-086: counter-based auto-fix for open/regressed/snoozed/accepted.
-            if status in ("open", "regressed", "snoozed", "accepted") and not in_scan:
+            # BC-117: awaiting_upstream also auto-closes on absence — when the
+            # operator re-pulls the fixed upstream image, next scan drops the
+            # CVE and absent_count climbs toward THRESHOLD.
+            if (
+                status in ("open", "regressed", "snoozed", "accepted", "awaiting_upstream")
+                and not in_scan
+            ):
                 new_count = absent_count + 1
                 if new_count >= AUTO_FIX_THRESHOLD:
                     # BC-105: stamp close_reason + last_status_change_ts.
@@ -1564,6 +1731,48 @@ def format_notification(
     return "\n".join(lines)
 
 
+def format_awaiting_upstream(finding: Finding, hint: dict) -> str:
+    """BC-117: Telegram body for findings whose fix lives in another repo.
+
+    Uses parse_mode='HTML'. Distinct lead emoji (🤝) + repo reference so
+    operators distinguish this at a glance from the normal fix path.
+    `hint` is the dict returned by `load_cross_repo_hint` — carries
+    `{repo, issue_url, policy_key}`.
+    """
+    import html
+
+    emoji = {"Critical": "🔴", "High": "🟠", "Medium": "🟡"}.get(finding.severity, "⚪")
+
+    def esc(s: str) -> str:
+        return html.escape(s, quote=False)
+
+    lines: list[str] = ["🤝 <b>Awaiting upstream</b>"]
+    # KEV / Tier 1 headers still apply even when awaiting upstream — the
+    # severity signal matters regardless of who owns the fix.
+    if finding.tier == 0:
+        lines.append("🚨 <b>KEV — EXPLOITED IN THE WILD</b>")
+        if finding.cve_alias and not finding.cve_id.upper().startswith("CVE-"):
+            lines.append(f"<i>via {esc(finding.cve_alias)}</i>")
+    if finding.tier == 1:
+        lines.append("🌐 <b>INTERNET-FACING — Tier 1</b>")
+    lines.extend(
+        [
+            _severity_line(finding, emoji, esc),
+            f"CVSS: <code>{finding.cvss:.1f}</code> · Host: <code>{esc(finding.host)}</code>",
+            f"Target: <code>{esc(finding.source_ref)}</code> ({esc(finding.source_type)})",
+            _package_fix_line(finding, esc),
+        ]
+    )
+    if finding.description:
+        desc = esc(finding.description[:160])
+        lines.append(f"\n<i>{desc}</i>")
+    lines.append(f"\n<i>Fix lives in upstream repo</i> <code>{esc(hint.get('repo') or '?')}</code>")
+    policy_key = hint.get("policy_key") or ""
+    if policy_key:
+        lines.append(f"<i>Policy:</i> <code>{esc(policy_key)}</code>")
+    return "\n".join(lines)
+
+
 def _has_upstream_fix(finding: Finding) -> bool:
     """BC-032 close-gap: 'not available' is the sentinel process_sbom_entry
     writes when grype's `fix.versions` is empty. Any heuristic that reasons
@@ -1915,6 +2124,37 @@ def _kb_regression(finding: Finding) -> "InlineKeyboardMarkup":
     )
 
 
+def _kb_awaiting_upstream(finding: Finding, hint: dict) -> "InlineKeyboardMarkup":
+    """BC-117: [📝 Open issue] (URL button → operator's browser) +
+    [✅ Accept risk] (standard ack callback).
+
+    No [🔧 Fix now] — the fix lives in another repo, so a hub-side
+    `docker pull` wouldn't help. `[📝 Open issue]` is a URL button
+    (not a callback) so taps open GitHub directly without a round
+    trip to hub. If the policy didn't carry an `issue_url`, fall
+    back to a callback that fires `open_issue` + displays the repo
+    name (operator still gets something actionable)."""
+    issue_url = (hint.get("issue_url") or "").strip()
+    rows: list[list[InlineKeyboardButton]] = []
+    if issue_url:
+        rows.append(
+            [InlineKeyboardButton("📝 Open issue", url=issue_url)],
+        )
+    else:
+        rows.append(
+            [
+                InlineKeyboardButton(
+                    "📝 Open issue",
+                    callback_data=_cb_data("open_issue", finding),
+                )
+            ],
+        )
+    rows.append(
+        [InlineKeyboardButton("✅ Accept risk", callback_data=_cb_data("ack", finding))],
+    )
+    return InlineKeyboardMarkup(rows)
+
+
 # BC-035 thin wrappers — hub call sites keep their original names but now
 # dispatch through the notifier registry. One adapter failing (e.g. Telegram
 # offline) must not stop others; the registry handles isolation.
@@ -2029,7 +2269,19 @@ async def notify_auto_fix_regression(finding: Finding, auto_fixed_ts: int) -> No
 
 
 async def notify(finding: Finding) -> None:
-    """BC-003: first-fire notification. Dispatched to all enabled adapters."""
+    """BC-003: first-fire notification. Dispatched to all enabled adapters.
+
+    BC-117: if the finding has a `cross_repo_hint` (ingested at
+    `awaiting_upstream`), route to the `notify_awaiting_upstream` path
+    instead. Pre-BC-117 findings (no hint) take the existing path.
+    """
+    # BC-117: branch on cross-repo hint before falling through to the
+    # default finding dispatch.
+    hint = load_cross_repo_hint(finding.id)
+    if hint is not None:
+        await notify_awaiting_upstream(finding, hint)
+        return
+
     last_seen_ts = _load_last_seen(finding.id)
     if MOCK and not _notifiers_pkg.enabled_adapters():
         _mock_print(
@@ -2044,6 +2296,27 @@ async def notify(finding: Finding) -> None:
         _emit_notify_sent_failed(finding, "finding", exc)
         raise
     _emit_notify_sent(finding, "finding")
+
+
+async def notify_awaiting_upstream(finding: Finding, hint: dict) -> None:
+    """BC-117: distinct notification for findings whose fix lives in another repo.
+
+    Body replaces `[🔧 Fix now]` with `[📝 Open issue]` + `[✅ Accept risk]`.
+    MOCK path renders to stdout; real path dispatches via the adapter layer.
+    """
+    if MOCK and not _notifiers_pkg.enabled_adapters():
+        _mock_print(
+            "AwaitingUpstream",
+            format_awaiting_upstream(finding, hint),
+        )
+        _emit_notify_sent(finding, "awaiting_upstream")
+        return
+    try:
+        await _dispatch_awaiting_upstream(finding, hint)
+    except Exception as exc:
+        _emit_notify_sent_failed(finding, "awaiting_upstream", exc)
+        raise
+    _emit_notify_sent(finding, "awaiting_upstream")
 
 
 async def notify_snooze_expired(finding: Finding) -> None:
@@ -2370,6 +2643,28 @@ async def _handle_ack(query, finding: Finding, finding_id: str, parts: list[str]
     )
 
 
+async def _handle_open_issue(query, finding: Finding, finding_id: str, parts: list[str]) -> None:  # noqa: ARG001
+    """BC-117: operator tapped the fallback [📝 Open issue] callback button
+    (shown only when the policy entry has no `issue_url` template — rare).
+    Does NOT mutate the finding's status. Emits a `cross_repo_open_issue`
+    audit event + shows the repo name as a terminal reply."""
+    hint = load_cross_repo_hint(finding_id) or {}
+    repo = hint.get("repo") or "unknown-upstream"
+    _audit.append(
+        "cross_repo_open_issue",
+        finding_id=finding_id,
+        host=finding.host,
+        cve_id=finding.cve_id,
+        repo=repo,
+        policy_key=hint.get("policy_key"),
+    )
+    await query.edit_message_text(
+        f"📝 Noted — fix lives in <code>{_esc(repo)}</code>\n"
+        f"<i>No issue URL template configured; file the issue manually.</i>",
+        parse_mode="HTML",
+    )
+
+
 async def _handle_verify(query, finding: Finding, finding_id: str, parts: list[str]) -> None:  # noqa: ARG001
     """BC-011: operator taps after restarting their service — run the configured probe."""
     if get_status(finding_id) == "fixed_verified":
@@ -2430,6 +2725,7 @@ _ACTION_HANDLERS = {
     "snooze": _handle_snooze,
     "ack": _handle_ack,
     "verify": _handle_verify,
+    "open_issue": _handle_open_issue,  # BC-117
 }
 
 
@@ -2575,11 +2871,15 @@ async def lifespan(  # noqa: PLR0915 - orchestration function; each background t
             "digest": format_digest_body,
             "snooze_expired": format_snooze_expired,
             "auto_fix_regression": format_auto_fix_regression,
+            # BC-117: awaiting-upstream body (fix lives in another repo).
+            "awaiting_upstream": format_awaiting_upstream,
         },
         keyboard_builders={
             "finding": _kb_finding,
             "regression": _kb_regression,
             "heartbeat": _kb_finding,  # same actions as a first-fire
+            # BC-117: [Open issue] + [Accept risk], no [Fix now].
+            "awaiting_upstream": _kb_awaiting_upstream,
         },
         mock_renderer=_render_mock_telegram,
         # BC-104: hub-side persistent retry queue.

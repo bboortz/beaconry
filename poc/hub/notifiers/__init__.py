@@ -94,6 +94,14 @@ async def notify_auto_fix_regression(
     await _dispatch("send_auto_fix_regression", finding, auto_fixed_ts, last_seen_ts)
 
 
+async def notify_awaiting_upstream(finding: Finding, hint: dict) -> None:
+    """BC-117: dispatch the distinct awaiting-upstream body. Fix lives
+    in another repo; the message carries an [Open issue] button pointing
+    at that repo and an [Accept risk] button. Adapters that don't
+    override `send_awaiting_upstream` inherit the base no-op."""
+    await _dispatch("send_awaiting_upstream", finding, hint)
+
+
 async def notify_scout_offline(
     host: str, last_heartbeat_ts: int, offline_duration_s: int, last_health: str | None
 ) -> None:
@@ -111,6 +119,7 @@ __all__ = [
     "TelegramAdapter",
     "enabled_adapters",
     "notify_auto_fix_regression",
+    "notify_awaiting_upstream",
     "notify_digest",
     "notify_finding",
     "notify_heartbeat",

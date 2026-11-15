@@ -74,6 +74,9 @@ services:
       # BC-116: stale-fixing sweep — revert stuck `fixing` rows after timeout.
       - BEACONRY_FIXING_TIMEOUT_S=${BEACONRY_FIXING_TIMEOUT_S:-600}
       - BEACONRY_FIXING_SWEEP_INTERVAL_S=${BEACONRY_FIXING_SWEEP_INTERVAL_S:-60}
+      # BC-117: cross-repo CVE fix policy — route findings whose fix lives
+      # in another repo to awaiting_upstream status. Empty = feature off.
+      - BEACONRY_CROSSREPO_SOURCES=${BEACONRY_CROSSREPO_SOURCES:-}
       # BC-089: snooze buttons + sweep.
       - BEACONRY_SNOOZE_DEFAULT_HOURS=${BEACONRY_SNOOZE_DEFAULT_HOURS:-1,4,24,168}
       - BEACONRY_SNOOZE_SWEEP_INTERVAL_S=${BEACONRY_SNOOZE_SWEEP_INTERVAL_S:-60}
