@@ -185,6 +185,65 @@ def test_healthz_summary_includes_new_keys(monkeypatch: pytest.MonkeyPatch) -> N
     assert "state_db_effective_path" in summary["checks"]
 
 
+# ── Ultrareview regressions ──────────────────────────────────────────────
+
+
+def test_probe_detects_readonly_populated_db(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
+    """BC-120 (ultrareview fix #1): pre-populate a DB with the correct
+    table, then make it read-only. A bare `CREATE TABLE IF NOT EXISTS`
+    probe would silently pass (no-op on an existing table), the caller
+    would mark the primary path healthy, and every later INSERT would
+    fail — the exact silent-drop BC-120 is meant to prevent. The
+    INSERT+ROLLBACK probe must reject it."""
+    primary = tmp_path / "scout-state.db"
+    # Seed the DB with the right schema so bare CREATE TABLE is a no-op.
+    con = sqlite3.connect(str(primary))
+    con.execute(scout._CREATE_PENDING_SCANS_SQL)
+    con.commit()
+    con.close()
+    primary.chmod(0o444)  # read-only
+    # The directory also has to be read-only so sqlite can't create the
+    # journal file alongside the DB.
+    tmp_path.chmod(0o555)
+    try:
+        assert scout._try_open_and_create(str(primary)) is False
+    finally:
+        # Restore perms so pytest can clean up tmp_path.
+        tmp_path.chmod(0o755)
+        primary.chmod(0o644)
+
+
+def test_probe_detects_corrupt_db_file(monkeypatch: pytest.MonkeyPatch, tmp_path) -> None:
+    """BC-120 (ultrareview fix #4): DB file exists but is not a valid
+    sqlite file. `sqlite3.connect` opens lazily so it succeeds; the
+    first real read (CREATE TABLE) raises `sqlite3.DatabaseError`
+    which is NOT an `OperationalError`. Pre-fix, this propagated out
+    of `_init_scout_db` → uvicorn startup fails → scout crash-loops.
+    Post-fix (catch `sqlite3.Error`) the probe returns False and
+    scout falls back cleanly."""
+    corrupt = tmp_path / "not-a-db.sqlite"
+    corrupt.write_bytes(b"this is definitely not a sqlite file\x00")
+    assert scout._try_open_and_create(str(corrupt)) is False
+
+
+def test_init_scout_db_falls_back_on_corrupt_primary(
+    monkeypatch: pytest.MonkeyPatch, tmp_path, caplog: pytest.LogCaptureFixture
+) -> None:
+    """BC-120 (ultrareview fix #4, end-to-end): corrupt primary →
+    `_init_scout_db` falls back + flips the flag, does NOT propagate."""
+    corrupt = tmp_path / "scout-state.db"
+    corrupt.write_bytes(b"not a sqlite file")
+    fallback_db = str(tmp_path / "fallback.db")
+    monkeypatch.setattr(scout, "SCOUT_STATE_DB_PATH", str(corrupt))
+    monkeypatch.setattr(scout, "_FALLBACK_STATE_DB_PATH", fallback_db)
+
+    with caplog.at_level(logging.WARNING, logger="scout"):
+        scout._init_scout_db()  # must not raise
+
+    assert scout._state_db_degraded is True  # type: ignore[attr-defined]
+    assert scout._effective_scout_state_db_path() == fallback_db
+
+
 # ── Scenario 5: Dockerfile pre-creates /data owned by UID 65532 ──────────
 
 

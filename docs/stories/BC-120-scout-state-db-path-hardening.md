@@ -98,11 +98,28 @@ Feature: Unwritable scout-state.db degrades loudly to an ephemeral fallback
     Then those 5 rows are gone (different /tmp/scout-state-<pid>.db)
     And no stale ownership error shows up in logs
 
-  Scenario: Homelab ansible chowns the data volume for new deploys
-    Given beaconry_scout role runs on a host where /data is root:root
-    When `make deploy-beaconry-scout` finishes
-    Then /data is owned by 65532:65532
-    And the next scout boot has state_db_degraded=false
+  Scenario: Scout Dockerfile pre-creates /data owned by UID 65532
+    Given a fresh scout image built from poc/scout/Dockerfile
+    And no host volume mounted at /data (standalone deploy)
+    When scout boots as UID 65532
+    Then /data exists in the container FS
+    And sqlite3.connect("/data/scout-state.db") succeeds without a chown step
+    And state_db_degraded is false on first boot
+
+  Scenario: Read-only populated primary DB still falls back (ultrareview fix)
+    Given /data/scout-state.db already contains the pending_scans table
+    And the file (or parent dir) is not writable by UID 65532
+    When scout starts
+    Then the real write probe (INSERT+ROLLBACK) detects the fault
+    And scout falls back to /tmp/scout-state-<pid>.db
+    And /healthz.checks.state_db_degraded is true
+
+  Scenario: Corrupt primary DB falls back, not crash-loop (ultrareview fix)
+    Given /data/scout-state.db exists but is not a valid sqlite file
+    When scout starts
+    Then sqlite3.Error is caught (DatabaseError is the parent class)
+    And scout falls back to /tmp/scout-state-<pid>.db
+    And scout does NOT crash-loop
 
   Scenario: make status surfaces the degradation
     Given a scout running with state_db_degraded=true

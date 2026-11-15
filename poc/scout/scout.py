@@ -618,9 +618,26 @@ _CREATE_PENDING_SCANS_SQL = """
 
 
 def _try_open_and_create(path: str) -> bool:
-    """BC-120: attempt sqlite3.connect + CREATE TABLE at `path`. Returns
-    True on success. Any OperationalError (unwritable, missing dir,
-    read-only) returns False so the caller can fall back."""
+    """BC-120: attempt a real write probe at `path`. Returns True iff
+    scout can both open the file AND write to it.
+
+    `CREATE TABLE IF NOT EXISTS` is a no-op when the table already
+    exists — a read-only-but-populated DB file (root-owned restore,
+    `:ro` mount, writable file in a read-only directory where sqlite
+    can't create its journal) passes a bare CREATE check. Caller then
+    believes the primary path works; every later INSERT silently fails
+    and the retry queue drops scans — the exact silent-drop BC-120 is
+    meant to prevent (ultrareview finding).
+
+    Probe: open the connection, ensure the table shape via CREATE TABLE
+    IF NOT EXISTS, then execute an INSERT inside a transaction and
+    ROLLBACK. The INSERT exercises the real write path (including
+    journal creation); the ROLLBACK leaves the DB byte-identical.
+
+    Catches `sqlite3.Error` (the parent class) so corrupt-file errors
+    (`sqlite3.DatabaseError: file is not a database`) also fall back
+    rather than crash-loop the scout — second ultrareview finding.
+    """
     import sqlite3
 
     db_dir = os.path.dirname(path)
@@ -629,13 +646,24 @@ def _try_open_and_create(path: str) -> bool:
             os.makedirs(db_dir, exist_ok=True)
     try:
         con = sqlite3.connect(path)
-    except sqlite3.OperationalError:
+    except sqlite3.Error:
         return False
     try:
         con.execute(_CREATE_PENDING_SCANS_SQL)
         con.commit()
-    except sqlite3.OperationalError:
-        con.close()
+        # Real write probe: INSERT + ROLLBACK. Exercises journal + write
+        # perms; leaves the DB unchanged on success.
+        con.execute("BEGIN")
+        con.execute(
+            "INSERT INTO pending_scans "
+            "(payload_json, created_ts, attempts, next_attempt_ts, last_error) "
+            "VALUES (?, ?, 0, ?, ?)",
+            ("__bc120_probe__", 0, 0, ""),
+        )
+        con.rollback()
+    except sqlite3.Error:
+        with suppress(sqlite3.Error):
+            con.close()
         return False
     finally:
         with suppress(sqlite3.Error):

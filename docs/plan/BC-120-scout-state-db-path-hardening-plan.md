@@ -176,20 +176,18 @@ Additive. On deploy of a BC-120 scout:
 Pre-ship audit (DD-TGD step 6a). This story may only move to `shipped`
 when every row below has non-empty evidence.
 
-| Scenario / goal | Evidence type | Pointer | Status |
+| Story scenario | Evidence type | Pointer | Status |
 |---|---|---|---|
-| Scenario 1: Primary writable → no degradation | unit | `poc/tests/unit/test_BC_120_scout_state_db_hardening.py::test_primary_writable_no_degradation` | ✓ |
-| Scenario 2: Unwritable primary → fallback + WARN log + flag set | unit | `poc/tests/unit/test_BC_120_scout_state_db_hardening.py::test_unwritable_primary_falls_back_to_tmp` | ✓ |
-| Scenario 3: Fallback usable across all pending_scans operations | unit | `poc/tests/unit/test_BC_120_scout_state_db_hardening.py::test_pending_scans_ops_use_effective_path` | ✓ |
-| Scenario 4: Fallback resets per process (expected ephemeral) | unit | `poc/tests/unit/test_BC_120_scout_state_db_hardening.py::test_fallback_path_includes_pid` | ✓ |
-| Scenario 5: Scout Dockerfile pre-creates /data for UID 65532 | unit (text assertion) | `poc/tests/unit/test_BC_120_scout_state_db_hardening.py::test_scout_dockerfile_creates_data_dir_for_nonroot` | ✓ |
-| Scenario 6: `make status` surfaces the degradation | unit | `poc/tests/unit/test_BC_120_scout_state_db_hardening.py::test_status_renders_state_db_degraded` | ✓ |
-| Scenario: Omit `state_db degraded` when healthy | unit | `test_status_omits_state_db_detail_when_healthy` | ✓ |
-| Goal 1: writability test at startup | unit | covered by Scenarios 1 + 2 | ✓ |
-| Goal 2: /healthz exposes degradation flag + path | unit | `test_healthz_summary_includes_new_keys` + Scenarios 1 + 2 | ✓ |
-| Goal 3: single effective-path getter | unit | covered by Scenario 3 | ✓ |
-| Goal 4: `make status` surfacing | unit | covered by Scenario 6 | ✓ |
-| Goal 5: Scout Dockerfile creates /data | unit + build | covered by Scenario 5 (text assertion); runtime verification via `make live-rebuild` | ✓ |
+| **Primary writable — no degradation** | unit + integration | unit `poc/tests/unit/test_BC_120_scout_state_db_hardening.py::test_primary_writable_no_degradation`; integration `poc/tests/integration/test_BC_120_scout_state_db_hardening.py::test_primary_writable_scenario_end_to_end` (full queue→depth→healthz loop) | ✓ |
+| **Primary unwritable — scout falls back to /tmp** (WARN + flag) | unit + integration | unit `test_unwritable_primary_falls_back_to_tmp`; integration `test_unwritable_primary_full_fallback_loop` (real read-only dir, no `sqlite3` monkeypatch) | ✓ |
+| **Fallback stays usable across pending_scans operations** | unit + integration | unit `test_pending_scans_ops_use_effective_path` (queue→depth); integration `test_unwritable_primary_full_fallback_loop` adds the `post_retry_sweep` call the unit test skips | ✓ |
+| **Fallback resets per process (ephemeral is expected)** | unit (path shape only) | `test_fallback_path_includes_pid` — asserts the pid-suffix exists; does NOT exercise an actual process restart (unit tests can't). Restart semantics are documented, not test-automated. | ⚠️ |
+| **Scout Dockerfile pre-creates /data for UID 65532** | unit (Dockerfile text) + live | unit `test_scout_dockerfile_creates_data_dir_for_nonroot`; live-rebuild on 2026-11-15 reported `state_db_degraded: false` + `/data/scout-state.db` effective path | ✓ |
+| **Read-only populated primary DB still falls back** (ultrareview fix #1) | unit + integration | unit `test_probe_detects_readonly_populated_db`; integration `test_readonly_populated_primary_falls_back_end_to_end` | ✓ |
+| **Corrupt primary DB falls back, not crash-loop** (ultrareview fix #4) | unit | `test_probe_detects_corrupt_db_file` + `test_init_scout_db_falls_back_on_corrupt_primary` | ✓ |
+| **`make status` surfaces the degradation** | unit | `test_status_renders_state_db_degraded` | ✓ |
+| **Omit `state_db degraded` when healthy** (symmetry case) | unit | `test_status_omits_state_db_detail_when_healthy` | ✓ |
+| /healthz key shape symmetric with status.py consumer (DD-TGD lens #2) | integration | `test_healthz_keys_match_status_py_consumer` | ✓ |
 | Memory drift pattern added if this story deprecates documented behavior | N/A | no documented behavior deprecated — pure additive + degrade | N/A |
 
 Legend: ✓ covered · ⚠️ partial (notes required) · ❌ open (blocks shipping).
