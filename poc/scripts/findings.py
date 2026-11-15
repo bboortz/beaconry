@@ -24,6 +24,7 @@ STATUS_ORDER = (
     "regressed",  # BC-031: highest urgency — a previously-fixed CVE is back
     "open",
     "verification_failed",
+    "awaiting_upstream",  # BC-117: fix lives elsewhere; keep visible
     "snoozed",
     "accepted",
     "fixed",
@@ -52,7 +53,13 @@ COLUMNS: list[tuple[str, str, int]] = [
     ("found_at_fmt", "First seen", 10),  # BC-105
     ("last_change_fmt", "Last change", 11),  # BC-105
 ]
-SORT_ONLY_COLUMNS = ("tier", "found_at", "last_status_change_ts", "close_reason")
+SORT_ONLY_COLUMNS = (
+    "tier",
+    "found_at",
+    "last_status_change_ts",
+    "close_reason",
+    "cross_repo_hint",  # BC-117
+)
 
 _CLOSE_REASON_LABELS = {
     "post_absent": "post",
@@ -164,18 +171,49 @@ def load_findings(db_path: Path, status: str | None = None, host: str | None = N
             -(r.get("cvss") or 0.0),
         )
     )
-    # BC-105: derive display cells from the persisted lifecycle columns.
+    # BC-105 / BC-117: derive display cells from the persisted lifecycle columns.
     import time as _time
 
     now = int(_time.time())
     for row in rows:
         row["found_at_fmt"] = _format_age(row.get("found_at"), now=now)
         row["last_change_fmt"] = _format_age(row.get("last_status_change_ts"), now=now)
-        reason = row.get("close_reason")
-        if reason and row.get("status") == "auto_fixed":
-            label = _CLOSE_REASON_LABELS.get(reason, reason)
-            row["status"] = f"auto_fixed ({label})"
+        row["status"] = _decorate_status(row)
     return rows
+
+
+def _decorate_status(row: dict) -> str:
+    """Add a suffix to `status` for terminal-reason / policy-key visibility.
+
+    BC-105: `auto_fixed (<close_reason>)`.
+    BC-117: `awaiting_upstream (<policy_key>)`.
+    """
+    status = row.get("status", "")
+    if status == "auto_fixed":
+        reason = row.get("close_reason")
+        if reason:
+            label = _CLOSE_REASON_LABELS.get(reason, reason)
+            return f"auto_fixed ({label})"
+    if status == "awaiting_upstream":
+        policy_key = _extract_policy_key(row.get("cross_repo_hint"))
+        if policy_key:
+            return f"awaiting_upstream ({policy_key})"
+    return status
+
+
+def _extract_policy_key(hint_raw: str | None) -> str | None:
+    """BC-117: pull policy_key out of the JSON blob, tolerating bad JSON."""
+    if not hint_raw:
+        return None
+    try:
+        import json as _json
+
+        hint = _json.loads(hint_raw)
+    except (ValueError, TypeError):
+        return None
+    if not isinstance(hint, dict):
+        return None
+    return hint.get("policy_key")
 
 
 def parse_args(argv: list[str]) -> argparse.Namespace:

@@ -66,7 +66,7 @@ def test_schema_v9_adds_pending_notifications(db_env: Path) -> None:
     finally:
         con.close()
     assert "pending_notifications" in tables
-    assert version == 10
+    assert version == 11  # BC-117 bumped 10 → 11 (cross_repo_hint)
 
 
 # ── Queueing ────────────────────────────────────────────────────────────────

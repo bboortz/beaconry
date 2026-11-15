@@ -1801,6 +1801,15 @@ Enforcement: `poc/scripts/verify_traceability.py` runs as part of `make check`. 
 - **verified by:**
   - `poc/tests/integration/test_BC_093_rescan_hooks.py`
 
+### CAP-T219: Cross-repo CVE fix workflow — `awaiting_upstream` + policy-mapped Telegram hint
+- **type:** business
+- **status:** active
+- **origin:** BC-117 — brotli-libs (CVSS 9.8) in nginx:alpine, postgres:18-alpine, nginxproxy/nginx-proxy was persistently flagged by fleet scans; operator `[🔧 Fix now]` triggers `docker pull nginx:alpine` which doesn't help (upstream Alpine's brotli package bump lands only when the nginx-maintainer image rebuilds). Pre-BC-117 the only escape was `make set-status accepted` which conflates "risk accepted" with "waiting for upstream". Pattern generalizes: `GO-2026-6888 brotli` in syft (BC-096's dogfood pain), `stdlib` in third-party Go images, `libpython*` in forge-chain bases.
+- **description:** `poc/hub/hub.py` adds a cross-repo CVE policy parser: `BEACONRY_CROSSREPO_SOURCES` env (`<glob>=<repo>|<issue_url_template>;...`) is parsed at import into `CROSSREPO_POLICY` (list of dicts). `_match_crossrepo_policy(source_ref)` returns the first-matching entry (operator orders specific-before-general); `_build_issue_url(template, cve_id, package, source_ref)` substitutes `{{cve_id}}` / `{{package}}` / `{{source_ref}}` placeholders URL-encoded. `save_finding` checks the policy — on match, the finding is persisted at `status='awaiting_upstream'` + `cross_repo_hint` JSON (new TEXT column, schema v10 → v11). `_VALID_STATUSES` (BC-116) gains `awaiting_upstream`. `notify()` branches on the hint → `notify_awaiting_upstream(finding, hint)` dispatches `send_awaiting_upstream` through the notifier registry; TelegramAdapter renders `format_awaiting_upstream` (🤝 header + repo line + policy_key line) with `_kb_awaiting_upstream` (URL button `[📝 Open issue]` → operator's browser when `issue_url` present; callback-button fallback when empty, handled by `_handle_open_issue` which emits `cross_repo_open_issue` audit event without mutating status). `[✅ Accept risk]` uses the existing `_handle_ack` which transitions to `accepted` with `close_reason='operator'` (BC-105 convention). `reconcile_scan` scope widened to include `awaiting_upstream` so BC-086's absent → auto_fixed path closes when operator re-pulls the fixed upstream. `make findings` shows `awaiting_upstream (<policy_key>)` suffix via BC-105's formatter. Empty env = feature off; pre-BC-117 findings never retroactively transition.
+- **supports:** CAP-T218, CAP-T165, CAP-T047, CAP-B023
+- **verified by:**
+  - `poc/tests/unit/test_BC_117_cross_repo_cve_fix_workflow.py`
+
 ### CAP-T218: Finding state machine extension (`fixing` + `rolled_back`) + validation + stale sweep
 - **type:** technical
 - **status:** active

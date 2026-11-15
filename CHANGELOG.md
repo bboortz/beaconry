@@ -4,6 +4,39 @@ All notable changes to beaconry are recorded here. The format is based
 on [Keep a Changelog](https://keepachangelog.com/), and this project
 follows [Semantic Versioning](https://semver.org/).
 
+## [v0.22.0] — 2026-11-09
+
+### Added (BC-117)
+
+- **Cross-repo CVE fix workflow — `awaiting_upstream` status +
+  policy-mapped Telegram hint.** For CVEs whose fix lives in
+  another repo (brotli-libs in `nginx:alpine` / `postgres:18-alpine`,
+  stdlib in third-party Go images, libpython in forge-chain bases),
+  hub no longer offers `[🔧 Fix now]` — pulling the same tag
+  doesn't help. Instead:
+    1. `BEACONRY_CROSSREPO_SOURCES` env var (semicolon-separated
+       `<glob>=<repo>|<issue_url_template>` entries, first-match-wins)
+       maps `source_ref` patterns to upstream repos + prefilled
+       issue URLs.
+    2. Matching new findings land at `status='awaiting_upstream'`
+       with a `cross_repo_hint` JSON column (schema v10 → v11 via
+       idempotent `ALTER TABLE`).
+    3. Telegram body is 🤝 `Awaiting upstream` + repo + policy_key.
+       Keyboard: `[📝 Open issue]` (URL button → operator's browser)
+       + `[✅ Accept risk]` (transitions to `accepted` with
+       `close_reason='operator'` per BC-105).
+    4. When the operator re-pulls the fixed upstream image, BC-086
+       absent-reconcile closes the finding to `auto_fixed` with
+       `close_reason='post_absent'` — no new mechanism needed.
+- `_VALID_STATUSES` (BC-116) gains `awaiting_upstream`. `make
+  findings` renders it as `awaiting_upstream (<policy_key>)` so
+  operators see which policy matched.
+- New `cross_repo_open_issue` audit event on the fallback callback
+  (fired when the policy entry has no `issue_url` template — rare).
+- **CAP-T219** registered.
+- Empty env = feature off; pre-BC-117 findings never retroactively
+  transition.
+
 ## [v0.21.0] — 2026-11-09
 
 ### Added (BC-116)
