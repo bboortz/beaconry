@@ -1,7 +1,7 @@
 ---
 id: BC-120
 title: Scout state DB path hardening — degrade loudly, never drop silently
-status: in-progress
+status: shipped
 created: 2026-11-15
 branch: feat/BC-120-scout-state-db-path-hardening
 plan: docs/plan/BC-120-scout-state-db-path-hardening-plan.md

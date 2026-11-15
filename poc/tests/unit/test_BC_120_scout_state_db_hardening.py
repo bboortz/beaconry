@@ -124,6 +124,20 @@ def test_fallback_path_includes_pid(monkeypatch: pytest.MonkeyPatch) -> None:
     assert fallback == "/tmp/scout-state-4242.db"
 
 
+def test_fallback_resets_per_process(monkeypatch: pytest.MonkeyPatch) -> None:
+    """BC-120 Scenario 4: a second 'process' (different pid) gets a
+    distinct fallback path, so queued rows in the first process's DB
+    file are not visible to the second. Simulates restart semantics
+    deterministically — monkeypatching `os.getpid` is the closest a
+    unit test gets to a real fork without actually forking."""
+    monkeypatch.setattr(scout.os, "getpid", lambda: 1111)
+    path_a = scout._build_fallback_state_db_path()
+    monkeypatch.setattr(scout.os, "getpid", lambda: 2222)
+    path_b = scout._build_fallback_state_db_path()
+    assert path_a != path_b
+    assert "1111" in path_a and "2222" in path_b
+
+
 # ── Scenario 6: make status surfaces degradation ──────────────────────────
 
 
