@@ -22,11 +22,11 @@ FROM anchore/grype:latest AS grype-src
 FROM ghcr.io/bboortz/python-scratch-trixie:latest AS runtime-src
 
 # ── Stage 1: builder ────────────────────────────────────────────────────────
-# BC-095: forge-builder-trixie ships Python + pip + syft + CA certs + tar.
+# BC-095: forge-builder-python-trixie ships Python + pip + syft + CA certs + tar.
 # Python minor is detected at build time (BC-098) and matches runtime by
 # forge contract (both images bumped as a pair). Extends BC-083's runtime
 # migration one stage up.
-FROM ghcr.io/bboortz/forge-builder-trixie:latest AS builder
+FROM ghcr.io/bboortz/forge-builder-python-trixie:latest AS builder
 
 # grype — pulled from the stage above, no GitHub release CDN dependency.
 COPY --from=grype-src /grype /usr/local/bin/grype
@@ -60,7 +60,7 @@ COPY hub/notifiers/ notifiers/
 COPY beaconry_health/ ./beaconry_health/
 COPY VERSION ./VERSION
 
-# BC-096: baked-in SBOM. syft (from forge-builder-trixie, BC-095) catalogs
+# BC-096: baked-in SBOM. syft (from forge-builder-python-trixie, BC-095) catalogs
 # the python wheels in /install → /sbom.json, which the runtime stage
 # COPYs in below. Adopts forge's FG-020 pattern: a frozen SBOM travels
 # with the image so `grype sbom:/sbom.json` separates "image regressed"
@@ -90,7 +90,7 @@ RUN --mount=from=runtime-src,source=/usr/local/lib,target=/runtime-lib \
  && if [ "$BUILDER_PY_VER" != "$RUNTIME_PY_VER" ]; then \
       echo "" >&2; \
       echo "BC-099 ABI guard tripped: forge base Python minors disagree." >&2; \
-      echo "  forge-builder-trixie:latest  -> Python ${BUILDER_PY_VER}" >&2; \
+      echo "  forge-builder-python-trixie:latest  -> Python ${BUILDER_PY_VER}" >&2; \
       echo "  python-scratch-trixie:latest -> Python ${RUNTIME_PY_VER}" >&2; \
       echo "" >&2; \
       echo "Cause: forge republished one base's :latest tag before the other" >&2; \
@@ -101,7 +101,7 @@ RUN --mount=from=runtime-src,source=/usr/local/lib,target=/runtime-lib \
       echo "" >&2; \
       echo "Remedy: wait for forge's next cron rebuild to republish the lagging" >&2; \
       echo "base, then:" >&2; \
-      echo "  docker pull ghcr.io/bboortz/forge-builder-trixie:latest" >&2; \
+      echo "  docker pull ghcr.io/bboortz/forge-builder-python-trixie:latest" >&2; \
       echo "  docker pull ghcr.io/bboortz/python-scratch-trixie:latest" >&2; \
       echo "  <re-run the build>" >&2; \
       echo "" >&2; \

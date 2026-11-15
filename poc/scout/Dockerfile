@@ -13,11 +13,11 @@
 FROM ghcr.io/bboortz/python-scratch-trixie:latest AS runtime-src
 
 # ── Stage 1: builder ────────────────────────────────────────────────────────
-# BC-095: forge-builder-trixie ships Python + pip + syft + CA certs.
+# BC-095: forge-builder-python-trixie ships Python + pip + syft + CA certs.
 # Python minor is detected at build time (BC-098) and checked against
 # the runtime base (BC-099). Scout needs exactly that set — no extra
 # RUN steps.
-FROM ghcr.io/bboortz/forge-builder-trixie:latest AS builder
+FROM ghcr.io/bboortz/forge-builder-python-trixie:latest AS builder
 
 WORKDIR /app
 COPY scout/requirements.txt .
@@ -56,7 +56,7 @@ RUN --mount=from=runtime-src,source=/usr/local/lib,target=/runtime-lib \
  && if [ "$BUILDER_PY_VER" != "$RUNTIME_PY_VER" ]; then \
       echo "" >&2; \
       echo "BC-099 ABI guard tripped: forge base Python minors disagree." >&2; \
-      echo "  forge-builder-trixie:latest  -> Python ${BUILDER_PY_VER}" >&2; \
+      echo "  forge-builder-python-trixie:latest  -> Python ${BUILDER_PY_VER}" >&2; \
       echo "  python-scratch-trixie:latest -> Python ${RUNTIME_PY_VER}" >&2; \
       echo "" >&2; \
       echo "Cause: forge republished one base's :latest tag before the other" >&2; \

@@ -31,14 +31,14 @@ DOCKER_CLI_MIN = (29, 9, 2)
 # Accepted variants:
 #   * upstream `python:3.1X-slim-{bookworm,trixie}` (BC-082 era — kept for
 #     the migration window so a revert-triage path exists)
-#   * `ghcr.io/bboortz/forge-builder-trixie:latest` (BC-095 — forge-signed,
+#   * `ghcr.io/bboortz/forge-builder-python-trixie:latest` (BC-095 — forge-signed,
 #     daily-rebuilt; ships python 3.13.18 ABI-matching the scratch runtime)
 # Any other variant must edit this lint too — that's the "conscious choice"
 # gate.
 BUILDER_BASE_RE = re.compile(
     r"^FROM\s+(?:"
     r"python:3\.(?P<minor>1[1-9])-slim-(?:bookworm|trixie)"
-    r"|ghcr\.io/bboortz/forge-builder-trixie:latest"
+    r"|ghcr\.io/bboortz/forge-builder-python-trixie:latest"
     r")\s+AS\s+builder\b",
     re.MULTILINE,
 )
@@ -87,7 +87,7 @@ def check_dockerfile(path: Path, *, expect_docker_cli: bool) -> list[str]:
         violations.append(
             f"{path}: builder stage must FROM one of the accepted bases "
             f"(BC-078/BC-082: `python:3.1X-slim-{{bookworm,trixie}}`, or "
-            f"BC-095: `ghcr.io/bboortz/forge-builder-trixie:latest`) "
+            f"BC-095: `ghcr.io/bboortz/forge-builder-python-trixie:latest`) "
             f"AS builder. All accepted variants ship python 3.11+ so wheels "
             f"ABI-match the scratch runtime; a drift here produces "
             f"ImportError on container start."

@@ -1,7 +1,7 @@
 # syntax=docker/dockerfile:1
 # BC-100 — telegram_mock onto the forge-signed scratch chain.
 # Mirrors the BC-083 → BC-095 → BC-097 → BC-098 → BC-099 pattern used
-# by hub + scout: multi-stage with forge-builder-trixie + python-scratch
+# by hub + scout: multi-stage with forge-builder-python-trixie + python-scratch
 # -trixie, BuildKit ABI guard, Python-minor-agnostic staging, baked
 # HEALTHCHECK. Requires BuildKit (syntax directive above enforces it;
 # Makefile exports DOCKER_BUILDKIT=1 + COMPOSE_DOCKER_CLI_BUILD=1).
@@ -12,9 +12,9 @@
 FROM ghcr.io/bboortz/python-scratch-trixie:latest AS runtime-src
 
 # ── Stage 1: builder ────────────────────────────────────────────────────────
-# forge-builder-trixie ships Python + pip + CA certs. Python minor detected
+# forge-builder-python-trixie ships Python + pip + CA certs. Python minor detected
 # at build time (BC-098) and checked against the runtime base (BC-099).
-FROM ghcr.io/bboortz/forge-builder-trixie:latest AS builder
+FROM ghcr.io/bboortz/forge-builder-python-trixie:latest AS builder
 
 WORKDIR /app
 COPY telegram_mock/requirements.txt .
@@ -40,7 +40,7 @@ RUN --mount=from=runtime-src,source=/usr/local/lib,target=/runtime-lib \
  && if [ "$BUILDER_PY_VER" != "$RUNTIME_PY_VER" ]; then \
       echo "" >&2; \
       echo "BC-099 ABI guard tripped: forge base Python minors disagree." >&2; \
-      echo "  forge-builder-trixie:latest  -> Python ${BUILDER_PY_VER}" >&2; \
+      echo "  forge-builder-python-trixie:latest  -> Python ${BUILDER_PY_VER}" >&2; \
       echo "  python-scratch-trixie:latest -> Python ${RUNTIME_PY_VER}" >&2; \
       echo "" >&2; \
       echo "Cause: forge republished one base's :latest tag before the other" >&2; \
