@@ -418,6 +418,90 @@ def test_main_round_trip_with_events(
     assert "1 verified" in out
 
 
+# ── Heartbeat cross-check (new user ask on BC-122 branch) ────────────────
+
+
+def test_scout_remembers_last_delivered_integrity(monkeypatch: pytest.MonkeyPatch) -> None:
+    scout._last_delivered_iteration_hash = None  # type: ignore[attr-defined]
+    scout._last_delivered_transfer_hash = None  # type: ignore[attr-defined]
+    scout._remember_delivered_integrity("iter-abc", "xfer-def")
+    assert scout._last_delivered_iteration_hash == "iter-abc"  # type: ignore[attr-defined]
+    assert scout._last_delivered_transfer_hash == "xfer-def"  # type: ignore[attr-defined]
+
+
+def test_hub_heartbeat_integrity_silent_when_no_scout_claim(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from poc.hub import hub
+
+    hub._pipeline_integrity_mismatches = 0
+    hub._last_scan_integrity_per_host.clear()
+    hub._check_heartbeat_integrity("host-a", {"host": "host-a"})
+    assert hub._pipeline_integrity_mismatches == 0
+
+
+def test_hub_heartbeat_integrity_silent_when_matches(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from poc.hub import hub
+
+    hub._pipeline_integrity_mismatches = 0
+    hub._last_scan_integrity_per_host["host-a"] = {
+        "iteration_hash": "iter-1",
+        "transfer_hash": "xfer-1",
+    }
+    hub._check_heartbeat_integrity(
+        "host-a",
+        {
+            "host": "host-a",
+            "last_delivered_iteration_hash": "iter-1",
+            "last_delivered_transfer_hash": "xfer-1",
+        },
+    )
+    assert hub._pipeline_integrity_mismatches == 0
+
+
+def test_hub_heartbeat_integrity_catches_scout_claim_without_hub_record(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Scout says 'I delivered X', hub has no record. The exact silent
+    transport-loss case BC-122's heartbeat extension catches."""
+    from poc.hub import hub
+
+    hub._pipeline_integrity_mismatches = 0
+    hub._last_scan_integrity_per_host.clear()
+    hub._check_heartbeat_integrity(
+        "host-a",
+        {
+            "host": "host-a",
+            "last_delivered_iteration_hash": "iter-1",
+            "last_delivered_transfer_hash": "xfer-1",
+        },
+    )
+    assert hub._pipeline_integrity_mismatches == 1
+
+
+def test_hub_heartbeat_integrity_catches_differing_claim(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from poc.hub import hub
+
+    hub._pipeline_integrity_mismatches = 0
+    hub._last_scan_integrity_per_host["host-a"] = {
+        "iteration_hash": "iter-A",
+        "transfer_hash": "xfer-A",
+    }
+    hub._check_heartbeat_integrity(
+        "host-a",
+        {
+            "host": "host-a",
+            "last_delivered_iteration_hash": "iter-B",
+            "last_delivered_transfer_hash": "xfer-B",
+        },
+    )
+    assert hub._pipeline_integrity_mismatches == 1
+
+
 def test_verifier_accounts_every_drop_cleanly() -> None:
     """Scenario 6: 10 candidates = 5 persisted + 2 dedup + 3 capped."""
     from poc.scripts import verify_integrity as vi

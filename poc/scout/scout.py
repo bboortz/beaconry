@@ -620,6 +620,9 @@ def collect_and_post():  # pragma: no cover - orchestrator; integration-tested l
     if ok:
         findings = (data or {}).get("findings", 0) if isinstance(data, dict) else 0
         log.info("Hub response: %d new finding(s)", findings)
+        # BC-122: remember the integrity block we just delivered so the
+        # next heartbeat can report it to hub for cross-check.
+        _remember_delivered_integrity(integrity["iteration_hash"], integrity["transfer_hash"])
         _started = True
     else:
         log.error("Failed to post to hub: %s", err)
@@ -791,6 +794,23 @@ def _build_integrity_section(
         "transfer_hash": _compute_transfer_hash(canonical_body),
         "n_sboms": n_sboms,
     }
+
+
+# BC-122: scout remembers the last integrity block it successfully
+# delivered. The next heartbeat carries these hashes so the hub can
+# cross-check "scout believes it delivered X" vs "I actually saw X in
+# the last scan_integrity audit event". Catches silent transport loss
+# where /scan POST never reached the hub.
+_last_delivered_iteration_hash: str | None = None
+_last_delivered_transfer_hash: str | None = None
+
+
+def _remember_delivered_integrity(iteration_hash: str, transfer_hash: str) -> None:
+    """BC-122: called from _post_scan_body on 2xx response to update
+    scout's belief of "last successfully delivered scan hashes"."""
+    global _last_delivered_iteration_hash, _last_delivered_transfer_hash
+    _last_delivered_iteration_hash = iteration_hash
+    _last_delivered_transfer_hash = transfer_hash
 
 
 def _post_scan_body(body: str) -> tuple[bool, str, object | None]:
@@ -1215,19 +1235,27 @@ def heartbeat_once() -> bool:
     outage or auth failure is logged + swallowed; the next tick will
     try again. SBOM-free body (<200 bytes).
     """
-    body = json.dumps(
-        {
-            "host": HOST_NAME,
-            "timestamp": int(time.time()),
-            "software_version": SOFTWARE_VERSION,
-            "api_version": CLIENT_API_VERSION,
-            "health": "ok" if _docker_socket_ok else "degraded",
-            # BC-092: canary ring role (workstation | staging | production).
-            # Hub updates scouts.role on each heartbeat so the production fix
-            # gate sees fresh data.
-            "role": HOST_ROLE,
-        }
-    )
+    heartbeat_body = {
+        "host": HOST_NAME,
+        "timestamp": int(time.time()),
+        "software_version": SOFTWARE_VERSION,
+        "api_version": CLIENT_API_VERSION,
+        "health": "ok" if _docker_socket_ok else "degraded",
+        # BC-092: canary ring role (workstation | staging | production).
+        # Hub updates scouts.role on each heartbeat so the production fix
+        # gate sees fresh data.
+        "role": HOST_ROLE,
+    }
+    # BC-122: report the last integrity block scout successfully delivered
+    # so hub can cross-check its own last scan_integrity audit cache for
+    # this host. Missing/mismatched = silent transport loss on the /scan
+    # path between the last scan and now. Only included when scout has
+    # delivered at least once this process; omitted on fresh boot so hub
+    # degrades gracefully.
+    if _last_delivered_iteration_hash and _last_delivered_transfer_hash:
+        heartbeat_body["last_delivered_iteration_hash"] = _last_delivered_iteration_hash
+        heartbeat_body["last_delivered_transfer_hash"] = _last_delivered_transfer_hash
+    body = json.dumps(heartbeat_body)
     headers = {
         "Content-Type": "application/json",
         "X-Beaconry-API-Expect": str(CLIENT_API_VERSION),

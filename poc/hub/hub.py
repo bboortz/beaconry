@@ -542,6 +542,14 @@ _PARTIAL_INVENTORY_THRESHOLD: float = 0.5
 # record); counts since this hub process booted.
 _pipeline_integrity_mismatches: int = 0
 
+# BC-122: per-host cache of the most recent scan_integrity (iteration +
+# transfer hashes) hub saw. Populated at the end of _ingest_candidates
+# right before emitting the audit event. Heartbeats carry the scout's
+# belief of "last delivered" hashes; hub compares and increments the
+# counter on mismatch — catches silent transport loss where /scan POST
+# never reached the hub (scout thinks it delivered X, hub never saw X).
+_last_scan_integrity_per_host: dict[str, dict[str, str | None]] = {}
+
 
 async def _dispatch_integrity_alert(
     *,
@@ -4830,7 +4838,82 @@ async def receive_heartbeat(payload: dict, request: _FastAPIRequest) -> dict:
             host=host,
             health=payload.get("health") or "unknown",
         )
+    # BC-122: cross-check scout's claimed "last delivered" hashes vs
+    # hub's per-host cache of the most recent scan_integrity event.
+    # Mismatch = silent transport loss on the /scan path (scout thinks
+    # it delivered X, hub never saw X; the next heartbeat surfaces it).
+    _check_heartbeat_integrity(host, payload)
     return {"ok": True, "host": host, "ts": now}
+
+
+def _check_heartbeat_integrity(host: str, payload: dict) -> None:
+    """BC-122: compare scout's claimed-delivered hashes against hub's
+    per-host cache. Three outcomes:
+      - scout has no claim (fresh boot or pre-BC-122) → silent pass.
+      - claim matches cache → silent pass.
+      - claim differs from cache → increment mismatch counter + WARN +
+        audit `heartbeat_integrity_mismatch`. Covers the "scout
+        believes it delivered X, hub never saw X" silent-loss class.
+    """
+    claimed_iteration = payload.get("last_delivered_iteration_hash")
+    claimed_transfer = payload.get("last_delivered_transfer_hash")
+    if not (claimed_iteration and claimed_transfer):
+        return
+    cached = _last_scan_integrity_per_host.get(host)
+    if cached is None:
+        # Scout claims a delivery but hub has no record — silent loss
+        # before this process started OR before scout's claimed scan
+        # arrived. Still a mismatch; log + count.
+        _record_heartbeat_mismatch(
+            host=host,
+            claimed_iteration=claimed_iteration,
+            claimed_transfer=claimed_transfer,
+            cached_iteration=None,
+            cached_transfer=None,
+        )
+        return
+    cached_iteration = cached.get("iteration_hash")
+    cached_transfer = cached.get("transfer_hash")
+    if cached_iteration == claimed_iteration and cached_transfer == claimed_transfer:
+        return
+    _record_heartbeat_mismatch(
+        host=host,
+        claimed_iteration=claimed_iteration,
+        claimed_transfer=claimed_transfer,
+        cached_iteration=cached_iteration,
+        cached_transfer=cached_transfer,
+    )
+
+
+def _record_heartbeat_mismatch(
+    *,
+    host: str,
+    claimed_iteration: str,
+    claimed_transfer: str,
+    cached_iteration: str | None,
+    cached_transfer: str | None,
+) -> None:
+    """BC-122: shared log + audit + counter path for heartbeat-integrity
+    mismatches (both "no record on hub" and "record differs" variants)."""
+    global _pipeline_integrity_mismatches
+    _pipeline_integrity_mismatches += 1
+    log.warning(
+        "BC-122: heartbeat integrity MISMATCH host=%s claim_iter=%s claim_xfer=%s "
+        "hub_iter=%s hub_xfer=%s",
+        host,
+        claimed_iteration,
+        claimed_transfer,
+        cached_iteration,
+        cached_transfer,
+    )
+    _audit.append(
+        "heartbeat_integrity_mismatch",
+        host=host,
+        claimed_iteration_hash=claimed_iteration,
+        claimed_transfer_hash=claimed_transfer,
+        cached_iteration_hash=cached_iteration,
+        cached_transfer_hash=cached_transfer,
+    )
 
 
 async def _dispatch_regression_notifications(
@@ -5021,6 +5104,13 @@ async def _ingest_candidates(
     n_capped = len(suppressed)  # dedup_and_cap's "overflow" goes to digest, not DB
     processing_hash = _compute_processing_hash(persisted_ids)
     ctx = integrity_ctx
+    # BC-122: cache the most recent scan-integrity state per host so the
+    # next heartbeat can cross-check scout's claim.
+    if ctx is not None:
+        _last_scan_integrity_per_host[host] = {
+            "iteration_hash": ctx.iteration_hash,
+            "transfer_hash": ctx.transfer_hash_claimed,
+        }
     _audit.append(
         "scan_integrity",
         host=host,
