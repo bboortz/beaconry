@@ -210,6 +210,26 @@ REVERSE_CHECK_ALLOWLIST: dict[str, str] = {
     "test_pyright_accepts_correct_usage": "pre-BC-041 — BC-012 pyright trap check",
     # BC-019 self-test of the evidence-pointer parser.
     "test_bare_test_file_without_node_id_still_checked": "pre-BC-041 — BC-019 parser self-test",
+    # BC-007 findings CLI — pre-BC-041 structural + format tests. The
+    # authoritative plan `BC-007-compose-path-plan.md` lists shipping
+    # evidence for the compose-path acceptance scenarios; the test file
+    # also carries 12 orthogonal rendering / filter / sort self-tests
+    # from before the reverse-check gate existed. Deterministic-plan-
+    # resolution (2026-11-15) now picks the compose-path plan on every
+    # OS, so these need explicit allowlisting rather than relying on
+    # filesystem-order flake.
+    "test_empty_db_friendly_message": "pre-BC-041 — BC-007 CLI self-test",
+    "test_prints_all_findings": "pre-BC-041 — BC-007 CLI self-test",
+    "test_status_filter_narrows_output": "pre-BC-041 — BC-007 CLI self-test",
+    "test_sort_open_before_other_statuses": "pre-BC-041 — BC-007 CLI self-test",
+    "test_sort_within_status_uses_tier_then_cvss": "pre-BC-041 — BC-007 CLI self-test",
+    "test_pure_read_does_not_modify_db": "pre-BC-041 — BC-007 CLI self-test",
+    "test_long_fields_truncate_with_ellipsis": "pre-BC-041 — BC-007 CLI self-test",
+    "test_unit_format_table_renders_header_and_rows": "pre-BC-041 — BC-007 CLI self-test",
+    "test_bc011_status_filter_accepts_fixed_verified": "pre-BC-041 — BC-007 CLI self-test",
+    "test_bc011_status_filter_accepts_verification_failed": "pre-BC-041 — BC-007 CLI self-test",
+    "test_bc011_sort_rank_puts_verification_failed_near_open": "pre-BC-041 — BC-007 CLI self-test",
+    "test_bc011_sort_rank_puts_fixed_verified_last": "pre-BC-041 — BC-007 CLI self-test",
     # BC-020 KEV ingest — notification-format tests orthogonal to the ingest Gherkin.
     "test_tier_0_notification_has_kev_header": "pre-BC-041 — BC-020 notification format self-test",
     "test_non_tier_0_notification_omits_kev_header": "pre-BC-041 — BC-020 notification format self-test",
@@ -237,12 +257,26 @@ def _find_plan_for_bc(plans_dir: Path, bc_slug: str) -> Path | None:
     Slug matching is prefix-based on the BC number since the test file's
     slug and the plan's slug can diverge by a word (e.g. `test_BC_038_scenario_harness.py`
     ↔ `BC-038-scenario-harness-plan.md`). We match by `BC-NNN-` prefix.
+
+    When multiple plans share the same `BC-NNN-` prefix (some BCs have
+    close-gap + follow-up plans, e.g. BC-007 has four), prefer a plan
+    that actually contains a `## Shipping evidence` section so the
+    reverse-check runs against the authoritative evidence table.
+    Fall back to any match if none contain the section (soft-pass path).
+    Sort deterministically to kill non-portable filesystem-order flakes
+    (CI picked a different plan than local, see 2026-11-15 nightly fix).
     """
     prefix = bc_slug.split("-")[0] + "-" + bc_slug.split("-")[1] + "-"
-    for plan in plans_dir.glob("BC-*-plan.md"):
-        if plan.name.startswith(prefix):
-            return plan
-    return None
+    candidates = sorted(p for p in plans_dir.glob("BC-*-plan.md") if p.name.startswith(prefix))
+    if not candidates:
+        return None
+    for plan in candidates:
+        try:
+            if "## Shipping evidence" in plan.read_text():
+                return plan
+        except OSError:
+            continue
+    return candidates[0]
 
 
 def _test_functions_in_file(test_file: Path) -> list[str]:
