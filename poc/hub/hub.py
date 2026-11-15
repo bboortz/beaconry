@@ -5444,4 +5444,8 @@ if TEST_MODE:
 
 
 if __name__ == "__main__":
-    uvicorn.run("hub:api", host="0.0.0.0", port=8000, log_level="info")
+    # BC-124: HUB_HTTP_PORT lets operators run parallel hubs on one host
+    # (shadow instance, test harness, multi-tenant dev). Default 8000
+    # matches the pre-BC-124 behavior.
+    _port = int(os.environ.get("HUB_HTTP_PORT", "8000"))
+    uvicorn.run("hub:api", host="0.0.0.0", port=_port, log_level="info")
