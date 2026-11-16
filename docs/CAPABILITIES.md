@@ -1801,6 +1801,15 @@ Enforcement: `poc/scripts/verify_traceability.py` runs as part of `make check`. 
 - **verified by:**
   - `poc/tests/integration/test_BC_093_rescan_hooks.py`
 
+### CAP-T229: /audit/integrity endpoint + verify-integrity remote routing
+- **type:** technical
+- **status:** active
+- **origin:** BC-126 — operator ran `beaconry verify-integrity --since 1h` on bb-82jq after v0.22.9 deployed and got `✗ audit log not found at .beaconry-cache/audit.log`. BC-122's verifier was built as a local-only tool; every other operator CLI (`findings`, `audit`, `status`) routes through HTTP to the configured hub. The verifier was the lone exception, defeating its "fleet-wide integrity verdict" purpose.
+- **description:** Hub exposes `GET /audit/integrity?since=24h&host=…&limit=500` under the existing `require_cli_token` auth. Walks `audit.log`, filters to `event == "scan_integrity"` rows + optional `since` (parsed via `_parse_since_spec` with the same `Ns`/`Nm`/`Nh`/`Nd` grammar the CLI uses) + optional `host`, returns a JSON list capped at 10k rows (mirrors `/findings`). `poc/scripts/verify_integrity.py::main` wraps with `choose_source(cfg, compose_hub_running=…)` identical to `beaconry findings`: remote hub → `fetch_events_via_http`; local dev-compose → `_run_in_container` (exec's `python -m poc.scripts.verify_integrity` inside `beaconry-dev-hub` so operator hits the compose volume's audit.log); else local file (preserved for dev tests + `BEACONRY_VERIFY_INTEGRITY_LOCAL=1` escape hatch). Legacy pre-BC-126 hub returns 404 → CLI surfaces friendly "upgrade hub to v0.22.10+" hint with exit code 2.
+- **supports:** CAP-T223, CAP-T076, CAP-B023
+- **verified by:**
+  - `poc/tests/unit/test_BC_126_integrity_endpoint_cli_http.py`
+
 ### CAP-T228: EXECUTOR env default hygiene — empty string resolves to `manual`
 - **type:** technical
 - **status:** active
