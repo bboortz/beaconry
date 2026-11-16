@@ -5212,6 +5212,43 @@ async def _dispatch_regression_notifications(
         log.info("BC-086: %d auto-fix close(s) on %s (silent)", len(auto_fixed), host)
 
 
+async def _notify_top_n(host: str, to_notify: list[Finding], persisted_ids: list[str]) -> int:
+    """BC-128 Phase 2 — notify loop extracted from _ingest_candidates.
+
+    Only sends Telegram for findings that this run actually persisted
+    (first-time saves). Dups suppressed. On exception, writes a
+    `notify_failed` audit event (BC-123) + continues. 0.3s rate-limit
+    between sends throttles Telegram bursts.
+    """
+    persisted_set = set(persisted_ids)
+    new_findings = 0
+    for f in to_notify:
+        if f.id not in persisted_set:
+            continue
+        log.info(
+            "New finding: %s (%s CVSS %.1f) in %s",
+            f.cve_id,
+            f.severity,
+            f.cvss,
+            f.source_ref,
+        )
+        try:
+            await notify(f)
+        except Exception as e:  # noqa: BLE001 — one bad notify must not kill the loop
+            log.warning("notify failed for %s: %s", f.cve_id, e)
+            _audit.append(
+                "notify_failed",
+                host=host,
+                finding_id=f.id,
+                cve_id=f.cve_id,
+                error=str(e)[:400],
+            )
+            continue
+        new_findings += 1
+        await asyncio.sleep(0.3)  # mild rate-limiting vs. Telegram flood control
+    return new_findings
+
+
 async def _ingest_candidates(
     host: str,
     candidates: list[Finding],
@@ -5252,41 +5289,29 @@ async def _ingest_candidates(
         len(suppressed),
     )
 
-    # BC-122: persisted_ids tracks what actually made it to the DB so
-    # processing_hash is a deterministic snapshot of this iteration's
-    # output set.
+    # BC-128: two-phase ingestion. Phase 1 persists every unique CVE
+    # (both top-N + tail) so the DB holds the complete identified
+    # surface. Phase 2 notifies only top-N (operator inbox cap).
+    # Pre-BC-128 the save loop was intertwined with notify + fired
+    # only on top-N, so the tail (up to 218 CVEs/scan on server2) was
+    # lost from the DB entirely. BC-128 keeps dedup_and_cap's ranking
+    # for notification priority; it just stops conflating that ranking
+    # with persistence.
+    #
+    # Phase 1 — persist every unique CVE. No Telegram rate-limit sleep
+    # here; SQLite inserts are <1ms. `save_finding` is idempotent via
+    # `INSERT OR IGNORE`; dups return False.
     persisted_ids: list[str] = []
-    new_findings = 0
-    for f in to_notify:
-        if not save_finding(f, now_ts=now_ts):
-            continue
-        persisted_ids.append(f.id)
-        log.info(
-            "New finding: %s (%s CVSS %.1f) in %s",
-            f.cve_id,
-            f.severity,
-            f.cvss,
-            f.source_ref,
-        )
-        try:
-            await notify(f)
-        except Exception as e:  # noqa: BLE001 — one bad notify must not kill the loop
-            log.warning("notify failed for %s: %s", f.cve_id, e)
-            # BC-123: persist the exception as an audit event so operators
-            # can see "finding saved but never alerted" — the exact class
-            # we previously missed. The retry queue (BC-104) can't actually
-            # replay this (the formatted text never left the handler), so
-            # audit visibility is the honest signal.
-            _audit.append(
-                "notify_failed",
-                host=host,
-                finding_id=f.id,
-                cve_id=f.cve_id,
-                error=str(e)[:400],
-            )
-            continue
-        new_findings += 1
-        await asyncio.sleep(0.3)  # mild rate-limiting vs. Telegram flood control
+    n_dropped_in_save = 0
+    all_unique = [*to_notify, *suppressed]
+    for f in all_unique:
+        if save_finding(f, now_ts=now_ts):
+            persisted_ids.append(f.id)
+        else:
+            n_dropped_in_save += 1
+
+    # Phase 2 — notify only top-N (the actual operator inbox cap).
+    new_findings = await _notify_top_n(host, to_notify, persisted_ids)
 
     # BC-036: throttle digests. First-fires above are unaffected; this gate
     # is strictly digest-local. See `should_send_digest` for the policy.
@@ -5361,12 +5386,17 @@ async def _ingest_candidates(
         regressed, auto_fixed, regressed_from_auto_fix = reconcile_scan(host, scanned_ids)
     await _dispatch_regression_notifications(host, regressed, regressed_from_auto_fix, auto_fixed)
 
-    # BC-122: emit scan_integrity audit event with full accounting so
-    # the verifier can prove candidates = persisted + every drop reason.
-    # save_finding can return False (e.g. legacy/invalid rows); track the
-    # delta separately so the sum stays explainable.
-    n_dropped_in_save = len(to_notify) - len(persisted_ids)
-    n_capped = len(suppressed)  # dedup_and_cap's "overflow" goes to digest, not DB
+    # BC-122 + BC-128: emit scan_integrity audit event with full
+    # accounting. BC-128 changed semantics: `n_persisted` now counts
+    # EVERY unique CVE that went through save_finding + returned True
+    # (both top-N and suppressed tail). `n_suppressed_from_notify`
+    # replaces the old `n_capped` — these are findings the top-N cap
+    # withheld from Telegram individual messages (they still landed
+    # in the DB + the digest body). `n_notified` is the new count of
+    # findings that actually went through notify().
+    # Balance invariant (post-BC-128):
+    #   n_candidates == n_persisted + n_dedup + n_dropped_in_save + n_filtered_other
+    n_suppressed_from_notify = len(suppressed)
     processing_hash = _compute_processing_hash(persisted_ids)
     ctx = integrity_ctx
     # BC-122: cache the most recent scan-integrity state per host so the
@@ -5389,14 +5419,17 @@ async def _ingest_candidates(
         n_sboms_received=sbom_count,
         n_candidates=len(candidates),
         n_persisted=len(persisted_ids),
-        # BC-122 accounting: every candidate not persisted falls in one
-        # of these buckets. Verifier asserts the sum matches.
+        n_notified=new_findings,
+        # BC-128 accounting: suppressed_from_notify are withheld from
+        # the Telegram inbox; they ARE persisted. n_dropped_in_save
+        # captures save_finding returning False (dupes). Balance:
+        #   candidates = persisted + dedup + dropped_in_save + filtered_other
         n_dedup=n_dedup,
-        n_capped=n_capped,
+        n_suppressed_from_notify=n_suppressed_from_notify,
         n_dropped_in_save=n_dropped_in_save,
         n_filtered_other=max(
             0,
-            len(candidates) - len(persisted_ids) - n_dedup - n_capped - n_dropped_in_save,
+            len(candidates) - len(persisted_ids) - n_dedup - n_dropped_in_save,
         ),
         processing_hash=processing_hash,
     )

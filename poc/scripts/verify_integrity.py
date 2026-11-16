@@ -53,9 +53,21 @@ class IntegrityReport:
 
 
 def _drop_sum(ev: dict) -> int:
+    """Sum of every "finding was dropped from persistence" bucket.
+
+    Pre-BC-128 events include `n_capped` (the suppressed-from-notify
+    tail that was ALSO dropped from the DB). Post-BC-128 events rename
+    it to `n_suppressed_from_notify` AND those findings are persisted
+    (so they're NOT a drop). We tolerate both event shapes:
+      - If `n_suppressed_from_notify` is present, we're on a BC-128
+        event — the value is not a drop, don't add it.
+      - Else if `n_capped` is present, we're on a pre-BC-128 event —
+        count it as a drop (matches the old balance invariant).
+    """
+    suppressed_term = 0 if "n_suppressed_from_notify" in ev else int(ev.get("n_capped") or 0)
     return (
         int(ev.get("n_dedup") or 0)
-        + int(ev.get("n_capped") or 0)
+        + suppressed_term
         + int(ev.get("n_dropped_in_save") or 0)
         + int(ev.get("n_filtered_other") or 0)
     )
