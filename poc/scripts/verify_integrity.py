@@ -189,8 +189,108 @@ def _parse_args(argv: list[str]) -> argparse.Namespace:
     return p.parse_args(argv)
 
 
+def fetch_events_via_http(cfg, since: str | None) -> list[dict]:  # type: ignore[no-untyped-def]
+    """BC-126: fetch scan_integrity events from the hub's /audit/integrity
+    endpoint. `since` is the raw CLI spec ("24h", "60m", …) — the hub
+    parses it with the same grammar the local path uses.
+
+    Raises on HTTP failure so `main()` can surface a friendly error +
+    return exit code 2 (matches the local-file not-found contract).
+    """
+    import urllib.parse
+
+    from poc.scripts.cli_http import http_get
+
+    url = cfg.hub_url.rstrip("/") + "/audit/integrity"
+    qs: dict[str, str] = {}
+    if since:
+        qs["since"] = since
+    if qs:
+        url += "?" + urllib.parse.urlencode(qs)
+    rows = http_get(url, token=cfg.hub_token)
+    if not isinstance(rows, list):
+        return []
+    return rows
+
+
+def _running_compose_hub() -> bool:
+    """BC-126: mirrors poc/scripts/findings.py::_running_compose_hub so
+    the dev-compose path exec's the verifier inside the hub container."""
+    import subprocess
+
+    hub_container = os.environ.get("BEACONRY_HUB_CONTAINER", "beaconry-dev-hub")
+    try:
+        result = subprocess.run(
+            ["docker", "inspect", "--format={{.State.Running}}", hub_container],
+            capture_output=True,
+            text=True,
+            timeout=3,
+            check=False,
+        )
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        return False
+    return result.returncode == 0 and result.stdout.strip() == "true"
+
+
+def _run_in_container(since: str | None) -> int:
+    """BC-126: exec verify_integrity inside the dev-compose hub so the
+    operator hits the compose volume's audit.log, not a non-existent
+    local file. Mirrors the pattern beaconry findings uses."""
+    import subprocess
+
+    hub_container = os.environ.get("BEACONRY_HUB_CONTAINER", "beaconry-dev-hub")
+    cmd = [
+        "docker",
+        "exec",
+        "-e",
+        "DATA_DIR=/data",
+        hub_container,
+        "python3",
+        "-m",
+        "poc.scripts.verify_integrity",
+    ]
+    if since:
+        cmd += ["--since", since]
+    r = subprocess.run(cmd, check=False)
+    return r.returncode
+
+
 def main(argv: list[str] | None = None) -> int:
     args = _parse_args(argv if argv is not None else sys.argv[1:])
+
+    # BC-126: route-pick mirrors beaconry findings / audit. Remote hub
+    # → HTTP; local dev-compose → docker-exec; else local file (back-
+    # compat for tests + air-gapped dev loops).
+    from poc.scripts.cli_config import load_cli_config
+    from poc.scripts.cli_http import choose_source, friendly_http_error
+
+    cfg = load_cli_config()
+    source = choose_source(
+        cfg,
+        compose_hub_running=_running_compose_hub(),
+        force_local=bool(os.environ.get("BEACONRY_VERIFY_INTEGRITY_LOCAL")),
+    )
+
+    if source == "http":
+        try:
+            events = fetch_events_via_http(cfg, args.since)
+        except Exception as exc:  # noqa: BLE001 — single friendly line.
+            url = cfg.hub_url.rstrip("/") + "/audit/integrity"
+            print("✗ " + friendly_http_error(url, exc), file=sys.stderr)
+            # 404 on legacy pre-BC-126 hub: hint at the upgrade path.
+            if "404" in str(exc):
+                print(
+                    "  (hub is pre-BC-126 — upgrade hub to v0.22.10+ to use this remotely)",
+                    file=sys.stderr,
+                )
+            return 2
+        report = build_report(events)
+        print(_format_report(report))
+        return report.exit_code
+
+    if source == "local-compose":
+        return _run_in_container(args.since)
+
     data_dir = Path(os.environ.get("DATA_DIR", ".beaconry-cache"))
     audit_path = data_dir / "audit.log"
     if not audit_path.exists():

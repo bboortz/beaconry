@@ -180,6 +180,7 @@ See also:
 | `BEACONRY_SCOUT_CONTAINER` | `beaconry-dev-scout` | string | `poc/scripts/{scan_cli,cli_smoke}.py` | Container name `make scan` + cli-smoke target. BC-101: new env; was hardcoded `beaconry-scout` pre-BC-101. Operators on homelab/systemd set this back to `beaconry-scout`. | BC-101 |
 | `BEACONRY_SCOUT_LOCAL_URL` | `http://127.0.0.1:18001/scan/trigger` | URL | `poc/scripts/scan_cli.py` | Localhost scout `/scan/trigger` URL for the BC-055 pre-CLI path. BC-101: host port moved 8001 → 18001 to coexist with operator systemd scout (which binds 0.0.0.0:8001 via `network_mode: host`). Operators who've customized the compose port override this; non-localhost workflows route through hub HTTP (unaffected). | BC-101 |
 | `BEACONRY_FINDINGS_LOCAL` | *(empty)* | bool (`0`/`1`) | `poc/scripts/findings.py` | `1` forces `make findings` to use the local `.beaconry-cache/beaconry.db` even if the compose hub is up. Needed when debugging an older dev-mode DB without stopping the live stack. | BC-007 |
+| `BEACONRY_VERIFY_INTEGRITY_LOCAL` | *(empty)* | bool (`0`/`1`) | `poc/scripts/verify_integrity.py` | `1` forces `beaconry verify-integrity` to use `$DATA_DIR/audit.log` directly even when a remote hub / compose hub is reachable. Needed for tests + air-gapped dev loops; operators normally route through the hub's `/audit/integrity` endpoint (BC-126). | BC-126 |
 
 ## Scenario harness
 

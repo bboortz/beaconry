@@ -3573,6 +3573,63 @@ def _audit_event_matches(
     return not (finding and e.get("finding_id") != finding)
 
 
+@api.get("/audit/integrity", dependencies=[Depends(require_cli_token)])
+async def http_audit_integrity(
+    since: str | None = None,
+    host: str | None = None,
+    limit: int = 500,
+) -> list[dict]:
+    """BC-126: scan_integrity audit events for the verify-integrity CLI.
+
+    `since` accepts `24h` / `60m` / `7d` / `30s` (same parser the CLI uses).
+    `host` narrows to a single scout. Response is a JSON list capped at
+    10k rows to match /findings.
+
+    Lives under /audit/ namespace so future per-event-type endpoints
+    (/audit/notify_failed, /audit/finding_filtered) have a consistent
+    home.
+    """
+    events = _read_audit_events()
+    cap = max(1, min(limit, 10000))
+    since_ts = _parse_since_spec(since) if since else None
+    out: list[dict] = []
+    for e in events:
+        if e.get("event") != "scan_integrity":
+            continue
+        if host and e.get("host") != host:
+            continue
+        if since_ts is not None:
+            raw_ts = e.get("ts")
+            try:
+                import datetime as _dt
+
+                event_ts = int(_dt.datetime.fromisoformat(str(raw_ts)).timestamp())
+                if event_ts < since_ts:
+                    continue
+            except (ValueError, TypeError):
+                # Unparseable ts → include defensively.
+                pass
+        out.append(e)
+        if len(out) >= cap:
+            break
+    return out
+
+
+def _parse_since_spec(spec: str) -> int | None:
+    """BC-126: `24h` / `60m` / `7d` / `30s` → unix ts N seconds ago.
+    Returns None for unparseable input (callers treat as no filter)."""
+    import re as _re
+    import time as _time
+
+    m = _re.fullmatch(r"(\d+)\s*([smhd])", spec.strip())
+    if not m:
+        return None
+    n = int(m.group(1))
+    unit = m.group(2)
+    secs = n * {"s": 1, "m": 60, "h": 3600, "d": 86400}[unit]
+    return int(_time.time()) - secs
+
+
 @api.get("/audit", dependencies=[Depends(require_cli_token)])
 async def http_audit(
     last: int = 50,

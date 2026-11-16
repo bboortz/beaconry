@@ -397,6 +397,9 @@ def test_load_events_missing_file_returns_empty(tmp_path) -> None:
 def test_main_exits_2_on_missing_audit(tmp_path, monkeypatch: pytest.MonkeyPatch) -> None:
     from poc.scripts import verify_integrity as vi
 
+    # BC-126: main() now routes via choose_source. Force local-file to
+    # keep this test about the "missing audit file" code path, not HTTP.
+    monkeypatch.setenv("BEACONRY_VERIFY_INTEGRITY_LOCAL", "1")
     monkeypatch.setenv("DATA_DIR", str(tmp_path / "nowhere"))
     rc = vi.main([])
     assert rc == 2
@@ -411,6 +414,9 @@ def test_main_round_trip_with_events(
     data_dir.mkdir()
     audit = data_dir / "audit.log"
     audit.write_text(json.dumps(_integrity_event()) + "\n")
+    # BC-126: pin local-file source so this test stays about the local
+    # happy path (not HTTP routing — covered in BC-126's own tests).
+    monkeypatch.setenv("BEACONRY_VERIFY_INTEGRITY_LOCAL", "1")
     monkeypatch.setenv("DATA_DIR", str(data_dir))
     rc = vi.main([])
     out = capsys.readouterr().out
