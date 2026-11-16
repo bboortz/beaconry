@@ -558,15 +558,38 @@ _pipeline_integrity_mismatches: int = 0
 # load_integrity_persistence) so a hub restart doesn't lose the cache.
 _last_scan_integrity_per_host: dict[str, dict[str, str | None]] = {}
 
+# BC-130: provenance of each `_last_scan_integrity_per_host` entry so
+# heartbeat-mismatch audit events can distinguish "cached value came
+# from boot-time SQLite reload" (deploy-race signature) from "cached
+# value came from a /scan the live process handled" (actionable
+# transport-loss signature). Keyed by host. Values: "sqlite_reload" |
+# "live_scan". Hosts not present in the cache map to "no_record" at
+# audit time (see _record_heartbeat_mismatch).
+_cache_source_per_host: dict[str, str] = {}
 
-def load_integrity_persistence() -> None:
+# BC-130: unix ts of the current hub process's boot. Set in
+# load_integrity_persistence (lifespan hook). Used to compute
+# `hub_uptime_s` for mismatch audit events + emit the
+# `hub_startup` audit event.
+_hub_boot_ts: int = 0
+
+
+def load_integrity_persistence() -> tuple[bool, int]:
     """BC-123: hydrate BC-122's in-memory integrity state from SQLite on
-    hub boot. No-op if the tables are absent (pre-migration) or empty."""
-    global _pipeline_integrity_mismatches
+    hub boot. No-op if the tables are absent (pre-migration) or empty.
+
+    BC-130: also stamps `_hub_boot_ts`, flags every hydrated host in
+    `_cache_source_per_host` as `"sqlite_reload"` so a heartbeat
+    mismatch immediately after boot is identifiable as a deploy-race
+    event, and returns `(reload_ok, hosts_in_cache)` for the
+    `hub_startup` audit event the lifespan emits."""
+    global _pipeline_integrity_mismatches, _hub_boot_ts
+    _hub_boot_ts = int(time.time())
+    reload_ok = False
     try:
         con = sqlite3.connect(DB_PATH)
     except sqlite3.OperationalError:
-        return
+        return False, 0
     try:
         row = con.execute(
             "SELECT value FROM integrity_counters WHERE key = 'pipeline_integrity_mismatches'"
@@ -580,6 +603,8 @@ def load_integrity_persistence() -> None:
                 "iteration_hash": iteration_hash,
                 "transfer_hash": transfer_hash,
             }
+            _cache_source_per_host[host] = "sqlite_reload"
+        reload_ok = True
     except sqlite3.OperationalError:
         # Tables don't exist yet (first boot before init_db ran, or an
         # old DB file that hasn't been migrated). Degrade silently; the
@@ -587,6 +612,33 @@ def load_integrity_persistence() -> None:
         pass
     finally:
         con.close()
+    return reload_ok, len(_last_scan_integrity_per_host)
+
+
+def _get_cache_last_updated_ts(host: str) -> int | None:
+    """BC-130: read the last-updated timestamp hub wrote to
+    integrity_state for this host. Used to enrich heartbeat_integrity_
+    mismatch events so the operator can see how stale the cached value
+    was at mismatch time. Returns None if the row doesn't exist or the
+    query fails."""
+    if not host:
+        return None
+    try:
+        con = sqlite3.connect(DB_PATH)
+    except sqlite3.OperationalError:
+        return None
+    try:
+        row = con.execute(
+            "SELECT last_updated_ts FROM integrity_state WHERE host = ?",
+            (host,),
+        ).fetchone()
+        if row and isinstance(row[0], int):
+            return int(row[0])
+    except sqlite3.OperationalError:
+        return None
+    finally:
+        con.close()
+    return None
 
 
 def _persist_integrity_counter() -> None:
@@ -613,17 +665,22 @@ def _persist_integrity_counter() -> None:
 
 def _persist_integrity_state(
     host: str, iteration_hash: str | None, transfer_hash: str | None
-) -> None:
+) -> bool:
     """BC-123: flush per-host `_last_scan_integrity_per_host[host]` to
     SQLite. Called at the end of `_ingest_candidates` in lockstep with
     the audit-event emit so the on-disk copy and the audit stream stay
-    in sync."""
+    in sync.
+
+    BC-130: returns True on successful commit, False otherwise. Callers
+    fold the bool into `scan_integrity.cache_persisted_ok` so a failed
+    SQLite write (disk full, locked file, schema drift) is visible in
+    the audit stream rather than silently absorbed."""
     if not host:
-        return
+        return False
     try:
         con = sqlite3.connect(DB_PATH)
     except sqlite3.OperationalError:
-        return
+        return False
     try:
         con.execute(
             "INSERT INTO integrity_state "
@@ -636,8 +693,10 @@ def _persist_integrity_state(
             (host, iteration_hash, transfer_hash, int(time.time())),
         )
         con.commit()
+        return True
     except sqlite3.OperationalError as e:
         log.warning("BC-123: couldn't persist integrity state for %s: %s", host, e)
+        return False
     finally:
         con.close()
 
@@ -3042,7 +3101,18 @@ async def lifespan(  # noqa: PLR0915 - orchestration function; each background t
     # BC-123: hydrate BC-122's integrity state (counter + per-host cache)
     # from SQLite so a hub restart doesn't lose the mismatch count and the
     # next scout heartbeat still cross-checks against the right hashes.
-    load_integrity_persistence()
+    # BC-130: returns (reload_ok, hosts_in_cache) + stamps _hub_boot_ts
+    # as a side effect; we fold both into the hub_startup audit event so
+    # every restart is a locatable boundary in the audit stream.
+    reload_ok, hosts_in_cache = load_integrity_persistence()
+    _audit.append(
+        "hub_startup",
+        software_version=SOFTWARE_VERSION,
+        api_version=API_VERSION,
+        cache_reload_ok=reload_ok,
+        hosts_in_cache=hosts_in_cache,
+        mismatch_counter_at_boot=_pipeline_integrity_mismatches,
+    )
 
     # BC-020: warm KEV in-memory from disk cache so the first scan already has
     # urgency scoring (even if the HTTP fetch is still pending). Also kicks off
@@ -5027,6 +5097,26 @@ async def receive_scan(payload: dict, request: _FastAPIRequest) -> dict:
             claimed_transfer,
             computed_transfer,
         )
+        # BC-130: emit a dedicated transfer_hash_mismatch audit event
+        # so operators grepping `audit?event=transfer_hash_mismatch`
+        # see the forensic context without having to filter
+        # scan_integrity by `transfer_match=false`. Symmetric with
+        # heartbeat_integrity_mismatch's enrichment. Four correlation
+        # fields match the heartbeat sibling so a single downstream
+        # tool can consume both event types uniformly.
+        now_ts = int(time.time())
+        hub_uptime_s = max(0, now_ts - _hub_boot_ts) if _hub_boot_ts else 0
+        _audit.append(
+            "transfer_hash_mismatch",
+            host=host,
+            iteration_hash=claimed_iteration,
+            transfer_hash_claimed=claimed_transfer,
+            transfer_hash_computed=computed_transfer,
+            hub_uptime_s=hub_uptime_s,
+            last_hub_startup_ts=_hub_boot_ts or None,
+            hub_cache_last_updated_ts=_get_cache_last_updated_ts(host),
+            cache_source=_cache_source_per_host.get(host, "no_record"),
+        )
         # BC-122: opt-in Telegram alert (default off until operator
         # baselines false-positive rate). Fire-and-forget — a failed
         # Telegram send must not block the scan response path.
@@ -5106,6 +5196,11 @@ def _check_heartbeat_integrity(host: str, payload: dict) -> None:
       - claim differs from cache → increment mismatch counter + WARN +
         audit `heartbeat_integrity_mismatch`. Covers the "scout
         believes it delivered X, hub never saw X" silent-loss class.
+
+    BC-130: enriches the mismatch audit event with hub uptime + boot ts
+    + cache-source + cache-last-updated ts so the operator can tell
+    deploy-race events (sqlite_reload + small uptime) from actionable
+    silent-transport-loss events (live_scan + large uptime).
     """
     claimed_iteration = payload.get("last_delivered_iteration_hash")
     claimed_transfer = payload.get("last_delivered_transfer_hash")
@@ -5122,6 +5217,7 @@ def _check_heartbeat_integrity(host: str, payload: dict) -> None:
             claimed_transfer=claimed_transfer,
             cached_iteration=None,
             cached_transfer=None,
+            cache_source="no_record",
         )
         return
     cached_iteration = cached.get("iteration_hash")
@@ -5134,6 +5230,7 @@ def _check_heartbeat_integrity(host: str, payload: dict) -> None:
         claimed_transfer=claimed_transfer,
         cached_iteration=cached_iteration,
         cached_transfer=cached_transfer,
+        cache_source=_cache_source_per_host.get(host, "no_record"),
     )
 
 
@@ -5144,20 +5241,39 @@ def _record_heartbeat_mismatch(
     claimed_transfer: str,
     cached_iteration: str | None,
     cached_transfer: str | None,
+    cache_source: str,
 ) -> None:
     """BC-122: shared log + audit + counter path for heartbeat-integrity
-    mismatches (both "no record on hub" and "record differs" variants)."""
+    mismatches (both "no record on hub" and "record differs" variants).
+
+    BC-130: enriches the audit payload with four correlation fields so
+    each event self-diagnoses:
+      - `hub_uptime_s`: how long this hub process has been running.
+      - `last_hub_startup_ts`: unix ts the hub booted.
+      - `hub_cache_last_updated_ts`: unix ts the integrity_state row
+        for this host was last written (None if no row).
+      - `cache_source`: `"sqlite_reload"` | `"live_scan"` | `"no_record"`.
+
+    Deploy-race signature: `cache_source="sqlite_reload"` AND
+    `hub_uptime_s` small. Actionable transport-loss signature:
+    `cache_source="live_scan"` AND `hub_uptime_s` large.
+    """
     global _pipeline_integrity_mismatches
     _pipeline_integrity_mismatches += 1
     _persist_integrity_counter()  # BC-123: survive hub restart
+    now_ts = int(time.time())
+    hub_uptime_s = max(0, now_ts - _hub_boot_ts) if _hub_boot_ts else 0
+    cache_last_updated_ts = _get_cache_last_updated_ts(host)
     log.warning(
         "BC-122: heartbeat integrity MISMATCH host=%s claim_iter=%s claim_xfer=%s "
-        "hub_iter=%s hub_xfer=%s",
+        "hub_iter=%s hub_xfer=%s cache_source=%s hub_uptime=%ds",
         host,
         claimed_iteration,
         claimed_transfer,
         cached_iteration,
         cached_transfer,
+        cache_source,
+        hub_uptime_s,
     )
     _audit.append(
         "heartbeat_integrity_mismatch",
@@ -5166,6 +5282,11 @@ def _record_heartbeat_mismatch(
         claimed_transfer_hash=claimed_transfer,
         cached_iteration_hash=cached_iteration,
         cached_transfer_hash=cached_transfer,
+        # BC-130 correlation fields.
+        hub_uptime_s=hub_uptime_s,
+        last_hub_startup_ts=_hub_boot_ts or None,
+        hub_cache_last_updated_ts=cache_last_updated_ts,
+        cache_source=cache_source,
     )
 
 
@@ -5454,12 +5575,22 @@ async def _ingest_candidates(
     # BC-122: cache the most recent scan-integrity state per host so the
     # next heartbeat can cross-check scout's claim.
     # BC-123: and flush to SQLite so the cache survives hub restart.
+    # BC-130: persist-first ordering — SQLite commit before in-memory
+    # cache mutation. If uvicorn is torn down between these two
+    # statements (SIGTERM during deploy), the in-memory cache must not
+    # be ahead of the durable SQLite row. Pre-BC-130 ordering was the
+    # reverse and produced ~1 spurious heartbeat_integrity_mismatch per
+    # deploy (counter ticked 0→6 over six deploys on 2026-11-16).
+    cache_persisted_ok = False
     if ctx is not None:
+        cache_persisted_ok = _persist_integrity_state(
+            host, ctx.iteration_hash, ctx.transfer_hash_claimed
+        )
         _last_scan_integrity_per_host[host] = {
             "iteration_hash": ctx.iteration_hash,
             "transfer_hash": ctx.transfer_hash_claimed,
         }
-        _persist_integrity_state(host, ctx.iteration_hash, ctx.transfer_hash_claimed)
+        _cache_source_per_host[host] = "live_scan"
     _audit.append(
         "scan_integrity",
         host=host,
@@ -5478,6 +5609,13 @@ async def _ingest_candidates(
         # accounted for in n_persisted (persistence) — this field
         # just makes the SLA escape hatch auditable.
         n_tail_criticals_notified=n_tail_criticals_notified,
+        # BC-130: did the SQLite write for this scan's integrity_state
+        # row succeed? False means in-memory advanced but disk didn't;
+        # on hub restart the next heartbeat from this host will produce
+        # a heartbeat_integrity_mismatch with cache_source="sqlite_
+        # reload". Visible here so operators don't have to wait for the
+        # follow-up event to notice.
+        cache_persisted_ok=cache_persisted_ok,
         # BC-128 accounting: suppressed_from_notify are withheld from
         # the Telegram inbox; they ARE persisted. n_dropped_in_save
         # captures save_finding returning False (dupes). Balance:

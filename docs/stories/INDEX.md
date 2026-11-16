@@ -121,4 +121,5 @@ Lifecycle: `draft → ready → in-progress → shipped`. Status matches each st
 | BC-126 | /audit/integrity endpoint + beaconry verify-integrity HTTP routing       | shipped     | — (merged to dev)                   |
 | BC-127 | `beaconry findings --severity` filter (Critical/High/Medium/Low)        | shipped     | — (merged to dev)                   |
 | BC-128 | Persist every unique CVE; notification cap is separate                   | shipped     | — (merged to dev)                   |
-| BC-129 | Loud alert for newly-persisted Tier ≤ 1 findings even in suppressed tail | in-progress | feat/BC-129-notify-new-tail-criticals |
+| BC-129 | Loud alert for newly-persisted Tier ≤ 1 findings even in suppressed tail | shipped     | — (merged to dev)                   |
+| BC-130 | Diagnose + fix hub-shutdown-race source of heartbeat_integrity_mismatch | in-progress | feat/BC-130-diagnose-heartbeat-mismatch-race |
