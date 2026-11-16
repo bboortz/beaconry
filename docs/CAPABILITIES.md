@@ -1801,6 +1801,15 @@ Enforcement: `poc/scripts/verify_traceability.py` runs as part of `make check`. 
 - **verified by:**
   - `poc/tests/integration/test_BC_093_rescan_hooks.py`
 
+### CAP-T231: Persist every identified unique CVE; notification cap is separate
+- **type:** technical
+- **status:** active
+- **origin:** BC-128 — forensic walk on server2 found 2029 candidates → 318 unique → 100 top-N persisted + 218 suppressed tail persisted NOWHERE, every scan, indefinitely. `BEACONRY_MAX_FINDINGS_PER_RUN=100` was designed as a notification-rate cap but was coded as a persistence cap too. Operator running `beaconry findings --host server2 --severity Critical` saw only top-ranked Criticals; lower-ranked Criticals in the suppressed tail never got a DB row.
+- **description:** `_ingest_candidates` now runs in two phases. Phase 1: `save_finding` on **every unique CVE** (`to_notify + suppressed`) without the 0.3s rate-limit (SQLite inserts are <1ms). Phase 2 (extracted to `_notify_top_n`): `notify()` + 0.3s rate-limit still only fires on `to_notify` findings that this run actually persisted (first-time). `send_digest(suppressed)` still fires for operator inbox parity. `scan_integrity` audit event: renamed `n_capped` → `n_suppressed_from_notify` (reflects new semantics — persisted, not dropped), added `n_notified` (top-N count actually sent via notify()), `n_persisted` now counts BOTH branches. Balance invariant updated: `n_candidates == n_persisted + n_dedup + n_dropped_in_save + n_filtered_other`. `poc/scripts/verify_integrity.py::_drop_sum` tolerates both pre-BC-128 (`n_capped` counted as drop) and post-BC-128 (`n_suppressed_from_notify` NOT counted) event shapes. Result: after one scan on server2 post-deploy, `beaconry findings --host server2` grows from ~100 rows to ~318. `beaconry findings --host server2 --severity Critical` reveals every Critical, not just the top-ranked 60.
+- **supports:** CAP-T207, CAP-T223, CAP-T224, CAP-T230, CAP-B023
+- **verified by:**
+  - `poc/tests/unit/test_BC_128_persist_all_unique_cves.py`
+
 ### CAP-T230: `beaconry findings --severity` filter
 - **type:** technical
 - **status:** active

@@ -143,10 +143,9 @@ def test_processing_drops_accounted_for(hub_env: Path) -> None:
     assert r.status_code == 200
     audit = _read_audit(hub_env)
     ev = next(e for e in audit if e.get("event") == "scan_integrity")
-    bucket_sum = (
-        int(ev["n_dedup"])
-        + int(ev["n_capped"])
-        + int(ev["n_dropped_in_save"])
-        + int(ev["n_filtered_other"])
-    )
+    # BC-128 renamed n_capped → n_suppressed_from_notify AND moved it
+    # out of the drop-sum (suppressed findings are now persisted).
+    # Post-BC-128 invariant: candidates = persisted + dedup +
+    # dropped_in_save + filtered_other.
+    bucket_sum = int(ev["n_dedup"]) + int(ev["n_dropped_in_save"]) + int(ev["n_filtered_other"])
     assert int(ev["n_candidates"]) == int(ev["n_persisted"]) + bucket_sum

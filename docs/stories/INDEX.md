@@ -120,3 +120,4 @@ Lifecycle: `draft → ready → in-progress → shipped`. Status matches each st
 | BC-125 | EXECUTOR env default hygiene — empty string resolves to `manual`        | shipped     | — (merged to dev)                   |
 | BC-126 | /audit/integrity endpoint + beaconry verify-integrity HTTP routing       | shipped     | — (merged to dev)                   |
 | BC-127 | `beaconry findings --severity` filter (Critical/High/Medium/Low)        | shipped     | — (merged to dev)                   |
+| BC-128 | Persist every unique CVE; notification cap is separate                   | shipped     | — (merged to dev)                   |
