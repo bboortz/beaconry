@@ -5249,6 +5249,52 @@ async def _notify_top_n(host: str, to_notify: list[Finding], persisted_ids: list
     return new_findings
 
 
+async def _notify_tail_criticals(
+    host: str, suppressed: list[Finding], persisted_ids: list[str]
+) -> int:
+    """BC-129 — SLA escape hatch: loud alert for newly-persisted Tier ≤ 1
+    findings that landed in the suppressed tail.
+
+    `_notify_top_n` only fires for findings in the top-N slice from
+    `dedup_and_cap`. On hosts with more unique CVEs than
+    `BEACONRY_MAX_FINDINGS_PER_RUN`, a fresh Tier 0 KEV or Tier 1
+    CVSS≥9 internet-facing CVE can rank outside the top-N; pre-BC-129
+    it only surfaced via the hash-throttled BC-036 digest body —
+    which cannot deliver a 15-min SLA. This pass guarantees every
+    newly-persisted Tier ≤ 1 finding gets an individual Telegram
+    alert regardless of rank. Same 0.3 s rate-limit, same
+    `notify_failed` audit path as `_notify_top_n`.
+    """
+    persisted_set = set(persisted_ids)
+    tail_notified = 0
+    for f in suppressed:
+        if f.id not in persisted_set or f.tier > 1:
+            continue
+        log.info(
+            "BC-129 tail-critical notify: %s (%s CVSS %.1f tier=%d) in %s",
+            f.cve_id,
+            f.severity,
+            f.cvss,
+            f.tier,
+            f.source_ref,
+        )
+        try:
+            await notify(f)
+        except Exception as e:  # noqa: BLE001 — same resilience as _notify_top_n
+            log.warning("tail-critical notify failed for %s: %s", f.cve_id, e)
+            _audit.append(
+                "notify_failed",
+                host=host,
+                finding_id=f.id,
+                cve_id=f.cve_id,
+                error=str(e)[:400],
+            )
+            continue
+        tail_notified += 1
+        await asyncio.sleep(0.3)
+    return tail_notified
+
+
 async def _ingest_candidates(
     host: str,
     candidates: list[Finding],
@@ -5312,6 +5358,12 @@ async def _ingest_candidates(
 
     # Phase 2 — notify only top-N (the actual operator inbox cap).
     new_findings = await _notify_top_n(host, to_notify, persisted_ids)
+
+    # BC-129: SLA escape hatch — any newly-persisted Tier ≤ 1 finding
+    # that landed in the suppressed tail must still fire an individual
+    # Telegram alert. Without this, a fresh KEV can ride a hash-
+    # throttled digest and miss its 15-min target.
+    n_tail_criticals_notified = await _notify_tail_criticals(host, suppressed, persisted_ids)
 
     # BC-036: throttle digests. First-fires above are unaffected; this gate
     # is strictly digest-local. See `should_send_digest` for the policy.
@@ -5420,6 +5472,12 @@ async def _ingest_candidates(
         n_candidates=len(candidates),
         n_persisted=len(persisted_ids),
         n_notified=new_findings,
+        # BC-129: count of tail-Critical loud alerts fired this scan.
+        # Additive to BC-128's accounting; the balance invariant is
+        # unchanged because tail-Critical notifications are already
+        # accounted for in n_persisted (persistence) — this field
+        # just makes the SLA escape hatch auditable.
+        n_tail_criticals_notified=n_tail_criticals_notified,
         # BC-128 accounting: suppressed_from_notify are withheld from
         # the Telegram inbox; they ARE persisted. n_dropped_in_save
         # captures save_finding returning False (dupes). Balance:
@@ -5436,7 +5494,7 @@ async def _ingest_candidates(
 
     return {
         "status": "ok",
-        "findings": new_findings,
+        "findings": new_findings + n_tail_criticals_notified,
         "regressed": len(regressed),
         "auto_fixed": len(auto_fixed),
         "regressed_from_auto_fix": len(regressed_from_auto_fix),

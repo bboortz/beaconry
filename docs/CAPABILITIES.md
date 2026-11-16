@@ -1801,6 +1801,15 @@ Enforcement: `poc/scripts/verify_traceability.py` runs as part of `make check`. 
 - **verified by:**
   - `poc/tests/integration/test_BC_093_rescan_hooks.py`
 
+### CAP-T232: Loud alert for newly-persisted Tier ≤ 1 findings regardless of rank
+- **type:** technical
+- **status:** active
+- **origin:** BC-129 — BC-128 fixed DB persistence, but `_notify_top_n` still only fires Telegram for findings in the top-N slice from `dedup_and_cap`. On hosts with more unique CVEs than `BEACONRY_MAX_FINDINGS_PER_RUN` (server2: 318, bb-82jq: 439), a newly-persisted Tier 0 KEV or Tier 1 CVSS≥9 internet-facing Critical ranking outside top-N only surfaced via the BC-036 hash-throttled digest body — which cannot deliver the design-mandated 15-min SLA.
+- **description:** New helper `_notify_tail_criticals(host, suppressed, persisted_ids)` runs after `_notify_top_n` in `_ingest_candidates`. For each `f in suppressed` where `f.id in persisted_set AND f.tier <= 1`: fire `notify(f)` with the same 0.3 s inter-send rate-limit and `notify_failed` audit-on-exception handling as the top-N path. Pre-existing tail items (save_finding returned False) do NOT re-notify — operator already got the first-time alert. Tier ≥ 2 suppressed items stay digest-only (BC-022 semantics unchanged). `scan_integrity` audit event gains `n_tail_criticals_notified` counting these second-pass sends. `_ingest_candidates`'s response `findings` field counts both top-N + tail sends. Balance invariant unchanged — tail notifications are accounting-neutral because persistence (BC-128) already counts them. `poc/scripts/verify_integrity.py::build_report` transparently tolerates pre-BC-129 events that lack the new field (it is not referenced in the drop sum).
+- **supports:** CAP-T231, CAP-T207, CAP-T223, CAP-T224, CAP-B023
+- **verified by:**
+  - `poc/tests/unit/test_BC_129_notify_new_tail_criticals.py`
+
 ### CAP-T231: Persist every identified unique CVE; notification cap is separate
 - **type:** technical
 - **status:** active

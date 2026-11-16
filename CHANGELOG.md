@@ -4,6 +4,11 @@ All notable changes to beaconry are recorded here. The format is based
 on [Keep a Changelog](https://keepachangelog.com/), and this project
 follows [Semantic Versioning](https://semver.org/).
 
+## [v0.22.13] — 2026-11-16
+
+### ✨ Features
+- **hub:** BC-129 loud alert for every newly-persisted Tier ≤ 1 finding, even in the suppressed tail — closes the SLA-escape-hatch gap BC-128 exposed
+
 ## [v0.22.12] — 2026-11-16
 
 ## [v0.22.11] — 2026-11-16

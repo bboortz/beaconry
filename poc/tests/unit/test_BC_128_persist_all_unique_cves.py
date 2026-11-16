@@ -87,7 +87,12 @@ async def _async_none():
 
 
 def test_ingest_notifies_only_top_n(hub_env: Path, monkeypatch: pytest.MonkeyPatch) -> None:
-    """Top-100 by (tier, -cvss) → notify. Tail → digest only."""
+    """Top-N by (tier, -cvss) → notify. Tail → digest only (for tier ≥ 2).
+
+    Post-BC-129: Tier ≤ 1 items in the suppressed tail also loud-notify,
+    so this test uses Tier 2 findings exclusively to isolate the BC-128
+    top-N-only notification semantics for low-tier items.
+    """
     monkeypatch.setenv("BEACONRY_MAX_FINDINGS_PER_RUN", "10")
     notified_ids: list[str] = []
 
@@ -105,8 +110,8 @@ def test_ingest_notifies_only_top_n(hub_env: Path, monkeypatch: pytest.MonkeyPat
     monkeypatch.setattr(hub, "reconcile_scan", lambda *a, **kw: ([], [], []))
     monkeypatch.setattr(hub, "_dispatch_regression_notifications", lambda *a, **kw: _async_none())
 
-    # 25 unique, cap 10 → 10 notified, 15 suppressed.
-    candidates = [_make_finding(f"CVE-{i}", cvss=9.0 - i * 0.01) for i in range(25)]
+    # 25 unique Tier 2 Highs, cap 10 → 10 notified, 15 suppressed (digest only).
+    candidates = [_make_finding(f"CVE-{i}", cvss=8.0 - i * 0.01, tier=2) for i in range(25)]
     asyncio.run(hub._ingest_candidates("host-a", candidates, now_ts=0, sbom_count=5))
     assert len(notified_ids) == 10
 
