@@ -497,7 +497,13 @@ DB_PATH = DATA_DIR / "beaconry.db"
 # Default `manual` keeps the POC safe on arbitrary infrastructure — operator
 # does the work, hub logs intent and re-reminds. Opt in to `docker` for
 # auto-pull on homogeneous stacks.
-EXECUTOR_NAME = os.environ.get("BEACONRY_EXECUTOR", "manual").lower()
+# BC-125: `.get(..., default)` only falls back when the key is ABSENT —
+# an empty-string value (what compose's `${VAR:-}` fallback emits) is
+# treated as a real value. Pre-BC-125 the hub stored `EXECUTOR_NAME=""`,
+# which rendered as a blank `EXECUTOR=` in the BC-123 POLICIES line
+# even though ManualAdapter was running. `or "manual"` normalizes
+# empty strings + whitespace-only inputs.
+EXECUTOR_NAME = (os.environ.get("BEACONRY_EXECUTOR") or "").strip().lower() or "manual"
 _executor_registry: dict[str, ExecutorPlugin] = {
     "manual": ManualAdapter(),
     "docker": DockerAdapter(),

@@ -1801,6 +1801,15 @@ Enforcement: `poc/scripts/verify_traceability.py` runs as part of `make check`. 
 - **verified by:**
   - `poc/tests/integration/test_BC_093_rescan_hooks.py`
 
+### CAP-T228: EXECUTOR env default hygiene — empty string resolves to `manual`
+- **type:** technical
+- **status:** active
+- **origin:** BC-125 — operator saw `EXECUTOR=` empty in the BC-123 POLICIES line after v0.22.8 deployed. Manual executor WAS running (Python registry fallback) but `EXECUTOR_NAME == ""` rendered as a blank cell. Root-cause chain: `poc/docker-compose.yml` had `${BEACONRY_EXECUTOR:-}` (empty fallback), which pushed an empty-string env into the container; `poc/hub/hub.py` used `os.environ.get("BEACONRY_EXECUTOR", "manual")` whose Python default only fires when the key is absent, not when the value is empty.
+- **description:** Two-layer fix. `poc/docker-compose.yml` changed the hub service env to `${BEACONRY_EXECUTOR:-manual}` so every compose-based deploy gets the correct default without touching upstream config. `poc/hub/hub.py::500` changed to `(os.environ.get("BEACONRY_EXECUTOR") or "").strip().lower() or "manual"` so empty + whitespace-only envs fall back to manual at the Python layer too. The registry lookup still falls through to `ManualAdapter()` on invalid values (operator typo like `dokcer`), preserving `EXECUTOR_NAME == "dokcer"` on the POLICIES line so the operator sees their mistake — hub keeps running manually regardless.
+- **supports:** CAP-T185, CAP-T224, CAP-B023
+- **verified by:**
+  - `poc/tests/unit/test_BC_125_executor_env_default_hygiene.py`
+
 ### CAP-T227: Hub HTTP port env knob
 - **type:** technical
 - **status:** active

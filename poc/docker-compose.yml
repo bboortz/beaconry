@@ -26,7 +26,9 @@ services:
       - BEACONRY_FIX_ENABLED=${BEACONRY_FIX_ENABLED:-1}
       # BC-066: which executor handles [Fix now]. manual = log + remind;
       # docker = auto-pull. Default manual (safe on arbitrary infra).
-      - BEACONRY_EXECUTOR=${BEACONRY_EXECUTOR:-}
+      # BC-125: default `manual` (not empty) so the BC-123 POLICIES line
+      # in `beaconry status` shows the actual running executor, not a blank.
+      - BEACONRY_EXECUTOR=${BEACONRY_EXECUTOR:-manual}
       - BEACONRY_MANUAL_REMINDER_INTERVAL_S=${BEACONRY_MANUAL_REMINDER_INTERVAL_S:-}
       # BC-011: policy-driven probe resolver
       - BEACONRY_HEALTH_PROBES=${BEACONRY_HEALTH_PROBES:-}
