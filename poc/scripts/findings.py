@@ -143,6 +143,7 @@ def load_findings(
     status: str | None = None,
     host: str | None = None,
     cve: str | None = None,
+    severity: str | None = None,
 ) -> list[dict]:
     if not db_path.exists():
         return []
@@ -176,6 +177,14 @@ def load_findings(
             else:
                 conds.append("cve_id = ?")
                 params_list.append(cve)
+        severities = _normalize_severities(severity)
+        if severities:
+            # BC-127: exact IN-match on severity. Multi-select comma-
+            # separated input is normalized to grype's canonical title
+            # case in `_normalize_severities`.
+            placeholders = ",".join("?" for _ in severities)
+            conds.append(f"severity IN ({placeholders})")
+            params_list.extend(severities)
         if conds:
             sql += " WHERE " + " AND ".join(conds)
         params: tuple[str, ...] = tuple(params_list)
@@ -263,7 +272,26 @@ def parse_args(argv: list[str]) -> argparse.Namespace:
     # BC-123: filter by CVE id so "did GO-2026-6888 land?" is a single
     # command, not a pipe through grep. Matches primary id + alias.
     p.add_argument("--cve", default=None, help="filter by CVE id (BC-123)")
+    # BC-127: filter by severity so `grep Critical` on the findings
+    # table becomes a first-class flag. Comma-separated multi-select;
+    # case-insensitive input normalized to grype's canonical casing.
+    p.add_argument(
+        "--severity",
+        default=None,
+        help="filter by severity (Critical,High,Medium,Low; comma-separated; BC-127)",
+    )
     return p.parse_args(argv)
+
+
+def _normalize_severities(raw: str | None) -> list[str] | None:
+    """BC-127: parse `Critical,High` / `critical` / ` Critical , high `
+    into a list of grype's canonical title-cased severities. Returns
+    None when the input is empty (no filter)."""
+    if not raw:
+        return None
+    parts = [s.strip().title() for s in raw.split(",")]
+    cleaned = [p for p in parts if p]
+    return cleaned or None
 
 
 HUB_CONTAINER = os.environ.get("BEACONRY_HUB_CONTAINER", "beaconry-dev-hub")
@@ -289,16 +317,23 @@ def _running_compose_hub() -> bool:
     return result.returncode == 0 and result.stdout.strip() == "true"
 
 
-def _run_in_container(args: list[str], host: str | None = None, cve: str | None = None) -> int:
+def _run_in_container(
+    args: list[str],
+    host: str | None = None,
+    cve: str | None = None,
+    severity: str | None = None,
+) -> int:
     """Exec findings.py inside the running hub container; stream output to our stdout."""
     import subprocess
 
     # BC-057: HOST filter needs its own placeholder in the inline script.
     # BC-123: CVE filter placeholder.
+    # BC-127: SEVERITY filter placeholder.
     script = (
         _INLINE_FINDINGS_SCRIPT.replace("##STATUS_FILTER##", repr(args[-1] if args else None))
         .replace("##HOST_FILTER##", repr(host))
         .replace("##CVE_FILTER##", repr(cve))
+        .replace("##SEVERITY_FILTER##", repr(severity))
     )
     cmd = [
         "docker",
@@ -326,6 +361,7 @@ if not os.path.exists(db):
 status = ##STATUS_FILTER##
 host_filter = ##HOST_FILTER##
 cve_filter = ##CVE_FILTER##
+severity_filter = ##SEVERITY_FILTER##
 con = sqlite3.connect(f'file:{db}?mode=ro', uri=True)
 cols = {r[1] for r in con.execute('PRAGMA table_info(findings)')}
 tier_sort = ', tier' if 'tier' in cols else ''
@@ -340,6 +376,11 @@ if cve_filter:
         conds.append('(cve_id=? OR cve_alias=?)'); params.append(cve_filter); params.append(cve_filter)
     else:
         conds.append('cve_id=?'); params.append(cve_filter)
+if severity_filter:
+    sevs = [s.strip().title() for s in severity_filter.split(',') if s.strip()]
+    if sevs:
+        placeholders = ','.join('?' for _ in sevs)
+        conds.append(f'severity IN ({placeholders})'); params.extend(sevs)
 if conds: sql += ' WHERE ' + ' AND '.join(conds)
 rows = con.execute(sql, tuple(params)).fetchall()
 if not rows:
@@ -368,7 +409,11 @@ for r in rows:
 
 
 def _findings_via_http(  # type: ignore[no-untyped-def]
-    cfg, status: str | None, host: str | None = None, cve: str | None = None
+    cfg,
+    status: str | None,
+    host: str | None = None,
+    cve: str | None = None,
+    severity: str | None = None,
 ) -> int:
     """BC-055 HTTP path for remote hubs. Returns the CLI exit code."""
     import urllib.parse
@@ -383,6 +428,8 @@ def _findings_via_http(  # type: ignore[no-untyped-def]
         qs["host"] = host
     if cve:
         qs["cve_id"] = cve  # BC-123
+    if severity:
+        qs["severity"] = severity  # BC-127
     if qs:
         url += "?" + urllib.parse.urlencode(qs)
     try:
@@ -417,14 +464,21 @@ def main(argv: list[str] | None = None) -> int:
     )
 
     if source == "http":
-        return _findings_via_http(cfg, args.status, args.host, args.cve)
+        return _findings_via_http(cfg, args.status, args.host, args.cve, args.severity)
 
     if source == "local-compose":
-        return _run_in_container([args.status] if args.status else [], host=args.host, cve=args.cve)
+        return _run_in_container(
+            [args.status] if args.status else [],
+            host=args.host,
+            cve=args.cve,
+            severity=args.severity,
+        )
 
     data_dir = Path(os.environ.get("DATA_DIR", ".beaconry-cache"))
     db_path = data_dir / "beaconry.db"
-    rows = load_findings(db_path, status=args.status, host=args.host, cve=args.cve)
+    rows = load_findings(
+        db_path, status=args.status, host=args.host, cve=args.cve, severity=args.severity
+    )
     if not rows:
         filter_desc = []
         if args.status:
@@ -433,6 +487,8 @@ def main(argv: list[str] | None = None) -> int:
             filter_desc.append(f"host={args.host!r}")
         if args.cve:
             filter_desc.append(f"cve={args.cve!r}")
+        if args.severity:
+            filter_desc.append(f"severity={args.severity!r}")
         if filter_desc:
             print(f"No findings with {' + '.join(filter_desc)} in {db_path}.")
         else:

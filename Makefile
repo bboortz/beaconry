@@ -258,7 +258,7 @@ check-full: check
 	@echo "✓ Full tier (make check-full) passed"
 
 findings:
-	@$(PYTHON) -m poc.scripts.findings $(if $(STATUS),--status $(STATUS)) $(if $(HOST),--host $(HOST)) $(if $(CVE),--cve $(CVE))
+	@$(PYTHON) -m poc.scripts.findings $(if $(STATUS),--status $(STATUS)) $(if $(HOST),--host $(HOST)) $(if $(CVE),--cve $(CVE)) $(if $(SEVERITY),--severity $(SEVERITY))
 
 # BC-042: operator view of audit.log with filters + compose-aware routing.
 # All filters propagate via env (LAST, SINCE, UNTIL, EVENT, CVE, HOST, FINDING,
