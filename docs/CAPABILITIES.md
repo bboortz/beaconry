@@ -1801,6 +1801,15 @@ Enforcement: `poc/scripts/verify_traceability.py` runs as part of `make check`. 
 - **verified by:**
   - `poc/tests/integration/test_BC_093_rescan_hooks.py`
 
+### CAP-T233: Shutdown-race-free integrity persistence + forensic audit enrichment
+- **type:** technical
+- **status:** active
+- **origin:** BC-130 — `pipeline_integrity_mismatches` counter ticked 0 → 6 across six hub deploys on 2026-11-16. Every event correlated with a hub restart; zero correlated with real transport loss. Root cause: `_ingest_candidates` updated `_last_scan_integrity_per_host[host]` BEFORE calling `_persist_integrity_state` (hub.py:5458-5462 pre-BC-130). `docker stop` during deploy left in-memory ahead of disk; next boot reloaded the previous iteration hash, scout's next heartbeat reported divergence, and the operator had no way to tell this deploy-race from a real silent-transport-loss event.
+- **description:** (1) **Reorder** — `_persist_integrity_state` runs FIRST; capture the bool it now returns. In-memory cache + `_cache_source_per_host[host]="live_scan"` only mutate after SQLite's durable commit. No window where in-memory is ahead of disk. (2) **Boot visibility** — new `hub_startup` audit event fired from the FastAPI lifespan after `load_integrity_persistence`, carrying `software_version`, `api_version`, `cache_reload_ok`, `hosts_in_cache`, `mismatch_counter_at_boot`. (3) **Mismatch enrichment** — `_record_heartbeat_mismatch` grows four correlation fields: `hub_uptime_s`, `last_hub_startup_ts`, `hub_cache_last_updated_ts`, `cache_source ∈ {"sqlite_reload","live_scan","no_record"}`. Deploy-race signature: `sqlite_reload + small uptime`. Actionable transport-loss signature: `live_scan + large uptime`. (4) **Symmetric transfer-hash event** — `receive_scan` now emits a dedicated `transfer_hash_mismatch` audit event with the same four fields, so `audit?event=transfer_hash_mismatch` queries work (pre-BC-130 only `scan_integrity.transfer_match=false` surfaced it). (5) **scan_integrity.cache_persisted_ok** — False when `_persist_integrity_state` hit OperationalError (disk full, locked file); operators grep for `cache_persisted_ok: false` to catch silent write failures.
+- **supports:** CAP-T223, CAP-T229, CAP-T232, CAP-B023
+- **verified by:**
+  - `poc/tests/unit/test_BC_130_diagnose_heartbeat_mismatch_race.py`
+
 ### CAP-T232: Loud alert for newly-persisted Tier ≤ 1 findings regardless of rank
 - **type:** technical
 - **status:** active

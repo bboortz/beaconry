@@ -4,6 +4,16 @@ All notable changes to beaconry are recorded here. The format is based
 on [Keep a Changelog](https://keepachangelog.com/), and this project
 follows [Semantic Versioning](https://semver.org/).
 
+## [v0.22.14] — 2026-11-16
+
+### 🐛 Fixes
+- **hub:** BC-130 close the hub-shutdown race that produced ~1 spurious `heartbeat_integrity_mismatch` per deploy — `_persist_integrity_state` now runs before the in-memory cache mutation; SQLite durability gates every advance
+
+### ✨ Features
+- **hub:** BC-130 `hub_startup` audit event marks every restart boundary in the audit stream
+- **hub:** BC-130 `heartbeat_integrity_mismatch` + `transfer_hash_mismatch` events carry `hub_uptime_s`, `last_hub_startup_ts`, `hub_cache_last_updated_ts`, `cache_source` — deploy-race events self-diagnose as `sqlite_reload + small uptime`; actionable transport-loss events show `live_scan + large uptime`
+- **hub:** BC-130 `scan_integrity.cache_persisted_ok: bool` — failed SQLite writes are now visible instead of silently swallowed
+
 ## [v0.22.13] — 2026-11-16
 
 ### ✨ Features
