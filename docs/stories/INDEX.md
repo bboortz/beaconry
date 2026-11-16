@@ -117,3 +117,4 @@ Lifecycle: `draft → ready → in-progress → shipped`. Status matches each st
 | BC-122 | Pipeline integrity hashes + runtime verifier                            | shipped     | — (merged to dev)                   |
 | BC-123 | Operator trust bundle — audit every silent drop + policies + CVE filter | shipped     | — (merged to dev)                   |
 | BC-124 | Heartbeat retry queue + HUB_HTTP_PORT + BC-117/119 integration tests     | shipped     | — (merged to dev)                   |
+| BC-125 | EXECUTOR env default hygiene — empty string resolves to `manual`        | shipped     | — (merged to dev)                   |
