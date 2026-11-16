@@ -3464,13 +3464,17 @@ async def http_findings(
     status: str | None = None,
     host: str | None = None,
     cve_id: str | None = None,
+    severity: str | None = None,
     limit: int = 500,
 ) -> list[dict]:
     """BC-055: read-only JSON view of findings matching `make findings`.
 
     BC-123: `cve_id` filter matches `cve_id` column OR BC-043 `cve_alias`
     so operators can grep a GO-* / GHSA-* primary and still find its CVE
-    twin in one shot."""
+    twin in one shot.
+
+    BC-127: `severity` filter — comma-separated title-cased severities
+    (`Critical,High`) → SQL `WHERE severity IN (?, …)`."""
     if not DB_PATH.exists():
         return []
     con = sqlite3.connect(f"file:{DB_PATH}?mode=ro", uri=True)
@@ -3498,6 +3502,15 @@ async def http_findings(
             else:
                 conds.append("cve_id = ?")
                 params.append(cve_id)
+        if severity:
+            # BC-127: comma-separated severity filter. Normalize to
+            # grype's canonical title case so `critical` / `CRITICAL`
+            # match the stored `Critical`.
+            sevs = [s.strip().title() for s in severity.split(",") if s.strip()]
+            if sevs:
+                placeholders = ",".join("?" for _ in sevs)
+                conds.append(f"severity IN ({placeholders})")
+                params.extend(sevs)
         if conds:
             sql += " WHERE " + " AND ".join(conds)
         sql += " LIMIT ?"

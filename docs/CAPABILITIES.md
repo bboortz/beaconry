@@ -1801,6 +1801,15 @@ Enforcement: `poc/scripts/verify_traceability.py` runs as part of `make check`. 
 - **verified by:**
   - `poc/tests/integration/test_BC_093_rescan_hooks.py`
 
+### CAP-T230: `beaconry findings --severity` filter
+- **type:** technical
+- **status:** active
+- **origin:** BC-127 — operator was piping `beaconry findings --status open --host hetzner-staging | grep -i Critical` to focus triage on critical rows. Fragile (substring match on row text, loses header, terminal-width dependent). BC-123 added `--cve`; `--severity` is the natural sibling.
+- **description:** New `--severity` argparse flag on `poc/scripts/findings.py` + `severity` query param on `GET /findings`, both accepting comma-separated case-insensitive values. Input is normalized via `_normalize_severities` to grype's canonical title case (`critical` → `Critical`), producing a SQL `WHERE severity IN (?, …)` clause. All three CLI paths carry the filter: local DB (`load_findings(severity=…)`), HTTP (`_findings_via_http` adds `severity` to query string → endpoint), local-compose (`_run_in_container` + inline script's `##SEVERITY_FILTER##` placeholder). Makefile exposes `make findings SEVERITY=Critical,High`. Unknown severities (operator typo) return an empty result with the standard "no findings with severity=…" message — no validation layer, no error.
+- **supports:** CAP-T207, CAP-T076, CAP-B023
+- **verified by:**
+  - `poc/tests/unit/test_BC_127_findings_severity_filter.py`
+
 ### CAP-T229: /audit/integrity endpoint + verify-integrity remote routing
 - **type:** technical
 - **status:** active
