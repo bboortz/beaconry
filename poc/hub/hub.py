@@ -18,6 +18,7 @@ import re
 import sqlite3
 import tempfile
 import time
+from collections.abc import Callable
 from contextlib import asynccontextmanager
 from pathlib import Path
 
@@ -3597,6 +3598,10 @@ async def http_findings(
 
 
 def _read_audit_events() -> list[dict]:
+    """Legacy: reads the entire audit.log, parses every line, returns
+    newest-first. Kept for utility use (re-indexing scripts, analytical
+    tools). Production HTTP paths use `_tail_audit_events` instead
+    (BC-131)."""
     audit_path = DATA_DIR / "audit.log"
     if not audit_path.exists():
         return []
@@ -3611,6 +3616,112 @@ def _read_audit_events() -> list[dict]:
             continue
     events.reverse()
     return events
+
+
+def _tail_audit_events(
+    matcher: Callable[[dict], bool],
+    limit: int,
+    chunk_size: int = 65536,
+) -> list[dict]:
+    """BC-131: read audit.log backward from EOF in `chunk_size` chunks,
+    parse newest-first, early-exit after `limit` matches.
+
+    The first line of every chunk (before the first \\n) might be a
+    partial line truncated from a prior event. It becomes `leftover`
+    prepended to the next (earlier) chunk's bytes so chunk-boundary
+    events reassemble. At BOF the first line is complete too.
+
+    Latency is bounded by the result set size plus the chunk that
+    contains the oldest match, not by the full log size. For the
+    common case (recent events match recent query), ~1 chunk read.
+    """
+    audit_path = DATA_DIR / "audit.log"
+    if not audit_path.exists():
+        return []
+    cap = max(1, limit)
+    matches: list[dict] = []
+    leftover = b""
+
+    with audit_path.open("rb") as f:
+        f.seek(0, 2)
+        pos = f.tell()
+
+        while pos > 0 and len(matches) < cap:
+            read_size = min(chunk_size, pos)
+            pos -= read_size
+            f.seek(pos)
+            chunk = f.read(read_size) + leftover
+            at_bof = pos == 0
+
+            # Split by \n. Line 0 may be partial (becomes leftover for
+            # the next earlier chunk); lines[1:] are known complete.
+            # At BOF line 0 is also complete.
+            lines = chunk.split(b"\n")
+            if at_bof:
+                complete_lines = lines
+                leftover = b""
+            else:
+                leftover = lines[0]
+                complete_lines = lines[1:]
+
+            # Iterate newest within this chunk first (end-of-chunk is
+            # the newer side of the file).
+            for raw in reversed(complete_lines):
+                raw = raw.strip()
+                if not raw:
+                    continue
+                try:
+                    e = json.loads(raw)
+                except json.JSONDecodeError:
+                    continue
+                if matcher(e):
+                    matches.append(e)
+                    if len(matches) >= cap:
+                        break
+
+    return matches
+
+
+def _enrich_findings_batch(events: list[dict]) -> None:
+    """BC-131: one-shot batched replacement for the pre-BC-131
+    per-call `_load_finding_lookup()` full-table scan. Collects the set
+    of finding_id values from the matched events, issues ONE `SELECT
+    cve_id, host, cve_alias FROM findings WHERE id IN (?, …)`, and
+    applies `setdefault` on the matching events in-place.
+
+    Zero DB roundtrips when no event carries `finding_id` (e.g. a
+    page of hub_startup / scan_integrity / heartbeat_integrity_
+    mismatch / transfer_hash_mismatch events)."""
+    ids = {e["finding_id"] for e in events if e.get("finding_id")}
+    if not ids:
+        return
+    if not DB_PATH.exists():
+        return
+    lookup: dict[str, tuple[str, str, str | None]] = {}
+    try:
+        con = sqlite3.connect(f"file:{DB_PATH}?mode=ro", uri=True)
+        try:
+            cols = {row[1] for row in con.execute("PRAGMA table_info(findings)")}
+            has_alias = "cve_alias" in cols
+            select_cols = "id, cve_id, host, cve_alias" if has_alias else "id, cve_id, host"
+            placeholders = ",".join("?" * len(ids))
+            for r in con.execute(
+                f"SELECT {select_cols} FROM findings WHERE id IN ({placeholders})",
+                tuple(ids),
+            ):
+                lookup[r[0]] = (r[1], r[2], r[3] if has_alias else None)
+        finally:
+            con.close()
+    except sqlite3.Error:
+        return
+    for e in events:
+        fid = e.get("finding_id")
+        if fid and fid in lookup:
+            cve_id, h, alias = lookup[fid]
+            e.setdefault("cve_id", cve_id)
+            e.setdefault("host", h)
+            if alias is not None:
+                e.setdefault("cve_alias", alias)
 
 
 def _load_finding_lookup() -> dict[str, tuple[str, str, str | None]]:
@@ -3668,34 +3779,25 @@ async def http_audit_integrity(
     `host` narrows to a single scout. Response is a JSON list capped at
     10k rows to match /findings.
 
-    Lives under /audit/ namespace so future per-event-type endpoints
-    (/audit/notify_failed, /audit/finding_filtered) have a consistent
-    home.
+    BC-131: backed by `_tail_audit_events` for bounded-by-result-set
+    latency. No finding-enrichment needed (scan_integrity carries no
+    finding_id).
     """
-    events = _read_audit_events()
     cap = max(1, min(limit, 10000))
     since_ts = _parse_since_spec(since) if since else None
-    out: list[dict] = []
-    for e in events:
+
+    def matcher(e: dict) -> bool:
         if e.get("event") != "scan_integrity":
-            continue
+            return False
         if host and e.get("host") != host:
-            continue
+            return False
         if since_ts is not None:
             raw_ts = e.get("ts")
-            try:
-                import datetime as _dt
+            if isinstance(raw_ts, int) and raw_ts < since_ts:
+                return False
+        return True
 
-                event_ts = int(_dt.datetime.fromisoformat(str(raw_ts)).timestamp())
-                if event_ts < since_ts:
-                    continue
-            except (ValueError, TypeError):
-                # Unparseable ts → include defensively.
-                pass
-        out.append(e)
-        if len(out) >= cap:
-            break
-    return out
+    return _tail_audit_events(matcher, cap)
 
 
 def _parse_since_spec(spec: str) -> int | None:
@@ -3723,34 +3825,41 @@ async def http_audit(
     host: str | None = None,
     finding: str | None = None,
 ) -> list[dict]:
-    """BC-055: enriched audit tail (newest first)."""
-    events = _read_audit_events()
-    lookup = _load_finding_lookup()
+    """BC-055: enriched audit tail (newest first).
+
+    BC-131: backed by `_tail_audit_events` (bounded-by-result-set
+    latency) + `_enrich_findings_batch` (one SELECT instead of a
+    full-table scan). Previously this path did two O(N) scans per
+    request; now both are O(result-set) for the common case.
+    """
     event_types = {e.strip() for e in event.split(",")} if event else None
     cap = max(1, min(last, 10000))
-    out: list[dict] = []
-    for e in events:
-        fid = e.get("finding_id")
-        if fid and fid in lookup:
-            cve_id, h, alias = lookup[fid]
-            e.setdefault("cve_id", cve_id)
-            e.setdefault("host", h)
-            if alias is not None:
-                e.setdefault("cve_alias", alias)
-        if not _audit_event_matches(
+
+    # When cve is set, we can't push the cve check into the matcher
+    # because some events only carry `finding_id` and get their cve_id
+    # populated by `_enrich_findings_batch` AFTER the tail read. We
+    # strip cve from the pre-enrichment matcher, over-fetch to absorb
+    # the post-enrichment filter loss, then filter + trim. 4× is cheap
+    # for recent-match queries (one chunk) and bounded for rare ones.
+    overfetch = cap * 4 if cve else cap
+
+    def matcher(e: dict) -> bool:
+        return _audit_event_matches(
             e,
             since=since,
             until=until,
             event_types=event_types,
-            cve=cve,
+            cve=None,  # cve handled post-enrichment so finding_id-only events survive
             host=host,
             finding=finding,
-        ):
-            continue
-        out.append(e)
-        if len(out) >= cap:
-            break
-    return out
+        )
+
+    matched = _tail_audit_events(matcher, overfetch)
+    _enrich_findings_batch(matched)
+
+    if cve:
+        matched = [e for e in matched if e.get("cve_id") == cve or e.get("cve_alias") == cve]
+    return matched[:cap]
 
 
 @api.get("/fleet", dependencies=[Depends(require_cli_token)])

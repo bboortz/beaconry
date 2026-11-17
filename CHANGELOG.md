@@ -4,6 +4,14 @@ All notable changes to beaconry are recorded here. The format is based
 on [Keep a Changelog](https://keepachangelog.com/), and this project
 follows [Semantic Versioning](https://semver.org/).
 
+## [v0.22.15] — 2026-11-17
+
+### ⚡ Performance
+- **hub:** BC-131 `/audit` + `/audit/integrity` latency dropped from ~7 s to <100 ms — new `_tail_audit_events` reads audit.log backward from EOF in 64 KB chunks with early-exit at `limit`; new `_enrich_findings_batch` replaces the per-request full findings-table scan with a single `WHERE id IN (...)` query (zero DB calls when no event carries `finding_id`)
+
+### 🐛 Fixes
+- **hub:** BC-131 `since` filter on `/audit/integrity` now compares `ts` as int instead of attempting ISO-parse (previous behavior silently ignored the filter)
+
 ## [v0.22.14] — 2026-11-16
 
 ### 🐛 Fixes
