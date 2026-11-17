@@ -195,6 +195,14 @@ See also:
 |---|---|---|---|---|---|
 | `BEACONRY_SKIP_CLI_SMOKE` | *(empty)* | bool (`0`/`1`) | `poc/scripts/cli_smoke.py` | Opt out of the live-stack CLI smoke harness. Needed on CI runners without a privileged Docker daemon, dev laptops without the stack booted, or when the BC-038 scenario stack owns the hub container (double-boot avoidance). Any non-empty value → the gate exits 0 with "skipped per env". | BC-044 |
 
+## Audit-index backpressure (BC-139 + BC-140)
+
+| Variable | Default | Type | Where read | Reason | Origin |
+|---|---|---|---|---|---|
+| `BEACONRY_AUDIT_INDEX_BATCH_SIZE` | `50` | int | `poc/hub/hub.py` | Max events per batched flush of the audit_index sidecar. Dev-only tuning knob; not an operator config. | BC-139 |
+| `BEACONRY_AUDIT_INDEX_FLUSH_INTERVAL_S` | `2.0` | float | `poc/hub/hub.py` | Interval (seconds) the background task sleeps between flush rounds. Dev-only tuning knob. | BC-139 |
+| `BEACONRY_AUDIT_INDEX_MAX_BUFFER` | `10000` | int | `poc/hub/hub.py` | Bounded in-memory deque size. Overflow drops oldest + bumps `audit_index_dropped_events` on `/healthz`. Dev-only tuning knob. | BC-140 |
+
 ## Perf gate (BC-132)
 
 | Variable | Default | Type | Where read | Reason | Origin |

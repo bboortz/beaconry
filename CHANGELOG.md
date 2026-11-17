@@ -4,6 +4,17 @@ All notable changes to beaconry are recorded here. The format is based
 on [Keep a Changelog](https://keepachangelog.com/), and this project
 follows [Semantic Versioning](https://semver.org/).
 
+## [v0.22.17] — 2026-11-17
+
+### 🐛 Fixes
+- **hub:** BC-139 audit-index write-amplitude fix — `finding_filtered` + `heartbeat_received` events (95 % of audit volume) skip the sqlite index; the remaining events buffer into a 2-second batched flush instead of one commit per event. WAL bounded via `wal_autocheckpoint=100` + `journal_size_limit=10 MB`. Fixes the live-load regression that took hetzner-staging offline for ~30 min at 04:04 UTC.
+- **hub:** BC-140 audit-index async decoupling — hot-path `_audit_index_append` never opens sqlite or waits on IO; a single lifespan-owned background task owns the sqlite connection. Bounded `collections.deque(maxlen=10000)` with overflow dropping oldest + cumulative `audit_index_dropped_events` counter.
+
+### ✨ Features
+- **hub:** BC-140 new `/healthz` fields: `audit_index_queue_depth` + `audit_index_dropped_events` surface the index-write backlog + loss. Both 0 under steady load.
+- **hub:** BC-140 new `audit_index_dropped` audit event, rate-limited to 1/min, preserves forensic trail on overflow without feeding the stressed index.
+- **gate:** BC-139 + BC-140 `BEACONRY_AUDIT_INDEX_BATCH_SIZE` (default 50), `BEACONRY_AUDIT_INDEX_FLUSH_INTERVAL_S` (default 2.0), `BEACONRY_AUDIT_INDEX_MAX_BUFFER` (default 10000) — dev-tunable knobs documented in VARIABLES.md.
+
 ## [v0.22.16] — 2026-11-17
 
 ### ✨ Features
