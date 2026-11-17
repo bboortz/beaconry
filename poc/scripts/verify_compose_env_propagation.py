@@ -42,6 +42,9 @@ _TEST_MODE_ALLOWLIST: frozenset[str] = frozenset(
         "BEACONRY_AUDIT_INDEX_BATCH_SIZE",
         "BEACONRY_AUDIT_INDEX_FLUSH_INTERVAL_S",
         "BEACONRY_AUDIT_INDEX_MAX_BUFFER",
+        # BC-143: tracemalloc toggle — operator opts in only for a
+        # leak investigation; not persistent config.
+        "BEACONRY_TRACEMALLOC",
     }
 )
 

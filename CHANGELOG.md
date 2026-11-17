@@ -4,6 +4,19 @@ All notable changes to beaconry are recorded here. The format is based
 on [Keep a Changelog](https://keepachangelog.com/), and this project
 follows [Semantic Versioning](https://semver.org/).
 
+## [v0.22.18] — 2026-11-17
+
+### 🛡️ Reliability
+- **ops:** BC-141 container + systemd memory + CPU caps — `poc/docker-compose.yml` (hub 1 GB/2 CPU, scout 768 MB/1 CPU), `docker-compose.scout-only.yml`, and ghcr overrides all carry `mem_limit`, `memswap_limit` (swap off), `cpus`. New `verify-compose-memory-limits` lint in `make check` catches drift. **Host-wide OOM-kill is no longer reachable from a beaconry memory leak** — the container dies, the host doesn't (the 2026-11-17 regression that took hetzner-staging offline three times).
+
+### ✨ Features
+- **hub:** BC-142 `/healthz checks` surfaces `rss_mb`, `rss_peak_mb`, `mem_limit_mb`. `beaconry status` DETAILS renders `rss <N>MB / <cap>MB cap`. Pure stdlib (no psutil).
+- **hub:** BC-143 `BEACONRY_TRACEMALLOC=1` toggles Python heap introspection at startup; new `/_tracemalloc/{top,snapshot,diff}` endpoints serve top-N allocators as JSON. Default off → zero overhead. Playbook at `docs/operations/memory-leak-hunt.md` covers the before/after snapshot workflow + maps file:lineno to the 4 known candidate leak classes.
+- **gate:** BC-144 `make perf` samples RSS during measurement + fails on growth > `BEACONRY_PERF_MEMORY_GROWTH_MB` (default 100) or monotonic growth over ≥3 consecutive samples. Reports a Memory-check block alongside the latency table.
+
+### 📝 Operations
+- **docs:** `docs/operations/memory-leak-hunt.md` — step-by-step memory-leak investigation playbook.
+
 ## [v0.22.17] — 2026-11-17
 
 ### 🐛 Fixes

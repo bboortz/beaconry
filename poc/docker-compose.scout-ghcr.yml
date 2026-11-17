@@ -25,3 +25,8 @@
 services:
   scout:
     image: ghcr.io/bboortz/beaconry-scout:${BEACONRY_IMAGE_TAG:-latest}
+    # BC-141: hard caps on prod ghcr scout stack. Matches docker-compose.scout-only.yml.
+    mem_limit: 768m
+    mem_reservation: 384m
+    memswap_limit: 768m
+    cpus: "1"

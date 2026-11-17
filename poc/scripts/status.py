@@ -256,6 +256,13 @@ def _hub_details(body: dict) -> str:
     mismatches = int(checks.get("pipeline_integrity_mismatches") or 0)
     if mismatches > 0:
         extras.append(f"⚠ integrity: {mismatches} mismatches")
+    # BC-142: show process memory + container cap. "rss: 180MB / 1024MB cap".
+    # Only render if the rss_mb field is present (absent on non-Linux dev).
+    rss = checks.get("rss_mb")
+    if rss is not None:
+        cap = checks.get("mem_limit_mb")
+        cap_str = f"{cap}MB cap" if cap is not None else "no cap"
+        extras.append(f"rss {rss}MB / {cap_str}")
     if status == "ok":
         base = f"grype_db ok · telegram {telegram}"
         return " · ".join([base, *extras]) if extras else base

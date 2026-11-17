@@ -126,4 +126,8 @@ Lifecycle: `draft → ready → in-progress → shipped`. Status matches each st
 | BC-131 | Audit-read performance — tail-chunked audit.log + batched finding enrichment | shipped     | — (merged to dev)                   |
 | BC-132 | HTTP latency budget gate + sidecar SQLite audit index                       | shipped     | — (merged to dev)                   |
 | BC-139 | Audit-index write-amplitude fix — skip + batch + WAL bounds                | in-progress | feat/BC-139-BC-140-audit-index-live-load-fix |
-| BC-140 | Audit-index async decoupling — bounded queue + overflow metrics + drain      | in-progress | feat/BC-139-BC-140-audit-index-live-load-fix |
+| BC-140 | Audit-index async decoupling — bounded queue + overflow metrics + drain      | shipped     | — (merged to dev)                   |
+| BC-141 | Container + systemd memory/CPU caps — contain OOM to the container          | in-progress | feat/BC-141-BC-144-memory-safety |
+| BC-142 | Memory metrics on /healthz + beaconry status                                 | in-progress | feat/BC-141-BC-144-memory-safety |
+| BC-143 | tracemalloc toggle + memory-leak playbook                                    | in-progress | feat/BC-141-BC-144-memory-safety |
+| BC-144 | Perf gate asserts bounded memory growth                                      | in-progress | feat/BC-141-BC-144-memory-safety |

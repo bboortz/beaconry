@@ -3119,6 +3119,15 @@ async def lifespan(  # noqa: PLR0915 - orchestration function; each background t
     # BC-055: warn operators who exposed the hub to the LAN without a token.
     _warn_if_exposed_without_auth()
 
+    # BC-143: optional python heap introspection. Default off (zero
+    # overhead); operator enables during a leak hunt via
+    # BEACONRY_TRACEMALLOC=1 and the /_tracemalloc/* endpoints.
+    if os.environ.get("BEACONRY_TRACEMALLOC") == "1":
+        import tracemalloc
+
+        tracemalloc.start(25)  # 25-frame traceback limit
+        log.info("BC-143: tracemalloc enabled (25-frame limit) — ~10-20%% CPU overhead")
+
     init_db()
 
     # BC-123: hydrate BC-122's integrity state (counter + per-host cache)
@@ -3853,6 +3862,54 @@ def _audit_index_metrics() -> dict:
         "audit_index_queue_depth": len(_audit_index_buffer),
         "audit_index_dropped_events": _audit_index_dropped_events,
     }
+
+
+def _memory_metrics() -> dict:
+    """BC-142: current + peak process RSS + container memory cap.
+
+    Stdlib only (no psutil dep). Reads `/proc/self/status` for VmRSS +
+    VmPeak; `/sys/fs/cgroup/memory.max` (cgroup v2) with a v1 fallback
+    for `memory.limit_in_bytes`. Fail-open — any read error → fields
+    absent (operator sees "no memory signal", not an error).
+
+    Returns up to three keys:
+        rss_mb         current process RSS, rounded to MB
+        rss_peak_mb    max RSS observed since process start
+        mem_limit_mb   container cgroup limit (null when uncapped / N/A)
+    """
+    out: dict = {}
+    try:
+        with open("/proc/self/status") as f:
+            for line in f:
+                if line.startswith("VmRSS:"):
+                    out["rss_mb"] = int(line.split()[1]) // 1024
+                elif line.startswith("VmPeak:") or line.startswith("VmHWM:"):
+                    # VmHWM = high-water-mark RSS (preferred).
+                    # VmPeak = peak virtual (upper bound; fallback).
+                    key = "rss_peak_mb"
+                    if key not in out or line.startswith("VmHWM:"):
+                        out[key] = int(line.split()[1]) // 1024
+    except OSError:
+        return out  # No /proc (macOS dev, etc.) → empty dict.
+
+    # Container cgroup memory limit.
+    for path in ("/sys/fs/cgroup/memory.max", "/sys/fs/cgroup/memory/memory.limit_in_bytes"):
+        try:
+            with open(path) as f:
+                raw = f.read().strip()
+            if raw == "max":
+                out["mem_limit_mb"] = None  # Explicitly unbounded.
+            else:
+                limit_bytes = int(raw)
+                # Kernel sentinel for "no limit" on v1 is 2**63-1 or similar huge.
+                if limit_bytes > 2**60:
+                    out["mem_limit_mb"] = None
+                else:
+                    out["mem_limit_mb"] = limit_bytes // (1024 * 1024)
+            break
+        except (OSError, ValueError):
+            continue
+    return out
 
 
 def _rebuild_audit_index_if_empty() -> None:
@@ -4653,6 +4710,15 @@ def _hub_healthz_summary() -> dict:
         # means the flusher is falling behind; operators see it in
         # `beaconry status` DETAILS before any user-visible impact.
         **_audit_index_metrics(),
+        # BC-143: is the heap-introspection tool armed? Operator-
+        # visible so they remember to turn it off after an
+        # investigation (it costs ~10-20%% CPU while on).
+        "tracemalloc_enabled": _tracemalloc_enabled(),
+        # BC-142: process memory. rss_mb climbing is an operator signal
+        # that a leak is in progress; rss_peak_mb since boot shows the
+        # worst case; mem_limit_mb is the BC-141 cgroup cap (null when
+        # uncapped, e.g. tests). Pure /proc + /sys reads; no psutil.
+        **_memory_metrics(),
         # BC-123: policy knobs echoed back so `beaconry status` can show
         # them in a POLICIES line. Operator sees running config without
         # `docker exec env` greps. These are config echoes, not health
@@ -4728,6 +4794,122 @@ async def health(response: _FastAPIResponse) -> dict:
         response.status_code = 503
         return {"status": "not_ready"}
     return {"status": "ready"}
+
+
+# BC-143 — on-demand Python heap introspection via tracemalloc.
+# Default off; operator enables during a leak hunt via
+# BEACONRY_TRACEMALLOC=1. The endpoint reports top-N allocators by
+# cumulative size. `_tracemalloc_snapshots` stores labeled snapshots
+# so /_tracemalloc/diff can compare before/after a load window.
+
+import tracemalloc as _tracemalloc_mod  # noqa: E402
+
+_tracemalloc_snapshots: dict[str, _tracemalloc_mod.Snapshot] = {}
+
+
+def _tracemalloc_enabled() -> bool:
+    try:
+        import tracemalloc
+
+        return tracemalloc.is_tracing()
+    except ImportError:
+        return False
+
+
+def _tracemalloc_top_payload(limit: int = 20) -> dict:
+    try:
+        import tracemalloc
+    except ImportError:
+        return {"enabled": False, "hint": "tracemalloc module unavailable"}
+    if not tracemalloc.is_tracing():
+        return {
+            "enabled": False,
+            "hint": "set BEACONRY_TRACEMALLOC=1 and restart the hub",
+        }
+    snap = tracemalloc.take_snapshot()
+    stats = snap.statistics("lineno")
+    total_bytes = sum(s.size for s in stats)
+    return {
+        "enabled": True,
+        "total_mb": round(total_bytes / 1024 / 1024, 1),
+        "top": [
+            {
+                "file": str(s.traceback[0].filename),
+                "lineno": s.traceback[0].lineno,
+                "size_mb": round(s.size / 1024 / 1024, 2),
+                "count": s.count,
+            }
+            for s in stats[:limit]
+        ],
+    }
+
+
+@api.get("/_tracemalloc/top", dependencies=[Depends(require_cli_token)])
+async def http_tracemalloc_top(limit: int = 20) -> dict:
+    """BC-143: top-N current allocators by cumulative size.
+
+    Default off (returns `enabled: false` hint). When
+    BEACONRY_TRACEMALLOC=1 at boot, returns top allocators per
+    file:lineno — operator cross-references with the live BC list in
+    `docs/operations/memory-leak-hunt.md`.
+    """
+    return _tracemalloc_top_payload(limit=max(1, min(limit, 200)))
+
+
+@api.post("/_tracemalloc/snapshot", dependencies=[Depends(require_cli_token)])
+async def http_tracemalloc_snapshot(label: str = "t0") -> dict:
+    """BC-143: label the current allocation set. Used by the
+    before/after workflow: snapshot 't0', run load, then diff."""
+    try:
+        import tracemalloc
+    except ImportError:
+        return {"enabled": False, "hint": "tracemalloc module unavailable"}
+    if not tracemalloc.is_tracing():
+        return {
+            "enabled": False,
+            "hint": "set BEACONRY_TRACEMALLOC=1 and restart the hub",
+        }
+    _tracemalloc_snapshots[label] = tracemalloc.take_snapshot()
+    return {"enabled": True, "label": label, "stored": True}
+
+
+@api.get("/_tracemalloc/diff", dependencies=[Depends(require_cli_token)])
+async def http_tracemalloc_diff(label: str = "t0", limit: int = 20) -> dict:
+    """BC-143: top growers vs a labeled snapshot.
+
+    Paired with /_tracemalloc/snapshot: operator snapshots 't0',
+    waits for a load cycle, then calls diff → top growing allocators
+    highlighted.
+    """
+    try:
+        import tracemalloc
+    except ImportError:
+        return {"enabled": False, "hint": "tracemalloc module unavailable"}
+    if not tracemalloc.is_tracing():
+        return {
+            "enabled": False,
+            "hint": "set BEACONRY_TRACEMALLOC=1 and restart the hub",
+        }
+    prior = _tracemalloc_snapshots.get(label)
+    if prior is None:
+        return {"enabled": True, "label": label, "hint": "no snapshot with that label"}
+    now = tracemalloc.take_snapshot()
+    diffs = now.compare_to(prior, "lineno")
+    return {
+        "enabled": True,
+        "label": label,
+        "top_growers": [
+            {
+                "file": str(s.traceback[0].filename),
+                "lineno": s.traceback[0].lineno,
+                "size_diff_mb": round(s.size_diff / 1024 / 1024, 3),
+                "count_diff": s.count_diff,
+                "size_mb": round(s.size / 1024 / 1024, 3),
+                "count": s.count,
+            }
+            for s in diffs[:limit]
+        ],
+    }
 
 
 # BC-096 — baked-in SBOM. Served from image-root `/sbom.json`.
