@@ -21,3 +21,8 @@
 services:
   hub:
     image: ghcr.io/bboortz/beaconry-hub:${BEACONRY_IMAGE_TAG:-latest}
+    # BC-141: hard caps on prod ghcr hub stack. Matches docker-compose.yml.
+    mem_limit: 1g
+    mem_reservation: 512m
+    memswap_limit: 1g
+    cpus: "2"

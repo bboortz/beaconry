@@ -16,6 +16,16 @@ services:
     # `docker-compose.scout-only.yml` which keeps the unqualified name).
     container_name: beaconry-dev-hub
     restart: unless-stopped
+    # BC-141: hard memory + CPU caps so a leak can only kill the
+    # container, not the host. Baseline hub RSS is ~150 MB; cap is 6×
+    # that for grype subprocess + scan burst headroom. memswap_limit ==
+    # mem_limit disables swap (swap thrashing prolonged the 2026-11-17
+    # outages). cpus: "2" bounds how much CPU the hub can starve from
+    # scouts + system services under load.
+    mem_limit: 1g
+    mem_reservation: 512m
+    memswap_limit: 1g
+    cpus: "2"
     environment:
       - TELEGRAM_BOT_TOKEN=${TELEGRAM_BOT_TOKEN}
       - TELEGRAM_CHAT_ID=${TELEGRAM_CHAT_ID}
@@ -160,6 +170,13 @@ services:
     # BC-101: dev stack namespaced (see hub).
     container_name: beaconry-dev-scout
     restart: unless-stopped
+    # BC-141: syft peaks at ~400 MB per large image; 768 MB cap holds
+    # roughly 2× peak with headroom. memswap_limit == mem_limit disables
+    # swap. cpus: "1" bounds CPU during busy scans.
+    mem_limit: 768m
+    mem_reservation: 384m
+    memswap_limit: 768m
+    cpus: "1"
     environment:
       - HUB_URL=http://hub:8000
       - HOST_NAME=${HOST_NAME:-server2}

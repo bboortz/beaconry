@@ -244,6 +244,9 @@ ENV_EXAMPLE_DEV_ONLY_ALLOWLIST: dict[str, str] = {
     "BEACONRY_AUDIT_INDEX_BATCH_SIZE": "BC-139 audit-index batched-flush size; dev-tunable, not operator config",
     "BEACONRY_AUDIT_INDEX_FLUSH_INTERVAL_S": "BC-139 audit-index flush interval; dev-tunable",
     "BEACONRY_AUDIT_INDEX_MAX_BUFFER": "BC-140 audit-index bounded deque max size; dev-tunable",
+    "BEACONRY_TRACEMALLOC": "BC-143 enable Python tracemalloc for a leak investigation; dev-only",
+    "BEACONRY_PERF_MEMORY_GROWTH_MB": "BC-144 perf-gate memory growth bound; dev-tunable",
+    "BEACONRY_PERF_MONOTONIC_SAMPLES": "BC-144 perf-gate monotonic-growth N-sample threshold; dev-tunable",
     # BC-069: SOAK_WINDOW_S is operator-tunable per invocation (`SOAK_WINDOW_S=1800 make soak`),
     # not persistent config. Documented in VARIABLES.md but kept out of .env.example.
     "SOAK_WINDOW_S": "BC-069 per-invocation CLI knob for `make soak` window",

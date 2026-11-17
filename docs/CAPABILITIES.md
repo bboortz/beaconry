@@ -1801,6 +1801,42 @@ Enforcement: `poc/scripts/verify_traceability.py` runs as part of `make check`. 
 - **verified by:**
   - `poc/tests/integration/test_BC_093_rescan_hooks.py`
 
+### CAP-T240: Memory-growth assertion in `make perf` ship gate
+- **type:** technical
+- **status:** active
+- **origin:** BC-144 — BC-132's perf gate caught latency regressions but missed the 2026-11-17 memory leak because it only measured 10s-per-endpoint and didn't sample RSS between samples.
+- **description:** `poc/scripts/perf_gate.py` samples `rss_mb` from `/healthz` at T0 + after each endpoint measurement + at T1. New `MemoryCheck` dataclass computes `growth_mb` + `monotonic_growth` (≥N consecutive strictly-increasing samples, N tunable via `BEACONRY_PERF_MONOTONIC_SAMPLES` default 3). `Verdict.memory_breach` is True when growth > `BEACONRY_PERF_MEMORY_GROWTH_MB` (default 100) or monotonic-growth signature detected. Gate exits 1 on memory breach even if latency clean. `_render` adds a Memory-check block with T0/T1/Peak/Growth + bound comparison. Non-Linux gate runs (where `rss_mb` is absent from `/healthz`) skip the memory assertion cleanly (missing samples → no breach).
+- **supports:** CAP-O042, CAP-T238, CAP-T239, CAP-T235
+- **verified by:**
+  - `poc/tests/unit/test_BC_144_perf_memory.py`
+
+### CAP-T239: On-demand Python heap introspection via tracemalloc
+- **type:** technical
+- **status:** active
+- **origin:** BC-143 — during 2026-11-17 debug, three candidate leak classes could not be disambiguated without `tracemalloc`. Had to be turned on retroactively via a hub redeploy; no production-safe path to enable it.
+- **description:** `BEACONRY_TRACEMALLOC=1` env flag toggles `tracemalloc.start(25)` at hub lifespan startup (25-frame traceback limit). `_tracemalloc_enabled()` mirrors the state on `/healthz checks.tracemalloc_enabled`. Three new endpoints (CLI-token auth): `GET /_tracemalloc/top?limit=N` returns top allocators by cumulative size (file + lineno + size_mb + count); `POST /_tracemalloc/snapshot?label=X` stores a named snapshot; `GET /_tracemalloc/diff?label=X` returns top growers since the labeled snapshot. Default off → zero overhead. Playbook at `docs/operations/memory-leak-hunt.md` cross-references the 4 known candidate-leak classes (BC-104 notify queue, asyncio fire-and-forget, KEV urllib, PTB queue).
+- **supports:** CAP-O042, CAP-T238
+- **verified by:**
+  - `poc/tests/unit/test_BC_143_tracemalloc.py`
+
+### CAP-T238: Process memory metrics on /healthz + beaconry status DETAILS
+- **type:** technical
+- **status:** active
+- **origin:** BC-142 — the 4.3 GB hub OOM on 2026-11-17 had no beaconry-side signal. Memory grew invisibly until the kernel OOM-killer fired.
+- **description:** New `_memory_metrics()` reads `/proc/self/status` for VmRSS + VmHWM (peak high-water-mark); reads `/sys/fs/cgroup/memory.max` (cgroup v2) with `memory.limit_in_bytes` v1 fallback for the container cap. Returns `rss_mb`, `rss_peak_mb`, `mem_limit_mb` (null if uncapped or sentinel >2**60) — fields are absent on non-Linux / `/proc`-less hosts (fail-open contract). Merged into `/healthz checks` additively. `poc/scripts/status.py::_hub_details` renders `rss <N>MB / <cap>MB cap` when the fields are present. Stdlib only — no `psutil` dep.
+- **supports:** CAP-O042, CAP-T147
+- **verified by:**
+  - `poc/tests/unit/test_BC_142_memory_metrics.py`
+
+### CAP-O042: Container + systemd memory + CPU caps enforced at both layers
+- **type:** operational
+- **status:** active
+- **origin:** BC-141 — three hetzner-staging outages on 2026-11-17 (04:04, 05:30, 07:00 UTC) all hit the host-wide OOM-killer because python RSS reached 4.3 GB on a ~2 GB VPS. Host-wide OOM took down sshd + Tailscale alongside the hub for 15-30 minutes each.
+- **description:** `poc/docker-compose.yml` + `docker-compose.scout-only.yml` + ghcr overrides carry `mem_limit`, `memswap_limit` (= mem_limit; swap off), and `cpus` on every beaconry service. Hub: 1 GB / 2 CPU. Scout: 768 MB / 1 CPU. `telegram-mock` / `probe-target` are exempt (short-lived test services). New `poc/scripts/verify_compose_memory_limits.py` lint (hooked into `make check`) catches drift — a PR adding a new service without caps fails CI. Future fleet systemd units should layer `MemoryMax` + `MemorySwapMax=0` + `CPUQuota` for defense-in-depth (homelab-side follow-up). Host-wide OOM is no longer reachable from a beaconry memory leak.
+- **supports:** CAP-B023
+- **verified by:**
+  - `poc/tests/unit/test_BC_141_memory_limits.py`
+
 ### CAP-T237: Audit-index writes fully decoupled from the FastAPI event loop
 - **type:** technical
 - **status:** active

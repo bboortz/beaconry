@@ -37,6 +37,14 @@ from typing import Any
 BUDGET_P50_MS = float(os.environ.get("BEACONRY_PERF_BUDGET_P50_MS", "100"))
 BUDGET_P95_MS = float(os.environ.get("BEACONRY_PERF_BUDGET_P95_MS", "300"))
 BUDGET_P99_MS = float(os.environ.get("BEACONRY_PERF_BUDGET_P99_MS", "1000"))
+# BC-144: memory growth budget during the measurement window.
+# Default 100 MB — clean hub boots at ~150 MB and settles ~180 MB;
+# 100 MB growth is comfortably above noise and well below BC-141's
+# 1 GB cap.
+BUDGET_MEMORY_GROWTH_MB = float(os.environ.get("BEACONRY_PERF_MEMORY_GROWTH_MB", "100"))
+# Monotonic-growth detection: ≥N consecutive increasing samples
+# triggers a leak flag even if the absolute bound isn't breached yet.
+MONOTONIC_GROWTH_SAMPLES = int(os.environ.get("BEACONRY_PERF_MONOTONIC_SAMPLES", "3"))
 
 SAMPLES_PER_ENDPOINT = 10
 WARM_START = 1  # first call is "cold"; warm stats skip index 0
@@ -155,6 +163,17 @@ def load_exceptions() -> dict[str, PerfException]:
 # ── Measurement ──────────────────────────────────────────────────────
 
 
+def _sample_rss_via_healthz(client) -> int | None:
+    """BC-144: pull rss_mb from /healthz. Returns None if BC-142's
+    metric is absent (non-Linux dev or older hub)."""
+    try:
+        resp = client.get("/healthz")
+        data = resp.json()
+        return data.get("checks", {}).get("rss_mb")
+    except Exception:  # noqa: BLE001 — never crash the gate on sampling
+        return None
+
+
 def _measure(client, spec: EndpointSpec, n: int = SAMPLES_PER_ENDPOINT) -> Measurement:
     """Run n consecutive calls. Record each's time.perf_counter()
     elapsed. First is "cold"; the rest make up the warm set."""
@@ -239,11 +258,50 @@ class _RemoteClient:
 
 
 @dataclass
+class MemoryCheck:
+    """BC-144: memory-growth measurement over the perf gate window."""
+
+    t0_rss_mb: int | None
+    t1_rss_mb: int | None
+    samples_mb: list[int]  # all RSS samples in order (for monotonic check)
+
+    @property
+    def growth_mb(self) -> int:
+        if self.t0_rss_mb is None or self.t1_rss_mb is None:
+            return 0
+        return self.t1_rss_mb - self.t0_rss_mb
+
+    @property
+    def monotonic_growth(self) -> bool:
+        """True if there's a run of ≥ MONOTONIC_GROWTH_SAMPLES
+        strictly-increasing samples (slow-leak signature)."""
+        if len(self.samples_mb) < MONOTONIC_GROWTH_SAMPLES:
+            return False
+        run = 1
+        for i in range(1, len(self.samples_mb)):
+            if self.samples_mb[i] > self.samples_mb[i - 1]:
+                run += 1
+                if run >= MONOTONIC_GROWTH_SAMPLES:
+                    return True
+            else:
+                run = 1
+        return False
+
+    @property
+    def breached(self) -> bool:
+        """Gate-failing condition."""
+        if self.t0_rss_mb is None or self.t1_rss_mb is None:
+            return False  # no signal — can't fail
+        return self.growth_mb > BUDGET_MEMORY_GROWTH_MB or self.monotonic_growth
+
+
+@dataclass
 class Verdict:
     measurements: list[Measurement]
     exceptions: dict[str, PerfException]
     today: dt.date
     baseline: dict[str, float] | None = None
+    memory: MemoryCheck | None = None
 
     @property
     def breaches(self) -> list[tuple[Measurement, PerfException | None]]:
@@ -259,6 +317,11 @@ class Verdict:
                 continue
             out.append((m, exc))
         return out
+
+    @property
+    def memory_breach(self) -> bool:
+        """BC-144: True if the memory check failed."""
+        return self.memory is not None and self.memory.breached
 
     @property
     def warnings(self) -> list[Measurement]:
@@ -320,6 +383,27 @@ def _render(v: Verdict) -> str:
         for m in warnings:
             base_p50 = v.baseline[m.key]  # type: ignore[index]
             rows.append(f"  - {m.key}: {base_p50:.0f}ms → {m.p50:.0f}ms")
+
+    # BC-144: memory check block.
+    if v.memory is not None and v.memory.t0_rss_mb is not None:
+        rows.append("")
+        rows.append("=== Memory check ===")
+        peak = max(v.memory.samples_mb) if v.memory.samples_mb else v.memory.t0_rss_mb
+        rows.append(f"  T0:       {v.memory.t0_rss_mb} MB")
+        rows.append(f"  T1:       {v.memory.t1_rss_mb} MB")
+        rows.append(f"  Max peak: {peak} MB")
+        growth_mark = "✓" if not v.memory.breached else "✗ BREACH"
+        rows.append(
+            f"  Growth:   {v.memory.growth_mb:+d} MB (bound: {BUDGET_MEMORY_GROWTH_MB:.0f} MB) {growth_mark}",
+        )
+        if v.memory.monotonic_growth:
+            rows.append(
+                f"  ⚠ Monotonic growth across ≥ {MONOTONIC_GROWTH_SAMPLES} samples — slow-leak signature",
+            )
+    elif v.memory is not None:
+        rows.append("")
+        rows.append("=== Memory check ===  (skipped — hub did not surface rss_mb)")
+
     return "\n".join(rows)
 
 
@@ -353,13 +437,40 @@ def main(argv: list[str] | None = None) -> int:
     specs = load_fixtures()
     exceptions = load_exceptions()
     client = _make_client()
-    measurements = [_measure(client, spec) for spec in specs]
+
+    # BC-144: memory-growth check. Sample RSS at T0 (before measurement),
+    # again between each endpoint measurement (one sample per endpoint =
+    # ~N samples), and at T1 (after). Each sample is cheap (<5 ms via
+    # BC-142's /healthz metric).
+    samples_mb: list[int] = []
+    t0_rss = _sample_rss_via_healthz(client)
+    if t0_rss is not None:
+        samples_mb.append(t0_rss)
+
+    measurements: list[Measurement] = []
+    for spec in specs:
+        measurements.append(_measure(client, spec))
+        sample = _sample_rss_via_healthz(client)
+        if sample is not None:
+            samples_mb.append(sample)
+
+    t1_rss = _sample_rss_via_healthz(client)
+    if t1_rss is not None:
+        samples_mb.append(t1_rss)
+
+    memory = MemoryCheck(
+        t0_rss_mb=t0_rss,
+        t1_rss_mb=t1_rss,
+        samples_mb=samples_mb,
+    )
+
     baseline = _load_baseline(args.baseline)
     v = Verdict(
         measurements=measurements,
         exceptions=exceptions,
         today=dt.date.today(),
         baseline=baseline,
+        memory=memory,
     )
 
     print(_render(v))
@@ -389,7 +500,10 @@ def main(argv: list[str] | None = None) -> int:
         _save_baseline(args.baseline, v)
         print(f"\nBaseline updated at {args.baseline}")
 
-    return 1 if v.breaches else 0
+    exit_code = 0
+    if v.breaches or v.memory_breach:
+        exit_code = 1
+    return exit_code
 
 
 if __name__ == "__main__":

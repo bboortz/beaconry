@@ -203,6 +203,12 @@ See also:
 | `BEACONRY_AUDIT_INDEX_FLUSH_INTERVAL_S` | `2.0` | float | `poc/hub/hub.py` | Interval (seconds) the background task sleeps between flush rounds. Dev-only tuning knob. | BC-139 |
 | `BEACONRY_AUDIT_INDEX_MAX_BUFFER` | `10000` | int | `poc/hub/hub.py` | Bounded in-memory deque size. Overflow drops oldest + bumps `audit_index_dropped_events` on `/healthz`. Dev-only tuning knob. | BC-140 |
 
+## Leak-investigation toggle (BC-143)
+
+| Variable | Default | Type | Where read | Reason | Origin |
+|---|---|---|---|---|---|
+| `BEACONRY_TRACEMALLOC` | *(empty)* | bool (`0`/`1`) | `poc/hub/hub.py` | Enable Python's `tracemalloc` at hub startup for a leak investigation. ~10-20% CPU overhead when on; default off. Pairs with `/_tracemalloc/*` endpoints + `docs/operations/memory-leak-hunt.md`. | BC-143 |
+
 ## Perf gate (BC-132)
 
 | Variable | Default | Type | Where read | Reason | Origin |
@@ -214,5 +220,7 @@ See also:
 | `BEACONRY_PERF_HUB_URL` | *(empty — in-process)* | URL | `poc/scripts/perf_gate.py` | Point the perf gate at a live hub via HTTP (operator real-fleet measurement). Default is in-process FastAPI TestClient against a seeded fixture. | BC-132 |
 | `BEACONRY_PERF_FIXTURE_FINDINGS` | `1000` | int | `poc/scripts/perf_gate.py` | Findings row count the perf gate's fixture seeder generates. Raise to stress-test perf at larger fleet scale. | BC-132 |
 | `BEACONRY_PERF_FIXTURE_EVENTS` | `10000` | int | `poc/scripts/perf_gate.py` | Audit-event count the perf gate's fixture seeder generates. Raise (e.g. `1000000`) to stress-test the audit index at production log sizes. | BC-132 |
+| `BEACONRY_PERF_MEMORY_GROWTH_MB` | `100` | float (MB) | `poc/scripts/perf_gate.py` | BC-144 absolute memory-growth budget over the gate measurement window. Gate fails if RSS grows past this. | BC-144 |
+| `BEACONRY_PERF_MONOTONIC_SAMPLES` | `3` | int | `poc/scripts/perf_gate.py` | BC-144 number of consecutive strictly-increasing RSS samples that triggers the monotonic-growth (slow-leak) flag. | BC-144 |
 
 <!-- BC-039 END VARIABLES TABLE -->

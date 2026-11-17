@@ -1,4 +1,4 @@
-.PHONY: help lint format type test check check-full demo smoke clean cleanup install-hooks verify-traceability verify-dockerfile-health-copy verify-dockerfile-sources verify-pinned-versions verify-base-images verify-memory-drift verify-compose-env-propagation verify-docs-drift verify-evidence-pointers verify-per-file-coverage verify-variables verify-install-doc verify-version-sync verify-version-bumped verify-changelog verify-feature-complete bump-patch bump-minor bump-major bump-auto changelog findings status audit soak metrics verify-integrity test-e2e live-rebuild live-status scan set-status test-scenarios test-cli dogfood-scan dogfood-sbom test-cold-start perf perf-seed
+.PHONY: help lint format type test check check-full demo smoke clean cleanup install-hooks verify-traceability verify-dockerfile-health-copy verify-dockerfile-sources verify-pinned-versions verify-base-images verify-memory-drift verify-compose-env-propagation verify-compose-memory-limits verify-docs-drift verify-evidence-pointers verify-per-file-coverage verify-variables verify-install-doc verify-version-sync verify-version-bumped verify-changelog verify-feature-complete bump-patch bump-minor bump-major bump-auto changelog findings status audit soak metrics verify-integrity test-e2e live-rebuild live-status scan set-status test-scenarios test-cli dogfood-scan dogfood-sbom test-cold-start perf perf-seed
 
 PYTHON ?= python3
 PYTEST_ARGS ?=
@@ -26,6 +26,7 @@ help:
 	@echo "  make verify-dockerfile-sources  every service-local .py is COPY'd by its Dockerfile (BC-021)"
 	@echo "  make verify-memory-drift        memory/*.md matches shipped reality (BC-015)"
 	@echo "  make verify-compose-env-propagation     every BEACONRY_* env read by code is in docker-compose.yml (BC-011)"
+	@echo "  make verify-compose-memory-limits       every beaconry service in compose has hard mem + CPU caps (BC-141)"
 	@echo "  make verify-docs-drift          Makefile help + README match code enumerations (BC-016)"
 	@echo "  make verify-evidence-pointers   plan shipping-evidence pointers resolve to real tests (BC-019)"
 	@echo "  make verify-per-file-coverage   every file ≥ 65% coverage (or allowlisted with reason)"
@@ -131,6 +132,12 @@ verify-memory-drift:
 verify-compose-env-propagation:
 	$(PYTHON) -m poc.scripts.verify_compose_env_propagation
 
+# BC-141: every beaconry service in every compose file carries hard
+# memory + CPU caps with swap disabled — prevents a future leak from
+# taking down the host (as happened 2026-11-17).
+verify-compose-memory-limits:
+	$(PYTHON) -m poc.scripts.verify_compose_memory_limits
+
 verify-docs-drift:
 	$(PYTHON) -m poc.scripts.verify_docs_drift
 
@@ -229,7 +236,7 @@ metrics:
 verify-integrity:
 	$(PYTHON) -m poc.scripts.verify_integrity $(ARGS)
 
-check: lint type test verify-per-file-coverage verify-traceability verify-dockerfile-health-copy verify-dockerfile-sources verify-pinned-versions verify-base-images verify-memory-drift verify-compose-env-propagation verify-docs-drift verify-evidence-pointers verify-variables verify-install-doc verify-version-sync verify-changelog verify-feature-complete smoke
+check: lint type test verify-per-file-coverage verify-traceability verify-dockerfile-health-copy verify-dockerfile-sources verify-pinned-versions verify-base-images verify-memory-drift verify-compose-env-propagation verify-compose-memory-limits verify-docs-drift verify-evidence-pointers verify-variables verify-install-doc verify-version-sync verify-changelog verify-feature-complete smoke
 	@echo ""
 	@echo "✓ Fast tier (make check) passed"
 

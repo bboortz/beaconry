@@ -20,6 +20,13 @@ services:
     container_name: beaconry-scout
     restart: on-failure
     network_mode: host
+    # BC-141: cap container memory so a leak kills the container, not
+    # the host. syft peaks at ~400 MB per large image; 768 MB cap holds
+    # 2× peak with headroom. swap disabled.
+    mem_limit: 768m
+    mem_reservation: 384m
+    memswap_limit: 768m
+    cpus: "1"
     environment:
       - HUB_URL=${HUB_URL:-http://hub:8000}
       - HUB_TOKEN=${HUB_TOKEN:-}
