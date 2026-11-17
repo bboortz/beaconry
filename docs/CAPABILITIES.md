@@ -1801,6 +1801,15 @@ Enforcement: `poc/scripts/verify_traceability.py` runs as part of `make check`. 
 - **verified by:**
   - `poc/tests/integration/test_BC_093_rescan_hooks.py`
 
+### CAP-T235: HTTP latency budget as a first-class ship gate + sidecar SQLite audit index
+- **type:** technical
+- **status:** active
+- **origin:** BC-132 — three perf regressions in 10 days (BC-131's /audit at 7s, deploy-wave 6× finding growth, rare-event tail fallback) all surfaced only through downstream-caller timeouts, not through CI. No automated gate measured endpoint latency. Fixture-scale testing revealed BC-131's tail-chunked read falls back to full-log scan for rare-event queries at production scale (1M audit events → `/audit?event=hub_startup&last=10` = 2874ms, well over budget).
+- **description:** (1) New `make perf` target measures every FastAPI route with 10 consecutive calls on a deterministic representative fleet state (3 scouts, 1000 findings, 10000 audit events via `poc/scripts/perf_seeder.py` with `random.Random(42)` → byte-equivalent fixture). Reports cold/P50/P95/P99. Fails on breach of `P95 ≤ 300ms` or `P99 ≤ 1000ms`. Route auto-discovery via `api.routes` so new endpoints opt in automatically. (2) `poc/scripts/perf-exceptions.toml` lists endpoints allowed to exceed the budget with a human-readable `reason` + `fix_by` date; expired exceptions re-enable gate failure. (3) `perf-baseline.json` tracks main-branch P50 per endpoint; a 2× regression warns without blocking. (4) `make check-full` depends on `make perf` so pre-push catches regressions. (5) **Architectural fix**: new `audit_index` SQLite table (schema v13) mirrors every `_audit.append` event via a post-append hook registered in the lifespan; `/audit*` queries now use indexed SELECT instead of file-tail scan. `_rebuild_audit_index_if_empty()` bootstraps the index from an existing audit.log on first boot after upgrade. JSONL stays the durable append-only truth; SQLite is the query path. Result: `/audit?event=hub_startup&last=10` at 1M events drops from 2874ms → 2ms (1400× speedup), every endpoint under 10ms P95 at 1M-event scale.
+- **supports:** CAP-T229, CAP-T234, CAP-T207, CAP-T223
+- **verified by:**
+  - `poc/tests/unit/test_BC_132_perf_gate.py`
+
 ### CAP-T234: Tail-chunked audit.log read + batched finding enrichment
 - **type:** technical
 - **status:** active

@@ -1,0 +1,11 @@
+# BC-132 — Endpoints allowed to exceed the perf budget, with a reason.
+# Each entry MUST declare either `fix_by = "YYYY-MM-DD"` (expiration
+# date that re-enables the gate failure) or `permanent = true` (never
+# a gate failure for this endpoint; must document why).
+#
+# Keys match the endpoint keys in `perf-endpoint-fixtures.toml`.
+
+# No exceptions at ship time of BC-132 — the architectural fix
+# (sidecar audit index) lets every endpoint meet the 300 ms P95
+# budget. Entries will reappear here only when a future BC introduces
+# a knowingly-slow endpoint (e.g. a bulk export).

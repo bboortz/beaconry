@@ -217,7 +217,7 @@ def test_schema_version_is_12_on_boot(tmp_path: Path, monkeypatch: pytest.Monkey
     con = sqlite3.connect(str(db))
     try:
         (ver,) = con.execute("PRAGMA user_version").fetchone()
-        assert ver == 12
+        assert ver == 13
     finally:
         con.close()
 

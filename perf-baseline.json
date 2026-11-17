@@ -1,0 +1,19 @@
+{
+  "/audit#default": 1.979790991754271,
+  "/audit#finding-filtered": 1.943613009643741,
+  "/audit#hub-startup-rare": 1.7692200053716078,
+  "/audit#scan-integrity": 2.0679299923358485,
+  "/audit/integrity#default": 1.9844000053126365,
+  "/audit/integrity#high-limit": 5.563835002249107,
+  "/findings#critical-only": 2.6367169921286404,
+  "/findings#default": 2.589854004327208,
+  "/fleet": 2.9418549966067076,
+  "/health": 1.614310996956192,
+  "/healthz": 1.6940000059548765,
+  "/heartbeat": 1.8799169920384884,
+  "/livez": 1.3323619932634756,
+  "/readyz": 1.634704996831715,
+  "/sbom": 1.3475870073307306,
+  "/scan": 4.075308999745175,
+  "/startupz": 1.3689589977730066
+}

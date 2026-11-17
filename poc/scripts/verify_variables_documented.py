@@ -234,6 +234,13 @@ ENV_EXAMPLE_DEV_ONLY_ALLOWLIST: dict[str, str] = {
     "BEACONRY_SKIP_FEATURE_COMPLETE": "BC-074 feature-completeness lint bypass — dev-only emergency",
     "BEACONRY_SKIP_DOGFOOD": "BC-082 dogfood-grype gate bypass — dev-only emergency",
     "BEACONRY_SKIP_BASE_IMAGES": "BC-083 verify-base-images bypass — dev-only emergency (air-gapped CI)",
+    "BEACONRY_SKIP_PERF": "BC-132 make perf gate bypass — dev-only emergency",
+    "BEACONRY_PERF_BUDGET_P50_MS": "BC-132 perf-gate budget tuning; dev/CI knob, not operator config",
+    "BEACONRY_PERF_BUDGET_P95_MS": "BC-132 perf-gate budget tuning; dev/CI knob, not operator config",
+    "BEACONRY_PERF_BUDGET_P99_MS": "BC-132 perf-gate budget tuning; dev/CI knob, not operator config",
+    "BEACONRY_PERF_HUB_URL": "BC-132 operator real-fleet perf measurement override; not a hub-host env",
+    "BEACONRY_PERF_FIXTURE_FINDINGS": "BC-132 perf-gate fixture-scale knob; dev/CI only",
+    "BEACONRY_PERF_FIXTURE_EVENTS": "BC-132 perf-gate fixture-scale knob; dev/CI only",
     # BC-069: SOAK_WINDOW_S is operator-tunable per invocation (`SOAK_WINDOW_S=1800 make soak`),
     # not persistent config. Documented in VARIABLES.md but kept out of .env.example.
     "SOAK_WINDOW_S": "BC-069 per-invocation CLI knob for `make soak` window",

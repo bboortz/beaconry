@@ -102,7 +102,7 @@ def test_schema_v7_adds_role_column(db_env: Path) -> None:
     user_version = con.execute("PRAGMA user_version").fetchone()[0]
     con.close()
     assert "role" in cols
-    assert user_version == 12  # BC-123 bumped 11 → 12 (integrity_state + integrity_counters)
+    assert user_version == 13  # BC-132 bumped 12 → 13 (audit_index)
 
 
 # ── _normalize_role ─────────────────────────────────────────────────────────

@@ -123,4 +123,5 @@ Lifecycle: `draft → ready → in-progress → shipped`. Status matches each st
 | BC-128 | Persist every unique CVE; notification cap is separate                   | shipped     | — (merged to dev)                   |
 | BC-129 | Loud alert for newly-persisted Tier ≤ 1 findings even in suppressed tail | shipped     | — (merged to dev)                   |
 | BC-130 | Diagnose + fix hub-shutdown-race source of heartbeat_integrity_mismatch | shipped     | — (merged to dev)                   |
-| BC-131 | Audit-read performance — tail-chunked audit.log + batched finding enrichment | in-progress | feat/BC-131-audit-read-perf |
+| BC-131 | Audit-read performance — tail-chunked audit.log + batched finding enrichment | shipped     | — (merged to dev)                   |
+| BC-132 | HTTP latency budget gate + sidecar SQLite audit index                       | in-progress | feat/BC-132-http-latency-budget-gate |

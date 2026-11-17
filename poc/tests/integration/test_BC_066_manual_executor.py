@@ -161,7 +161,8 @@ def test_expected_schema_version_is_7(hub_env) -> None:
     # BC-089 bumped 5 → 6 (snooze_until_ts).
     # BC-092 bumped 6 → 7 (scouts.role).
     # BC-102 bumped 7 → 8 (scouts.last_offline_alert_ts).
-    assert hub_env["hub"].EXPECTED_SCHEMA_VERSION == 12  # BC-123
+    # BC-132 bumped 12 → 13 (audit_index).
+    assert hub_env["hub"].EXPECTED_SCHEMA_VERSION == 13  # BC-132
 
 
 def test_fresh_db_v4_has_last_claim_ts_column(hub_env) -> None:
@@ -211,7 +212,7 @@ def test_schema_v3_to_latest_migration(tmp_path: Path, monkeypatch: pytest.Monke
     (ver,) = con.execute("PRAGMA user_version").fetchone()
     (row,) = con.execute("SELECT last_claim_ts FROM findings WHERE id='legacy'").fetchall()
     con.close()
-    assert ver == 12  # BC-123 bumped 11 → 12 (integrity tables)
+    assert ver == 13  # BC-123 bumped 11 → 12 (integrity tables)
     assert "last_claim_ts" in cols
     # BC-086 columns appear too since migration runs through v5.
     assert "absent_count" in cols

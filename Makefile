@@ -1,4 +1,4 @@
-.PHONY: help lint format type test check check-full demo smoke clean cleanup install-hooks verify-traceability verify-dockerfile-health-copy verify-dockerfile-sources verify-pinned-versions verify-base-images verify-memory-drift verify-compose-env-propagation verify-docs-drift verify-evidence-pointers verify-per-file-coverage verify-variables verify-install-doc verify-version-sync verify-version-bumped verify-changelog verify-feature-complete bump-patch bump-minor bump-major bump-auto changelog findings status audit soak metrics verify-integrity test-e2e live-rebuild live-status scan set-status test-scenarios test-cli dogfood-scan dogfood-sbom test-cold-start
+.PHONY: help lint format type test check check-full demo smoke clean cleanup install-hooks verify-traceability verify-dockerfile-health-copy verify-dockerfile-sources verify-pinned-versions verify-base-images verify-memory-drift verify-compose-env-propagation verify-docs-drift verify-evidence-pointers verify-per-file-coverage verify-variables verify-install-doc verify-version-sync verify-version-bumped verify-changelog verify-feature-complete bump-patch bump-minor bump-major bump-auto changelog findings status audit soak metrics verify-integrity test-e2e live-rebuild live-status scan set-status test-scenarios test-cli dogfood-scan dogfood-sbom test-cold-start perf perf-seed
 
 PYTHON ?= python3
 PYTEST_ARGS ?=
@@ -49,6 +49,10 @@ help:
 	@echo "                                  ARGS=\"usability|features|all --since 7d --json\" to drill in"
 	@echo "  make verify-integrity           verify every scout→hub scan iteration is lossless (BC-122)"
 	@echo "                                  ARGS=\"--since 24h\" to narrow window"
+	@echo "  make perf                       HTTP latency budget gate — P95 ≤ 300ms per endpoint (BC-132)"
+	@echo "                                  BEACONRY_SKIP_PERF=1 to opt out; BEACONRY_PERF_FIXTURE_EVENTS=N to stress"
+	@echo "  make perf-seed                  seed a deterministic perf fixture (BC-132)"
+	@echo "                                  OUT=/path (default .beaconry-cache/perf); SEED=N"
 	@echo ""
 	@echo "Tiers:"
 	@echo "  make check         FAST TIER — all gates above (~7s)"
@@ -252,10 +256,28 @@ check-full: check
 	@echo "==> Full tier: dogfood-sbom scan (BC-096; BEACONRY_SKIP_DOGFOOD=1 to opt out)"
 	$(MAKE) dogfood-sbom
 	@echo ""
+	@echo "==> Full tier: HTTP latency budget gate (BC-132; BEACONRY_SKIP_PERF=1 to opt out)"
+	$(MAKE) perf
+	@echo ""
 	@echo "==> Full tier: cleanup (BC-080 — remove leaked test images)"
 	$(MAKE) cleanup
 	@echo ""
 	@echo "✓ Full tier (make check-full) passed"
+
+# BC-132: HTTP latency budget gate. Runs an in-process hub with a
+# deterministic perf fixture, measures every endpoint, fails on P95
+# breach. Opt-out: BEACONRY_SKIP_PERF=1 (dev-only emergency).
+perf:
+ifeq ($(BEACONRY_SKIP_PERF),1)
+	@echo "↷ perf: skipped per BEACONRY_SKIP_PERF"
+else
+	@$(PYTHON) -m poc.scripts.perf_gate
+endif
+
+# BC-132: seed a perf fixture into $(OUT) (default: .beaconry-cache/perf).
+# Operator can inspect the fixture state produced by the gate.
+perf-seed:
+	@$(PYTHON) -m poc.scripts.perf_seeder --out $(or $(OUT),.beaconry-cache/perf)
 
 findings:
 	@$(PYTHON) -m poc.scripts.findings $(if $(STATUS),--status $(STATUS)) $(if $(HOST),--host $(HOST)) $(if $(CVE),--cve $(CVE)) $(if $(SEVERITY),--severity $(SEVERITY))
