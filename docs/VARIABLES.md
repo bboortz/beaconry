@@ -195,4 +195,16 @@ See also:
 |---|---|---|---|---|---|
 | `BEACONRY_SKIP_CLI_SMOKE` | *(empty)* | bool (`0`/`1`) | `poc/scripts/cli_smoke.py` | Opt out of the live-stack CLI smoke harness. Needed on CI runners without a privileged Docker daemon, dev laptops without the stack booted, or when the BC-038 scenario stack owns the hub container (double-boot avoidance). Any non-empty value → the gate exits 0 with "skipped per env". | BC-044 |
 
+## Perf gate (BC-132)
+
+| Variable | Default | Type | Where read | Reason | Origin |
+|---|---|---|---|---|---|
+| `BEACONRY_SKIP_PERF` | *(empty)* | bool (`0`/`1`) | `poc/scripts/perf_gate.py` | Opt out of the `make perf` HTTP latency budget gate. Dev-only emergency escape; CI keeps it enabled. | BC-132 |
+| `BEACONRY_PERF_BUDGET_P50_MS` | `100` | float (ms) | `poc/scripts/perf_gate.py` | Override the P50 latency budget per endpoint. Raise if running on a slow/overloaded host; lower to tighten the floor. | BC-132 |
+| `BEACONRY_PERF_BUDGET_P95_MS` | `300` | float (ms) | `poc/scripts/perf_gate.py` | Override the P95 hard-ceiling budget per endpoint — the gate fails when this is breached. | BC-132 |
+| `BEACONRY_PERF_BUDGET_P99_MS` | `1000` | float (ms) | `poc/scripts/perf_gate.py` | Override the P99 fallback budget — allows cold-cache + rare-event tail-fallback cases to pass without failing the gate. | BC-132 |
+| `BEACONRY_PERF_HUB_URL` | *(empty — in-process)* | URL | `poc/scripts/perf_gate.py` | Point the perf gate at a live hub via HTTP (operator real-fleet measurement). Default is in-process FastAPI TestClient against a seeded fixture. | BC-132 |
+| `BEACONRY_PERF_FIXTURE_FINDINGS` | `1000` | int | `poc/scripts/perf_gate.py` | Findings row count the perf gate's fixture seeder generates. Raise to stress-test perf at larger fleet scale. | BC-132 |
+| `BEACONRY_PERF_FIXTURE_EVENTS` | `10000` | int | `poc/scripts/perf_gate.py` | Audit-event count the perf gate's fixture seeder generates. Raise (e.g. `1000000`) to stress-test the audit index at production log sizes. | BC-132 |
+
 <!-- BC-039 END VARIABLES TABLE -->

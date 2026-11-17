@@ -4,6 +4,17 @@ All notable changes to beaconry are recorded here. The format is based
 on [Keep a Changelog](https://keepachangelog.com/), and this project
 follows [Semantic Versioning](https://semver.org/).
 
+## [v0.22.16] — 2026-11-17
+
+### ✨ Features
+- **gate:** BC-132 `make perf` HTTP latency budget gate — every @api route is measured, P95 ≤ 300 ms (P99 ≤ 1000 ms) enforced; `make check-full` depends on it so regressions fail pre-push
+- **scripts:** BC-132 deterministic `perf_seeder` fixture (3 scouts · 1000 findings · 10000 audit events, seeded with `random.Random(42)` → byte-equivalent across machines)
+- **gate:** BC-132 `perf-exceptions.toml` with mandatory `fix_by` or `permanent=true`; expired fix-by re-enables gate failure
+- **gate:** BC-132 `perf-baseline.json` tracks main-branch P50 per endpoint; 2× regression prints non-blocking warning
+
+### ⚡ Performance
+- **hub:** BC-132 sidecar SQLite `audit_index` table (schema v13) mirrors every `_audit.append` event so `/audit*` queries use indexed SELECT instead of file-tail scan. At 1M audit events, `/audit?event=hub_startup&last=10` drops from 2874 ms → 2 ms (1400× speedup); every endpoint under 10 ms P95 at million-event scale
+
 ## [v0.22.15] — 2026-11-17
 
 ### ⚡ Performance

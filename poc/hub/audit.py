@@ -42,6 +42,27 @@ _last_error: str = ""
 _write_failures: int = 0
 _write_failures_since_degraded: int = 0
 
+# BC-132: post-append hook registry. Hub registers a callback at startup
+# that writes each event to the SQLite audit_index sidecar so queries
+# are indexed-fast regardless of log size. Keeping the index in a
+# separate module via a hook means audit.py stays pure JSONL (no DB
+# dependency); the hook is best-effort (exceptions logged + swallowed)
+# so an index-write failure never prevents the durable JSONL write.
+_post_append_hooks: list = []  # list[Callable[[dict], None]]
+
+
+def register_post_append_hook(hook) -> None:  # type: ignore[no-untyped-def]
+    """BC-132: register a callback invoked after every successful
+    `append()` with the full event dict. Hub uses this to mirror
+    writes into the SQLite audit_index sidecar."""
+    _post_append_hooks.append(hook)
+
+
+def clear_post_append_hooks() -> None:
+    """BC-132: test helper — drops any registered hooks. Production
+    calls this only at hub shutdown."""
+    _post_append_hooks.clear()
+
 
 def _audit_path() -> Path:
     return Path(os.environ.get("DATA_DIR", "/data")) / "audit.log"
@@ -105,6 +126,14 @@ def append(event_type: str, **details: Any) -> None:
     except OSError as exc:
         log.warning("audit write failed (%s): %s", exc, event)
         _mark_write_failed(exc)
+    # BC-132: notify post-append hooks (e.g. SQLite index writer).
+    # Best-effort — an index-write failure must not surface to the
+    # caller because the JSONL durable write already completed.
+    for hook in _post_append_hooks:
+        try:
+            hook(event)
+        except Exception as exc:  # noqa: BLE001 — never raise from audit
+            log.warning("audit post-append hook failed: %s", exc)
 
 
 def read_events(limit: int | None = None) -> list[dict]:

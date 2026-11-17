@@ -66,7 +66,7 @@ def test_schema_v9_adds_pending_notifications(db_env: Path) -> None:
     finally:
         con.close()
     assert "pending_notifications" in tables
-    assert version == 12  # BC-123 bumped 11 → 12 (integrity_state + integrity_counters)
+    assert version == 13  # BC-123 bumped 11 → 12 (integrity_state + integrity_counters)
 
 
 # ── Queueing ────────────────────────────────────────────────────────────────

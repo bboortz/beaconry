@@ -417,7 +417,7 @@ def test_schema_v11_adds_cross_repo_hint(db_env: Path) -> None:
     finally:
         con.close()
     assert "cross_repo_hint" in cols
-    assert version == 12  # BC-123 bumped 11 → 12
+    assert version == 13  # BC-123 bumped 11 → 12
 
 
 # ── _VALID_STATUSES extension ──────────────────────────────────────────────

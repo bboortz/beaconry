@@ -67,6 +67,13 @@ ALLOWLIST: dict[str, tuple[float, str]] = {
         "stack-detection are unit-tested; scenario bodies are exercised by "
         "`make test-cli` in check-full.",
     ),
+    "poc/scripts/perf_gate.py": (
+        40.0,
+        "BC-132 live-measurement gate — exercised end-to-end via `make perf` "
+        "(spins up an in-process hub + TestClient). Pure helpers (stats, "
+        "exception parser, verdict logic) are unit-tested; render + main + "
+        "HTTP-call paths run only against a real hub.",
+    ),
 }
 
 

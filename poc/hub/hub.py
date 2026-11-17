@@ -818,7 +818,7 @@ except ImportError:
 
 HUB_VERSION = SOFTWARE_VERSION  # back-compat alias
 API_VERSION = 1
-EXPECTED_SCHEMA_VERSION = 12  # BC-123: integrity_state + integrity_counters tables
+EXPECTED_SCHEMA_VERSION = 13  # BC-132: audit_index sidecar table + indexes
 STRICT_API = os.environ.get("BEACONRY_STRICT_API") == "1"
 
 
@@ -1170,6 +1170,26 @@ def init_db() -> None:
             value INTEGER NOT NULL
         )
     """)
+    # BC-132: sidecar audit index for indexed-fast /audit* queries.
+    # audit.log stays the durable append-only JSONL truth; this table
+    # mirrors every event with query-indexable columns so even rare-
+    # event queries at high scale resolve in <100ms. Rebuildable from
+    # audit.log if lost.
+    con.execute("""
+        CREATE TABLE IF NOT EXISTS audit_index (
+            id          INTEGER PRIMARY KEY AUTOINCREMENT,
+            ts          INTEGER NOT NULL,
+            event       TEXT NOT NULL,
+            host        TEXT,
+            finding_id  TEXT,
+            cve_id      TEXT,
+            body        TEXT NOT NULL
+        )
+    """)
+    con.execute("CREATE INDEX IF NOT EXISTS idx_audit_event_ts ON audit_index(event, ts DESC)")
+    con.execute("CREATE INDEX IF NOT EXISTS idx_audit_ts ON audit_index(ts DESC)")
+    con.execute("CREATE INDEX IF NOT EXISTS idx_audit_host_ts ON audit_index(host, ts DESC)")
+    con.execute("CREATE INDEX IF NOT EXISTS idx_audit_finding ON audit_index(finding_id)")
     # BC-062: stamp the DB with the schema version we just migrated to.
     con.execute(f"PRAGMA user_version = {EXPECTED_SCHEMA_VERSION}")
     con.commit()
@@ -3106,6 +3126,12 @@ async def lifespan(  # noqa: PLR0915 - orchestration function; each background t
     # as a side effect; we fold both into the hub_startup audit event so
     # every restart is a locatable boundary in the audit stream.
     reload_ok, hosts_in_cache = load_integrity_persistence()
+    # BC-132: register the sidecar audit_index writer BEFORE emitting the
+    # first audit event of this process so hub_startup is indexed. Then
+    # bootstrap the index from audit.log if the table is empty (pre-BC-132
+    # DBs or operator-rebuilt DB).
+    _audit.register_post_append_hook(_audit_index_append)
+    _rebuild_audit_index_if_empty()
     _audit.append(
         "hub_startup",
         software_version=SOFTWARE_VERSION,
@@ -3597,6 +3623,207 @@ async def http_findings(
     return rows
 
 
+# BC-132: module-level sqlite connection reused by the audit_index
+# post-append hook. Opening a new connection per audit event cost
+# ~1 ms × hundreds of events per scan; the cached connection + WAL
+# mode keeps the hot write path near-free so bulk /scan endpoints
+# aren't slowed by the index mirror.
+_audit_index_conn: sqlite3.Connection | None = None
+
+
+def _reset_audit_index_conn() -> None:
+    """BC-132: close + null the module-level audit_index connection.
+    Called on test teardown to avoid leaking handles across fixtures."""
+    global _audit_index_conn
+    if _audit_index_conn is not None:
+        with contextlib.suppress(sqlite3.OperationalError):
+            _audit_index_conn.close()
+        _audit_index_conn = None
+
+
+def _audit_index_append(event: dict) -> None:
+    """BC-132: mirror every audit.log event into the SQLite
+    audit_index sidecar so `/audit*` queries are indexed-fast. Fire-
+    and-forget: a DB error here is logged but never propagated (the
+    durable JSONL write already succeeded). Registered as a post-
+    append hook on `_audit` during lifespan startup."""
+    global _audit_index_conn
+    if not DB_PATH.exists():
+        return
+    try:
+        if _audit_index_conn is None:
+            _audit_index_conn = sqlite3.connect(DB_PATH, timeout=5)
+            _audit_index_conn.execute("PRAGMA journal_mode=WAL")
+            _audit_index_conn.execute("PRAGMA synchronous=NORMAL")
+        _audit_index_conn.execute(
+            "INSERT INTO audit_index (ts, event, host, finding_id, cve_id, body) "
+            "VALUES (?, ?, ?, ?, ?, ?)",
+            (
+                int(event.get("ts", 0)) if isinstance(event.get("ts"), int) else 0,
+                str(event.get("event", "")),
+                event.get("host"),
+                event.get("finding_id"),
+                event.get("cve_id"),
+                json.dumps(event, default=str),
+            ),
+        )
+        _audit_index_conn.commit()
+    except sqlite3.OperationalError as e:
+        log.warning("BC-132: audit_index write failed: %s", e)
+        _reset_audit_index_conn()
+
+
+def _rebuild_audit_index_if_empty() -> None:
+    """BC-132: bootstrap the audit_index from audit.log if the index
+    table is empty but the log has events. Runs at hub startup so a
+    pre-BC-132 DB upgrades cleanly."""
+    if not DB_PATH.exists():
+        return
+    audit_path = DATA_DIR / "audit.log"
+    if not audit_path.exists():
+        return
+    try:
+        con = sqlite3.connect(DB_PATH, timeout=10)
+    except sqlite3.OperationalError:
+        return
+    try:
+        row = con.execute("SELECT COUNT(*) FROM audit_index").fetchone()
+        if row and row[0] > 0:
+            return  # Index already populated.
+        log.info("BC-132: audit_index empty — rebuilding from audit.log")
+        batch: list[tuple] = []
+        n = 0
+        with audit_path.open() as f:
+            for line in f:
+                line = line.strip()
+                if not line:
+                    continue
+                try:
+                    e = json.loads(line)
+                except json.JSONDecodeError:
+                    continue
+                batch.append(
+                    (
+                        int(e.get("ts", 0)) if isinstance(e.get("ts"), int) else 0,
+                        str(e.get("event", "")),
+                        e.get("host"),
+                        e.get("finding_id"),
+                        e.get("cve_id"),
+                        json.dumps(e, default=str),
+                    ),
+                )
+                n += 1
+                if len(batch) >= 5000:
+                    con.executemany(
+                        "INSERT INTO audit_index "
+                        "(ts, event, host, finding_id, cve_id, body) "
+                        "VALUES (?, ?, ?, ?, ?, ?)",
+                        batch,
+                    )
+                    batch.clear()
+        if batch:
+            con.executemany(
+                "INSERT INTO audit_index "
+                "(ts, event, host, finding_id, cve_id, body) "
+                "VALUES (?, ?, ?, ?, ?, ?)",
+                batch,
+            )
+        con.commit()
+        log.info("BC-132: audit_index rebuilt — %d events indexed", n)
+    except sqlite3.OperationalError as e:
+        log.warning("BC-132: audit_index rebuild failed: %s", e)
+    finally:
+        con.close()
+
+
+def _build_audit_where(
+    event_types: set[str] | None,
+    host: str | None,
+    finding_id: str | None,
+    cve_id: str | None,
+    since_ts: int | None,
+) -> tuple[str, list]:
+    """BC-132: assemble the WHERE clause + params for an audit_index
+    query. Extracted so `_query_audit_index` stays under the
+    complexity gate."""
+    where: list[str] = []
+    params: list = []
+    if event_types:
+        where.append(f"event IN ({','.join('?' * len(event_types))})")
+        params.extend(event_types)
+    if host:
+        where.append("host = ?")
+        params.append(host)
+    if finding_id:
+        where.append("finding_id = ?")
+        params.append(finding_id)
+    if cve_id:
+        where.append("cve_id = ?")
+        params.append(cve_id)
+    if since_ts is not None:
+        where.append("ts >= ?")
+        params.append(since_ts)
+    clause = " WHERE " + " AND ".join(where) if where else ""
+    return clause, params
+
+
+def _query_audit_index(
+    matcher: Callable[[dict], bool],
+    limit: int,
+    *,
+    event_types: set[str] | None = None,
+    host: str | None = None,
+    finding_id: str | None = None,
+    cve_id: str | None = None,
+    since_ts: int | None = None,
+) -> list[dict] | None:
+    """BC-132: indexed-fast `/audit*` read path. Returns `limit`
+    matching events newest-first via SQL, or `None` if the index is
+    unavailable OR empty (caller falls back to file-tail).
+
+    Empty index triggers a file-tail fallback so pre-BC-132 DBs and
+    test fixtures that write audit.log directly (bypassing
+    `_audit.append`) still see results. The lifespan path calls
+    `_rebuild_audit_index_if_empty()` on boot to populate the index
+    from pre-existing audit.log entries so this fallback is a one-
+    shot condition, not a repeated cost.
+    """
+    if not DB_PATH.exists():
+        return None
+    try:
+        con = sqlite3.connect(f"file:{DB_PATH}?mode=ro", uri=True, timeout=5)
+    except sqlite3.OperationalError:
+        return None
+    try:
+        row = con.execute("SELECT COUNT(*) FROM audit_index LIMIT 1").fetchone()
+        if not row or row[0] == 0:
+            return None  # empty → caller falls back to file-tail
+        clause, params = _build_audit_where(
+            event_types,
+            host,
+            finding_id,
+            cve_id,
+            since_ts,
+        )
+        fetch_limit = max(limit * 2, limit + 10)
+        sql = f"SELECT body FROM audit_index{clause} ORDER BY ts DESC LIMIT ?"
+        matches: list[dict] = []
+        for (body,) in con.execute(sql, [*params, fetch_limit]):
+            try:
+                e = json.loads(body)
+            except json.JSONDecodeError:
+                continue
+            if matcher(e):
+                matches.append(e)
+                if len(matches) >= limit:
+                    break
+        return matches
+    except sqlite3.OperationalError:
+        return None
+    finally:
+        con.close()
+
+
 def _read_audit_events() -> list[dict]:
     """Legacy: reads the entire audit.log, parses every line, returns
     newest-first. Kept for utility use (re-indexing scripts, analytical
@@ -3797,6 +4024,17 @@ async def http_audit_integrity(
                 return False
         return True
 
+    # BC-132: try the indexed path first; fall back to file-tail if
+    # the index is unavailable (test mode / pre-index DB).
+    indexed = _query_audit_index(
+        matcher,
+        cap,
+        event_types={"scan_integrity"},
+        host=host,
+        since_ts=since_ts,
+    )
+    if indexed is not None:
+        return indexed
     return _tail_audit_events(matcher, cap)
 
 
@@ -3854,7 +4092,18 @@ async def http_audit(
             finding=finding,
         )
 
-    matched = _tail_audit_events(matcher, overfetch)
+    # BC-132: try the indexed read path first; fall back to BC-131's
+    # tail-chunked file read when the index is unavailable.
+    matched = _query_audit_index(
+        matcher,
+        overfetch,
+        event_types=event_types,
+        host=host,
+        finding_id=finding,
+        since_ts=since,
+    )
+    if matched is None:
+        matched = _tail_audit_events(matcher, overfetch)
     _enrich_findings_batch(matched)
 
     if cve:

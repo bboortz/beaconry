@@ -1,0 +1,89 @@
+# BC-132 — Default query params / bodies per endpoint for the perf gate.
+# One table per endpoint pattern. `method` defaults to "GET"; "POST" is explicit.
+# `query` maps to URL query string; `body` maps to JSON body.
+# Entries whose name ends in `#<label>` test a specific-pattern variant
+# of the same endpoint (e.g. "/audit#hub_startup" measures the rare-event
+# fallback path separately from "/audit#default").
+
+# ── Health probes (public — no auth) ─────────────────────────────────
+
+[endpoints."/healthz"]
+method = "GET"
+
+[endpoints."/livez"]
+method = "GET"
+
+[endpoints."/readyz"]
+method = "GET"
+
+[endpoints."/startupz"]
+method = "GET"
+
+[endpoints."/health"]
+method = "GET"
+
+# ── Operator CLI surface (require_cli_token; token stripped in gate) ─
+
+[endpoints."/fleet"]
+method = "GET"
+
+[endpoints."/findings#default"]
+method = "GET"
+path = "/findings"
+query = { host = "hetzner-staging", status = "open", limit = "100" }
+
+[endpoints."/findings#critical-only"]
+method = "GET"
+path = "/findings"
+query = { severity = "Critical", status = "open", limit = "100" }
+
+[endpoints."/audit#default"]
+method = "GET"
+path = "/audit"
+query = { last = "10" }
+
+[endpoints."/audit#finding-filtered"]
+method = "GET"
+path = "/audit"
+query = { event = "finding_filtered", last = "10" }
+
+[endpoints."/audit#scan-integrity"]
+method = "GET"
+path = "/audit"
+query = { event = "scan_integrity", last = "10" }
+
+[endpoints."/audit#hub-startup-rare"]
+method = "GET"
+path = "/audit"
+query = { event = "hub_startup", last = "10" }
+
+[endpoints."/audit/integrity#default"]
+method = "GET"
+path = "/audit/integrity"
+query = { limit = "10" }
+
+[endpoints."/audit/integrity#high-limit"]
+method = "GET"
+path = "/audit/integrity"
+query = { limit = "500" }
+
+# ── Scout → Hub ingest paths (require_scout_token; stripped in gate) ─
+
+[endpoints."/scan"]
+method = "POST"
+body.host = "perf-test-scout"
+body.sboms = []
+body.integrity = { iteration_hash = "perf-iter", transfer_hash = "perf-xfer", n_sboms = 0 }
+
+[endpoints."/heartbeat"]
+method = "POST"
+body.host = "perf-test-scout"
+body.software_version = "0.22.15"
+body.api_version = 1
+body.health = "ok"
+body.role = "workstation"
+
+# ── Legacy / adjacent ────────────────────────────────────────────────
+
+[endpoints."/sbom"]
+method = "GET"
