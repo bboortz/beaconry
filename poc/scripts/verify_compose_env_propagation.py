@@ -36,6 +36,12 @@ _TEST_MODE_ALLOWLIST: frozenset[str] = frozenset(
         # Prod docker-compose.yml intentionally doesn't propagate them.
         "BEACONRY_SKIP_GRYPE_DB",  # BC-018: skip ~90s grype DB download in e2e
         "BEACONRY_TELEGRAM_BASE_URL",  # BC-018: point python-telegram-bot at telegram-mock
+        # BC-139 + BC-140: audit-index tuning knobs are dev/CI-only.
+        # Operators never touch them; the defaults (50 / 2s / 10 000) are
+        # production-correct. Documented in VARIABLES.md.
+        "BEACONRY_AUDIT_INDEX_BATCH_SIZE",
+        "BEACONRY_AUDIT_INDEX_FLUSH_INTERVAL_S",
+        "BEACONRY_AUDIT_INDEX_MAX_BUFFER",
     }
 )
 

@@ -7,6 +7,7 @@ dispatches to executor adapters on approval, verifies fix via re-scan.
 """
 
 import asyncio
+import collections
 import contextlib
 import fnmatch
 import gzip
@@ -17,6 +18,7 @@ import os
 import re
 import sqlite3
 import tempfile
+import threading
 import time
 from collections.abc import Callable
 from contextlib import asynccontextmanager
@@ -3130,8 +3132,13 @@ async def lifespan(  # noqa: PLR0915 - orchestration function; each background t
     # first audit event of this process so hub_startup is indexed. Then
     # bootstrap the index from audit.log if the table is empty (pre-BC-132
     # DBs or operator-rebuilt DB).
+    # BC-139 + BC-140: spawn the background flush task so the hot path
+    # only enqueues; one flusher process-wide owns the sqlite connection
+    # and does all INSERTs.
     _audit.register_post_append_hook(_audit_index_append)
     _rebuild_audit_index_if_empty()
+    global _audit_index_flush_task
+    _audit_index_flush_task = asyncio.create_task(_audit_index_flush_loop_forever())
     _audit.append(
         "hub_startup",
         software_version=SOFTWARE_VERSION,
@@ -3189,6 +3196,13 @@ async def lifespan(  # noqa: PLR0915 - orchestration function; each background t
         _kev_task.cancel()
         with contextlib.suppress(asyncio.CancelledError):
             await _kev_task
+        # BC-140: also drain the audit_index on the short-lifespan path.
+        if _audit_index_flush_task is not None:
+            _audit_index_flush_task.cancel()
+            with contextlib.suppress(asyncio.CancelledError):
+                await _audit_index_flush_task
+        _audit_index_shutdown_drain(timeout_s=2.0)
+        _reset_audit_index_conn()
         return
 
     builder = Application.builder().token(TELEGRAM_BOT_TOKEN)
@@ -3276,6 +3290,16 @@ async def lifespan(  # noqa: PLR0915 - orchestration function; each background t
         await _notify_retry_task
     with contextlib.suppress(asyncio.CancelledError):
         await _stale_fixing_task
+
+    # BC-140: cancel the audit_index flush task + drain whatever is
+    # still buffered. Bounded by 2 s so this never blocks docker-stop
+    # grace (10 s total). audit.log retains any un-mirrored events.
+    if _audit_index_flush_task is not None:
+        _audit_index_flush_task.cancel()
+        with contextlib.suppress(asyncio.CancelledError):
+            await _audit_index_flush_task
+    _audit_index_shutdown_drain(timeout_s=2.0)
+    _reset_audit_index_conn()
 
     assert tg_app is not None
     assert tg_app.updater is not None
@@ -3623,17 +3647,68 @@ async def http_findings(
     return rows
 
 
-# BC-132: module-level sqlite connection reused by the audit_index
-# post-append hook. Opening a new connection per audit event cost
-# ~1 ms × hundreds of events per scan; the cached connection + WAL
-# mode keeps the hot write path near-free so bulk /scan endpoints
-# aren't slowed by the index mirror.
+# BC-132 / BC-139 / BC-140: audit_index write path.
+#
+# History:
+#   - BC-132 shipped per-event commits through a cached sqlite handle.
+#     In-process tests passed; live fleet killed the VPS host within
+#     14 min because 15 fsyncs/sec of concurrent writes starved a
+#     reader-pinned WAL into unbounded growth.
+#   - BC-139 added:
+#       * SKIP_EVENTS filter (finding_filtered + heartbeat_received
+#         = 95 % of audit volume operators never query by);
+#       * module-level buffered writes with a 2-second background
+#         flush task (one executemany + commit per flush window);
+#       * WAL bounds (wal_autocheckpoint=100, journal_size_limit=10 MB).
+#   - BC-140 added:
+#       * bounded deque (prevents memory growth on sustained backlog);
+#       * dropped-event counter surfaced on /healthz + rate-limited
+#         audit event;
+#       * graceful shutdown drain bounded by 2 s so docker-stop grace
+#         isn't exceeded.
+#
+# Hot-path contract: `_audit_index_append` must never open a sqlite
+# connection, never wait on IO, and never raise. All sqlite work
+# happens inside `_flush_audit_index_batch_locked` under the single
+# flush task in the lifespan.
+
+_AUDIT_INDEX_SKIP_EVENTS = frozenset(
+    {
+        # BC-139: high-volume, low-query-interest event types that would
+        # otherwise flood the index.
+        "finding_filtered",
+        "heartbeat_received",
+        # BC-140: the overflow alert itself — skip it to prevent a feedback
+        # loop where an overflow-triggered audit_index_dropped event also
+        # tries to enter the (already-full) buffer, incrementing the drop
+        # counter a second time. The event is still in audit.log for
+        # forensics; file-tail fallback finds it.
+        "audit_index_dropped",
+    },
+)
+_AUDIT_INDEX_BATCH_SIZE = int(os.environ.get("BEACONRY_AUDIT_INDEX_BATCH_SIZE", "50"))
+_AUDIT_INDEX_FLUSH_INTERVAL_S = float(
+    os.environ.get("BEACONRY_AUDIT_INDEX_FLUSH_INTERVAL_S", "2.0"),
+)
+_AUDIT_INDEX_MAX_BUFFER = int(os.environ.get("BEACONRY_AUDIT_INDEX_MAX_BUFFER", "10000"))
+_AUDIT_INDEX_DROPPED_AUDIT_RATE_LIMIT_S = 60  # 1/min max audit_index_dropped events
+
 _audit_index_conn: sqlite3.Connection | None = None
+# BC-140: `deque(maxlen=N)` auto-drops oldest on `append()` once full.
+# The check-len-before-vs-after pattern in `_audit_index_append` detects
+# drops so the counter + rate-limited audit event stay honest.
+_audit_index_buffer: collections.deque = collections.deque(maxlen=_AUDIT_INDEX_MAX_BUFFER)
+_audit_index_lock = threading.Lock()
+_audit_index_flush_task: asyncio.Task | None = None
+_audit_index_dropped_events: int = 0
+_audit_index_last_dropped_audit_ts: int = 0
 
 
 def _reset_audit_index_conn() -> None:
     """BC-132: close + null the module-level audit_index connection.
-    Called on test teardown to avoid leaking handles across fixtures."""
+    Called on test teardown to avoid leaking handles across fixtures,
+    and from error paths so a wedged connection doesn't poison
+    subsequent flushes."""
     global _audit_index_conn
     if _audit_index_conn is not None:
         with contextlib.suppress(sqlite3.OperationalError):
@@ -3642,35 +3717,142 @@ def _reset_audit_index_conn() -> None:
 
 
 def _audit_index_append(event: dict) -> None:
-    """BC-132: mirror every audit.log event into the SQLite
-    audit_index sidecar so `/audit*` queries are indexed-fast. Fire-
-    and-forget: a DB error here is logged but never propagated (the
-    durable JSONL write already succeeded). Registered as a post-
-    append hook on `_audit` during lifespan startup."""
+    """BC-132 / BC-139 / BC-140: enqueue an audit event for the index.
+
+    Hot path invariants:
+      * no sqlite connection opened here
+      * no IO performed here
+      * never raises
+      * O(1) + one short-held lock acquire
+
+    BC-139: `_AUDIT_INDEX_SKIP_EVENTS` cuts 95 % of volume by skipping
+    event types operators don't query by (they still land in audit.log).
+
+    BC-140: buffer is a bounded `deque`; overflow drops oldest +
+    bumps `_audit_index_dropped_events`. Rate-limited `audit_index_dropped`
+    audit event (1/min) preserves the forensic trail without cascading
+    writes under stress.
+    """
+    global _audit_index_dropped_events, _audit_index_last_dropped_audit_ts
+
+    event_type = event.get("event", "")
+    if event_type in _AUDIT_INDEX_SKIP_EVENTS:
+        return
+
+    row = (
+        int(event.get("ts", 0)) if isinstance(event.get("ts"), int) else 0,
+        str(event_type),
+        event.get("host"),
+        event.get("finding_id"),
+        event.get("cve_id"),
+        json.dumps(event, default=str),
+    )
+
+    dropped_now = False
+    with _audit_index_lock:
+        was_full = len(_audit_index_buffer) >= _audit_index_buffer.maxlen  # type: ignore[arg-type]
+        _audit_index_buffer.append(row)
+        if was_full:
+            _audit_index_dropped_events += 1
+            dropped_now = True
+
+    if dropped_now:
+        now = int(time.time())
+        if now - _audit_index_last_dropped_audit_ts >= _AUDIT_INDEX_DROPPED_AUDIT_RATE_LIMIT_S:
+            _audit_index_last_dropped_audit_ts = now
+            # Write the alert to audit.log directly, bypassing our own hook
+            # (prevents recursion + ensures the event survives even if the
+            # flusher is wedged).
+            with contextlib.suppress(Exception):
+                _audit.append(
+                    "audit_index_dropped",
+                    dropped_total=_audit_index_dropped_events,
+                    buffer_maxlen=_audit_index_buffer.maxlen,
+                )
+
+
+def _flush_audit_index_batch_locked() -> None:
+    """BC-139 + BC-140: drain the audit_index buffer with one
+    `executemany` + commit. Caller MUST hold `_audit_index_lock`.
+
+    On `sqlite3.OperationalError`, the drained batch is re-queued at
+    the LEFT of the deque so the next flush retries. If the deque is
+    at maxlen, re-queueing may drop oldest entries — the drop counter
+    captures that. Fail-open: never raises.
+    """
     global _audit_index_conn
+    if not _audit_index_buffer:
+        return
     if not DB_PATH.exists():
         return
+
+    batch = list(_audit_index_buffer)
+    _audit_index_buffer.clear()
+
     try:
         if _audit_index_conn is None:
             _audit_index_conn = sqlite3.connect(DB_PATH, timeout=5)
             _audit_index_conn.execute("PRAGMA journal_mode=WAL")
             _audit_index_conn.execute("PRAGMA synchronous=NORMAL")
-        _audit_index_conn.execute(
+            # BC-139: cap WAL growth so a reader-pinned snapshot can't
+            # grow the file unbounded under write pressure.
+            _audit_index_conn.execute("PRAGMA wal_autocheckpoint=100")
+            _audit_index_conn.execute("PRAGMA journal_size_limit=10485760")
+        _audit_index_conn.executemany(
             "INSERT INTO audit_index (ts, event, host, finding_id, cve_id, body) "
             "VALUES (?, ?, ?, ?, ?, ?)",
-            (
-                int(event.get("ts", 0)) if isinstance(event.get("ts"), int) else 0,
-                str(event.get("event", "")),
-                event.get("host"),
-                event.get("finding_id"),
-                event.get("cve_id"),
-                json.dumps(event, default=str),
-            ),
+            batch,
         )
         _audit_index_conn.commit()
     except sqlite3.OperationalError as e:
-        log.warning("BC-132: audit_index write failed: %s", e)
+        log.warning("BC-139: audit_index batch flush failed (%d events): %s", len(batch), e)
         _reset_audit_index_conn()
+        # Re-queue at the left so the retry picks up oldest-first.
+        # BC-140: deque.extendleft reverses order — undo by slicing reversed.
+        for row in reversed(batch):
+            _audit_index_buffer.appendleft(row)
+
+
+async def _audit_index_flush_loop_forever() -> None:
+    """BC-139 + BC-140: background task that periodically drains the
+    buffer. One flusher process-wide keeps the sqlite connection busy
+    without lock contention inside the flush path itself.
+
+    Cancellation on shutdown is handled by the lifespan: it schedules a
+    final drain + closes the connection.
+    """
+    while True:
+        try:
+            await asyncio.sleep(_AUDIT_INDEX_FLUSH_INTERVAL_S)
+            with _audit_index_lock:
+                _flush_audit_index_batch_locked()
+        except asyncio.CancelledError:
+            raise
+        except Exception as e:  # noqa: BLE001 — never kill the flusher
+            log.warning("BC-139: unexpected flush-loop error: %s", e)
+
+
+def _audit_index_shutdown_drain(timeout_s: float = 2.0) -> None:
+    """BC-140: lifespan shutdown hook. Drains the buffer once, bounded
+    by `timeout_s` so docker-stop grace (10 s) isn't exceeded.
+    """
+    import time as _time
+
+    deadline = _time.time() + timeout_s
+    while _time.time() < deadline:
+        with _audit_index_lock:
+            if not _audit_index_buffer:
+                return
+            _flush_audit_index_batch_locked()
+        _time.sleep(0.01)
+
+
+def _audit_index_metrics() -> dict:
+    """BC-140: snapshot for `/healthz`. Non-blocking (no lock)."""
+    return {
+        "audit_index_queue_depth": len(_audit_index_buffer),
+        "audit_index_dropped_events": _audit_index_dropped_events,
+    }
 
 
 def _rebuild_audit_index_if_empty() -> None:
@@ -4462,6 +4644,15 @@ def _hub_healthz_summary() -> dict:
         # corruption somewhere on the scout→hub path; audit log has
         # per-event details. `beaconry status` surfaces this in DETAILS.
         "pipeline_integrity_mismatches": _pipeline_integrity_mismatches,
+        # BC-140: audit_index observability. `audit_index_queue_depth` is
+        # the current in-memory buffer size (should return to ~0 within
+        # one flush interval); `audit_index_dropped_events` is cumulative
+        # overflow count (0 under healthy load). Both are config echoes,
+        # not health signals — excluded from the aggregate `degraded`
+        # check below. A growing queue depth or climbing dropped count
+        # means the flusher is falling behind; operators see it in
+        # `beaconry status` DETAILS before any user-visible impact.
+        **_audit_index_metrics(),
         # BC-123: policy knobs echoed back so `beaconry status` can show
         # them in a POLICIES line. Operator sees running config without
         # `docker exec env` greps. These are config echoes, not health

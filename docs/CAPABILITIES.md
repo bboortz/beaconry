@@ -1801,6 +1801,24 @@ Enforcement: `poc/scripts/verify_traceability.py` runs as part of `make check`. 
 - **verified by:**
   - `poc/tests/integration/test_BC_093_rescan_hooks.py`
 
+### CAP-T237: Audit-index writes fully decoupled from the FastAPI event loop
+- **type:** technical
+- **status:** active
+- **origin:** BC-140 — even after BC-139 reduced write amplitude, `_audit_index_append` still ran synchronously inside FastAPI request handlers. A future sqlite stall would re-expose the "audit write blocks /readyz → healthcheck fails → container restart loop" chain that killed hetzner-staging at 04:04 UTC on 2026-11-17.
+- **description:** `_audit_index_append` now writes to a `collections.deque(maxlen=BEACONRY_AUDIT_INDEX_MAX_BUFFER)` under a short-held `threading.Lock`. No sqlite interaction happens in the hot path. A dedicated lifespan-owned background task is the ONLY code that opens the sqlite connection + commits. Overflow drops oldest + bumps `_audit_index_dropped_events`, surfaced on `/healthz` (new keys `audit_index_queue_depth` + `audit_index_dropped_events`). A rate-limited `audit_index_dropped` audit event (1/min) preserves the forensic trail without cascading writes under stress. The event itself is in `_AUDIT_INDEX_SKIP_EVENTS` to prevent recursion. Flush failures (`sqlite3.OperationalError`) re-queue the batch at the left of the deque for retry. Shutdown drain is bounded to 2 s so `docker stop` grace (10 s total) isn't exceeded.
+- **supports:** CAP-T236, CAP-T235, CAP-T234, CAP-T223
+- **verified by:**
+  - `poc/tests/unit/test_BC_139_BC_140_audit_index_live_load.py`
+
+### CAP-T236: Audit-index write path survives live-load concurrent scans
+- **type:** technical
+- **status:** active
+- **origin:** BC-139 — BC-132 shipped per-event commits on a shared cached sqlite connection. Live scout load (~15 finding_filtered events/sec) created sustained fsync pressure; a long-running reader pinned the WAL open; WAL file grew unbounded. Within 14 minutes of deploy, the hetzner-staging VPS fell off the network (TCP:8000 + TCP:22 both unreachable) for ~30 minutes.
+- **description:** (1) `_AUDIT_INDEX_SKIP_EVENTS = {"finding_filtered", "heartbeat_received", "audit_index_dropped"}` drops 95 % of audit volume from the index before it hits the write path — operators query by these event types rarely enough that the file-tail fallback is acceptable, and audit.log remains the durable truth. (2) Non-skipped events buffer in a module-level `list[tuple]` guarded by `threading.Lock`; a lifespan-spawned background task flushes every `BEACONRY_AUDIT_INDEX_FLUSH_INTERVAL_S` (2.0 s default) with a single `executemany` + commit, turning a 500-event scan's 500 serial fsyncs into 1-10 batched fsyncs. (3) The cached sqlite connection sets `wal_autocheckpoint=100` (vs default 1000) + `journal_size_limit=10485760` so a reader-pinned WAL snapshot can't grow the file beyond 10 MB. (4) Flush failures (`sqlite3.OperationalError`) log + reset the connection; the batch isn't lost — see CAP-T237's re-queue path. (5) The lifespan shutdown drain path calls one final flush before closing the connection.
+- **supports:** CAP-T235, CAP-T234, CAP-T223
+- **verified by:**
+  - `poc/tests/unit/test_BC_139_BC_140_audit_index_live_load.py`
+
 ### CAP-T235: HTTP latency budget as a first-class ship gate + sidecar SQLite audit index
 - **type:** technical
 - **status:** active

@@ -168,10 +168,14 @@ def test_audit_index_table_exists_after_init(hub_env: Path) -> None:
 
 
 def test_audit_index_hook_populates_on_append(hub_env: Path) -> None:
-    """Registered hook mirrors every _audit.append into audit_index."""
+    """Registered hook mirrors every _audit.append into audit_index.
+    BC-139: events go through the deque buffer; call the flush path
+    explicitly (production uses the background flush task)."""
     _audit_mod.register_post_append_hook(hub._audit_index_append)
     _audit_mod.append("scan_integrity", host="h1", iteration_hash="abc")
     _audit_mod.append("hub_startup", software_version="0.22.16")
+    with hub._audit_index_lock:
+        hub._flush_audit_index_batch_locked()
     con = sqlite3.connect(hub.DB_PATH)
     rows = con.execute("SELECT event, host FROM audit_index ORDER BY id").fetchall()
     con.close()
@@ -196,12 +200,16 @@ def test_rebuild_audit_index_from_existing_log(hub_env: Path) -> None:
 
 
 def test_rebuild_audit_index_skips_when_already_populated(hub_env: Path) -> None:
-    """Idempotency: rebuild is a no-op if the index already has rows."""
+    """Idempotency: rebuild is a no-op if the index already has rows.
+    BC-139: flush the buffer first so the sqlite table has rows."""
     _audit_mod.register_post_append_hook(hub._audit_index_append)
     _audit_mod.append("hub_startup", software_version="0.22.16")
+    with hub._audit_index_lock:
+        hub._flush_audit_index_batch_locked()
     con = sqlite3.connect(hub.DB_PATH)
     count_before = con.execute("SELECT COUNT(*) FROM audit_index").fetchone()[0]
     con.close()
+    assert count_before == 1, "flush must land the event"
     (hub_env / "audit.log").write_text(
         '{"ts": 1, "event": "x"}\n{"ts": 2, "event": "y"}\n',
     )
@@ -221,11 +229,17 @@ def test_query_audit_index_returns_none_on_empty_index(hub_env: Path) -> None:
 
 
 def test_query_audit_index_filters_by_event_type(hub_env: Path) -> None:
-    """Indexed path pushes event filter down to SQL WHERE clause."""
+    """Indexed path pushes event filter down to SQL WHERE clause.
+    BC-139: finding_filtered events are skipped by the hook, so the
+    query path should only see hub_startup. Flush the buffer first so
+    it lands in the sqlite table."""
     _audit_mod.register_post_append_hook(hub._audit_index_append)
+    # Use scan_integrity (not finding_filtered which is skipped by BC-139).
     for i in range(5):
-        _audit_mod.append("finding_filtered", cve_id=f"CVE-{i}")
+        _audit_mod.append("scan_integrity", iteration_hash=f"iter-{i}")
     _audit_mod.append("hub_startup", software_version="0.22.16")
+    with hub._audit_index_lock:
+        hub._flush_audit_index_batch_locked()
 
     result = hub._query_audit_index(
         matcher=lambda _: True,
@@ -315,13 +329,16 @@ def test_build_audit_where_empty_when_no_filters() -> None:
 
 
 def test_query_audit_index_newest_first(hub_env: Path) -> None:
-    """Index results are returned newest-first (ORDER BY ts DESC)."""
+    """Index results are returned newest-first (ORDER BY ts DESC).
+    BC-139: flush the buffered events to the sqlite table first."""
     _audit_mod.register_post_append_hook(hub._audit_index_append)
     import time as _t
 
     for i in range(5):
         _audit_mod.append("scan_integrity", host="h1", n=i)
         _t.sleep(0.001)  # ensure monotonic ts
+    with hub._audit_index_lock:
+        hub._flush_audit_index_batch_locked()
 
     result = hub._query_audit_index(matcher=lambda _: True, limit=10)
     assert result is not None

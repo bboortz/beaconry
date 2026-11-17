@@ -124,4 +124,6 @@ Lifecycle: `draft → ready → in-progress → shipped`. Status matches each st
 | BC-129 | Loud alert for newly-persisted Tier ≤ 1 findings even in suppressed tail | shipped     | — (merged to dev)                   |
 | BC-130 | Diagnose + fix hub-shutdown-race source of heartbeat_integrity_mismatch | shipped     | — (merged to dev)                   |
 | BC-131 | Audit-read performance — tail-chunked audit.log + batched finding enrichment | shipped     | — (merged to dev)                   |
-| BC-132 | HTTP latency budget gate + sidecar SQLite audit index                       | in-progress | feat/BC-132-http-latency-budget-gate |
+| BC-132 | HTTP latency budget gate + sidecar SQLite audit index                       | shipped     | — (merged to dev)                   |
+| BC-139 | Audit-index write-amplitude fix — skip + batch + WAL bounds                | in-progress | feat/BC-139-BC-140-audit-index-live-load-fix |
+| BC-140 | Audit-index async decoupling — bounded queue + overflow metrics + drain      | in-progress | feat/BC-139-BC-140-audit-index-live-load-fix |

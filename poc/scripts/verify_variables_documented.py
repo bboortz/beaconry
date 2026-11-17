@@ -241,6 +241,9 @@ ENV_EXAMPLE_DEV_ONLY_ALLOWLIST: dict[str, str] = {
     "BEACONRY_PERF_HUB_URL": "BC-132 operator real-fleet perf measurement override; not a hub-host env",
     "BEACONRY_PERF_FIXTURE_FINDINGS": "BC-132 perf-gate fixture-scale knob; dev/CI only",
     "BEACONRY_PERF_FIXTURE_EVENTS": "BC-132 perf-gate fixture-scale knob; dev/CI only",
+    "BEACONRY_AUDIT_INDEX_BATCH_SIZE": "BC-139 audit-index batched-flush size; dev-tunable, not operator config",
+    "BEACONRY_AUDIT_INDEX_FLUSH_INTERVAL_S": "BC-139 audit-index flush interval; dev-tunable",
+    "BEACONRY_AUDIT_INDEX_MAX_BUFFER": "BC-140 audit-index bounded deque max size; dev-tunable",
     # BC-069: SOAK_WINDOW_S is operator-tunable per invocation (`SOAK_WINDOW_S=1800 make soak`),
     # not persistent config. Documented in VARIABLES.md but kept out of .env.example.
     "SOAK_WINDOW_S": "BC-069 per-invocation CLI knob for `make soak` window",
