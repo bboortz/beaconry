@@ -1801,6 +1801,15 @@ Enforcement: `poc/scripts/verify_traceability.py` runs as part of `make check`. 
 - **verified by:**
   - `poc/tests/integration/test_BC_093_rescan_hooks.py`
 
+### CAP-T234: Tail-chunked audit.log read + batched finding enrichment
+- **type:** technical
+- **status:** active
+- **origin:** BC-131 — `/audit` + `/audit/integrity` were taking ~7 s per request regardless of `limit`. `_read_audit_events()` was reading the entire JSONL log (full `read_text().splitlines()`) and `_load_finding_lookup()` was doing a full-table scan on the findings table (3137+ rows) on EVERY request, even for events that carry no `finding_id`. Monitor scripts with `--max-time 5` were silently failing their /audit polls.
+- **description:** New `_tail_audit_events(matcher, limit, chunk_size=65536)` reads audit.log backward from EOF in 64 KB chunks, splits each chunk by `\n`, carries the first (possibly truncated) line as `leftover` to the next (earlier) chunk so chunk-boundary events reassemble cleanly, and early-exits once `matcher` has produced `limit` matches. Latency is bounded by result-set size for the common recent-match case (~1 chunk read) and falls back to full-log traversal only when filter matches rare events. New `_enrich_findings_batch(events)` collects the distinct `finding_id` set from the matched events, issues **one** `SELECT cve_id, host, cve_alias FROM findings WHERE id IN (?, ?, ...)` for the whole set, applies `setdefault` in place. Zero DB roundtrips when no event carries `finding_id` (hub_startup, scan_integrity, heartbeat_integrity_mismatch, transfer_hash_mismatch, digest_sent, scout_offline). Also fixes an incidental `since` parsing bug in `/audit/integrity` (previously `datetime.fromisoformat(int)` always raised → filter was effectively ignored; now compares `ts` as an int directly). `_read_audit_events` kept as a utility for future analytical callers. No audit event schema change, no wire protocol change, no DB schema change.
+- **supports:** CAP-T229, CAP-T207, CAP-T223
+- **verified by:**
+  - `poc/tests/unit/test_BC_131_audit_read_perf.py`
+
 ### CAP-T233: Shutdown-race-free integrity persistence + forensic audit enrichment
 - **type:** technical
 - **status:** active

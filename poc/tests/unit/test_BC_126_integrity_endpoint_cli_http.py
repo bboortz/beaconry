@@ -41,8 +41,10 @@ def _write_audit(data_dir: Path, events: list[dict]) -> None:
     audit.write_text("\n".join(json.dumps(e) for e in events) + "\n")
 
 
-def _ts(h: int = 18, d: int = 16) -> str:
-    return dt.datetime(2026, 11, d, h, 0, 0).isoformat()
+def _ts(h: int = 18, d: int = 16) -> int:
+    # BC-131: audit.append writes ts as int(time.time()); tests must mirror
+    # that shape so the since-filter comparison path matches production.
+    return int(dt.datetime(2026, 11, d, h, 0, 0).timestamp())
 
 
 def test_endpoint_returns_scan_integrity_events(hub_env: Path) -> None:
@@ -72,7 +74,7 @@ def test_endpoint_since_filter_narrows(hub_env: Path) -> None:
             # Fresh (~today in wall clock).
             {
                 "event": "scan_integrity",
-                "ts": dt.datetime.now().isoformat(),
+                "ts": int(dt.datetime.now().timestamp()),
                 "host": "a",
                 "iteration_hash": "new",
             },
