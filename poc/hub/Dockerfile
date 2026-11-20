@@ -19,7 +19,7 @@ FROM anchore/grype:latest AS grype-src
 # this named handle, BuildKit could theoretically re-resolve the
 # `:latest` tag between the mount and the FROM — rare but possible,
 # and exactly the race class BC-099 is defending against.
-FROM ghcr.io/bboortz/python-scratch-trixie:latest AS runtime-src
+FROM ghcr.io/bboortz/base/python-trixie:latest AS runtime-src
 
 # ── Stage 1: builder ────────────────────────────────────────────────────────
 # BC-095: forge-builder-python-trixie ships Python + pip + syft + CA certs + tar.

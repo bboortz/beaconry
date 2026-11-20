@@ -9,7 +9,7 @@
 # ── Stage 0: runtime base reference (BC-099 ABI guard source) ──────────────
 # Named FROM so the ABI guard's `--mount=from=runtime-src` resolves to the
 # same digest BuildKit uses for the Stage 2 runtime FROM.
-FROM ghcr.io/bboortz/python-scratch-trixie:latest AS runtime-src
+FROM ghcr.io/bboortz/base/python-trixie:latest AS runtime-src
 
 # ── Stage 1: builder ────────────────────────────────────────────────────────
 # forge-builder-python-trixie ships Python + pip + CA certs. Python minor detected
