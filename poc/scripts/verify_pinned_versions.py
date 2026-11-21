@@ -26,40 +26,44 @@ from pathlib import Path
 # dogfood-grype gate (CAP-T167) will flag the next regression first.
 DOCKER_CLI_MIN = (29, 9, 2)
 
-# BC-078 → BC-095 Python-base contract. Builder Python must match runtime
-# Python or wheels won't load (same major.minor).
-# Accepted variants:
+# BC-078 → BC-095 → FG-075 Python-base contract. Builder Python must match
+# runtime Python or wheels won't load (same major.minor).
+# Accepted variants (newest-first):
+#   * `ghcr.io/bboortz/base/python-slim-trixie:latest` (FG-075 — forge's
+#     public API; replaces forge-builder-python-trixie as the
+#     dual-use builder/runtime foundation)
+#   * `ghcr.io/bboortz/forge-builder-python-trixie:latest` (BC-095 — frozen
+#     since 2026-11-20 but kept here as a rollback path)
 #   * upstream `python:3.1X-slim-{bookworm,trixie}` (BC-082 era — kept for
 #     the migration window so a revert-triage path exists)
-#   * `ghcr.io/bboortz/forge-builder-python-trixie:latest` (BC-095 — forge-signed,
-#     daily-rebuilt; ships python 3.13.18 ABI-matching the scratch runtime)
 # Any other variant must edit this lint too — that's the "conscious choice"
 # gate.
 BUILDER_BASE_RE = re.compile(
     r"^FROM\s+(?:"
     r"python:3\.(?P<minor>1[1-9])-slim-(?:bookworm|trixie)"
+    r"|ghcr\.io/bboortz/base/python-slim-trixie:latest"
     r"|ghcr\.io/bboortz/forge-builder-python-trixie:latest"
     r")\s+AS\s+builder\b",
     re.MULTILINE,
 )
 
-# BC-078 → BC-082 → BC-083 → BC-097 runtime contract.
-# BC-083 moved runtime to the self-owned forge image on the semver-pinned
-# `:3.13` tag; BC-097 (2026-11-08) bumped to `:latest` for symmetry with
-# the BC-095 builder and to pick up FG-031's `/hc` immediately.
-# `:3.13` + distroless debian12/debian13 stay accepted for rollback and
-# the migration window. Any other variant (random ghcr repo,
-# distroless-debug, etc.) must edit this lint too — that's the
-# "conscious choice" gate.
+# BC-078 → BC-082 → BC-083 → BC-097 → FG-075 runtime contract.
+# FG-075 (2026-11-20) moved the forge image under the `base/` tier and kept
+# `:latest` as the sole supported tag (dropped `:3.13`). The pre-FG-075 flat
+# path + `:3.13` stay accepted here for rollback-triage symmetry with the
+# builder lint above. BC-099 introduces a `runtime-src` stage aliasing the
+# base image, so the regex matches either the direct `AS runtime` form
+# (pre-BC-099) or the aliased `AS runtime-src` form.
 RUNTIME_IMAGE_RE = re.compile(
     r"^FROM\s+(?:"
-    r"ghcr\.io/bboortz/python-scratch-trixie:(?:latest|3\.13)"  # BC-097/BC-083 primary
+    r"ghcr\.io/bboortz/base/python-scratch-trixie:latest"  # FG-075 primary
+    r"|ghcr\.io/bboortz/python-scratch-trixie:(?:latest|3\.13)"  # pre-FG-075 rollback
     r"|gcr\.io/distroless/python3-debian1[23]:nonroot"  # BC-078/BC-082 fallback
-    r")\s+AS\s+runtime\b",
+    r")\s+AS\s+(?:runtime|runtime-src)\b",
     re.MULTILINE,
 )
 # Preferred (newest accepted) tag — error messages name this one.
-RUNTIME_IMAGE_PREFERRED = "ghcr.io/bboortz/python-scratch-trixie:latest"
+RUNTIME_IMAGE_PREFERRED = "ghcr.io/bboortz/base/python-scratch-trixie:latest"
 
 # BC-081 docker CLI pin.
 DOCKER_CLI_RE = re.compile(

@@ -1,13 +1,13 @@
 """BC-145 Shepherd Release 0 POC — integration-tier acceptance.
 
 Covers:
-    - shepherd.scan-trivy: workflow file exists + scheduled + dispatch-triggerable
-    - shepherd.sandbox.no-secrets: agent step env block does not expose GITHUB_TOKEN
-    - shepherd.sandbox.diff-only: separate agent-call → validate → open-pr steps
-    - shepherd.blocklist.protected-files: validate.sh rejects protected paths
-    - shepherd.gate.diff-size: validate.sh rejects > 50 changed lines
-    - shepherd.scope.level-1: agent prompt binds to deps + lockfiles
-    - supply-chain.sha-pin-all-actions: every uses: line is 40-hex SHA-pinned
+    - CAP-S001: Trivy fs scan runs on schedule — workflow exists + scheduled + dispatch-triggerable
+    - CAP-S002: Shepherd agent step runs with no secrets beyond the Anthropic API key
+    - CAP-S003: Shepherd agent output is a diff; a separate trusted step applies it
+    - CAP-S004: Protected-files blocklist — validate.sh rejects protected paths
+    - CAP-S005: Shepherd diff-size cap — validate.sh rejects > 50 changed lines
+    - CAP-S006: Shepherd scope level 1 — agent prompt binds to deps + lockfiles
+    - CAP-S007: Supply-chain — every uses: line is 40-hex SHA-pinned
 
 No network required. Mirrors bboortz/healthy HC-008 shell acceptance.
 """

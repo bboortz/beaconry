@@ -133,6 +133,7 @@ omit = [
     # Integration-shell modules: interactive main loops where pytest-cov
     # metrics would require fake-mocking without correctness value.
     "poc/demo.py",              # interactive mock-pipeline orchestrator
+    "poc/scenarios/__main__.py",  # BC-038 argparse scenario runner
 ]
 
 [tool.coverage.report]

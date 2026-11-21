@@ -40,7 +40,7 @@ def test_hub_dockerfile_uses_distroless_runtime() -> None:
     # forge image. Accept any of the three during the soft-migration window
     # (verify_pinned_versions has the authoritative acceptance regex).
     # BC-097 broadened to accept :latest alongside :3.13 + distroless fallback.
-    accepted = r"(gcr\.io/distroless/python3-debian1[23]:nonroot|ghcr\.io/bboortz/python-scratch-trixie:(?:latest|3\.13))"
+    accepted = r"(gcr\.io/distroless/python3-debian1[23]:nonroot|ghcr\.io/bboortz/(?:base/)?python-scratch-trixie:(?:latest|3\.13))"
     assert re.search(accepted, content), (
         "hub Dockerfile runtime stage must use an accepted base image "
         "(forge primary; distroless fallback during migration)"
@@ -51,7 +51,7 @@ def test_scout_dockerfile_uses_distroless_runtime() -> None:
     """CAP-T161 (BC-083 broadened): accepted runtime is forge OR distroless."""
     content = SCOUT_DOCKERFILE.read_text()
     # BC-097 broadened to accept :latest alongside :3.13 + distroless fallback.
-    accepted = r"(gcr\.io/distroless/python3-debian1[23]:nonroot|ghcr\.io/bboortz/python-scratch-trixie:(?:latest|3\.13))"
+    accepted = r"(gcr\.io/distroless/python3-debian1[23]:nonroot|ghcr\.io/bboortz/(?:base/)?python-scratch-trixie:(?:latest|3\.13))"
     assert re.search(accepted, content), (
         "scout Dockerfile runtime stage must use an accepted base image "
         "(forge primary; distroless fallback during migration)"
