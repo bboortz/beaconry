@@ -9,12 +9,19 @@
 # ── Stage 0: runtime base reference (BC-099 ABI guard source) ──────────────
 # Named FROM so the ABI guard's `--mount=from=runtime-src` resolves to the
 # same digest BuildKit uses for the Stage 2 runtime FROM.
-FROM ghcr.io/bboortz/python-scratch-trixie:latest AS runtime-src
+FROM ghcr.io/bboortz/base/python-scratch-trixie:latest AS runtime-src
 
 # ── Stage 1: builder ────────────────────────────────────────────────────────
 # forge-builder-python-trixie ships Python + pip + CA certs. Python minor detected
 # at build time (BC-098) and checked against the runtime base (BC-099).
-FROM ghcr.io/bboortz/forge-builder-python-trixie:latest AS builder
+FROM ghcr.io/bboortz/base/python-slim-trixie:latest AS builder
+
+# FG-075 migration: base/python-slim-trixie defaults USER 65532. Pip
+# install writes to /install (and hub's apt-get install curl needs
+# root) so flip back to root for the builder stage. The runtime stage
+# FROMs scratch-shape base which already runs as 65532.
+USER 0
+
 
 WORKDIR /app
 COPY telegram_mock/requirements.txt .
@@ -33,15 +40,15 @@ RUN --mount=from=runtime-src,source=/usr/local/lib,target=/runtime-lib \
     BUILDER_PY_VER="$(python3 -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')" \
  && RUNTIME_PY_DIR_COUNT="$(ls /runtime-lib | grep -cE '^python3\.[0-9]+$')" \
  && if [ "$RUNTIME_PY_DIR_COUNT" != "1" ]; then \
-      echo "BC-099: expected exactly one python3.X dir in python-scratch-trixie:latest, found $RUNTIME_PY_DIR_COUNT" >&2; \
+      echo "BC-099: expected exactly one python3.X dir in base/python-scratch-trixie:latest, found $RUNTIME_PY_DIR_COUNT" >&2; \
       ls -la /runtime-lib >&2; exit 1; \
     fi \
  && RUNTIME_PY_VER="$(ls /runtime-lib | grep -E '^python3\.[0-9]+$' | sed 's/^python//')" \
  && if [ "$BUILDER_PY_VER" != "$RUNTIME_PY_VER" ]; then \
       echo "" >&2; \
       echo "BC-099 ABI guard tripped: forge base Python minors disagree." >&2; \
-      echo "  forge-builder-python-trixie:latest  -> Python ${BUILDER_PY_VER}" >&2; \
-      echo "  python-scratch-trixie:latest -> Python ${RUNTIME_PY_VER}" >&2; \
+      echo "  base/python-slim-trixie:latest  -> Python ${BUILDER_PY_VER}" >&2; \
+      echo "  base/python-scratch-trixie:latest -> Python ${RUNTIME_PY_VER}" >&2; \
       echo "" >&2; \
       echo "Cause: forge republished one base's :latest tag before the other" >&2; \
       echo "during a Python minor bump. Remedy: pull both bases fresh + rebuild." >&2; \
