@@ -57,10 +57,7 @@ def test_workflow_pins_reusable_shepherd() -> None:
 
 
 def test_gates_pins_reusable_shepherd_gates() -> None:
-    assert (
-        "bboortz/shepherd/.github/workflows/reusable-shepherd-gates.yml@"
-        in _read(GATES)
-    )
+    assert "bboortz/shepherd/.github/workflows/reusable-shepherd-gates.yml@" in _read(GATES)
 
 
 # ────────────────────────────────────────────────────────────────────
