@@ -389,3 +389,107 @@ def test_perf_seeder_main_falls_back_to_env_out_dir(tmp_path: Path, monkeypatch)
         == 0
     )
     assert (tmp_path / "beaconry.db").is_file()
+
+
+# ── MemoryCheck dataclass invariants ─────────────────────────────────────
+
+
+def test_memory_check_growth_defaults_to_zero_when_missing_t0() -> None:
+    mc = perf_gate.MemoryCheck(t0_rss_mb=None, t1_rss_mb=200, samples_mb=[200])
+    assert mc.growth_mb == 0
+    assert mc.breached is False
+
+
+def test_memory_check_growth_defaults_to_zero_when_missing_t1() -> None:
+    mc = perf_gate.MemoryCheck(t0_rss_mb=100, t1_rss_mb=None, samples_mb=[100])
+    assert mc.growth_mb == 0
+    assert mc.breached is False
+
+
+def test_memory_check_growth_positive_delta() -> None:
+    mc = perf_gate.MemoryCheck(t0_rss_mb=100, t1_rss_mb=150, samples_mb=[100, 125, 150])
+    assert mc.growth_mb == 50
+
+
+def test_memory_check_monotonic_growth_detected() -> None:
+    # Six strictly-increasing samples — slow-leak signature.
+    mc = perf_gate.MemoryCheck(
+        t0_rss_mb=100,
+        t1_rss_mb=200,
+        samples_mb=[100, 110, 120, 130, 140, 150, 160, 170],
+    )
+    assert mc.monotonic_growth is True
+
+
+def test_memory_check_monotonic_growth_not_detected_on_wobble() -> None:
+    mc = perf_gate.MemoryCheck(
+        t0_rss_mb=100,
+        t1_rss_mb=200,
+        samples_mb=[100, 110, 105, 115, 120, 125, 130, 128, 140],
+    )
+    # Wobbles reset the run counter → no monotonic signature.
+    assert mc.monotonic_growth is False
+
+
+def test_memory_check_too_few_samples_for_monotonic() -> None:
+    mc = perf_gate.MemoryCheck(t0_rss_mb=100, t1_rss_mb=150, samples_mb=[100, 110, 120])
+    assert mc.monotonic_growth is False
+
+
+def test_memory_check_breached_on_growth_over_budget() -> None:
+    mc = perf_gate.MemoryCheck(
+        t0_rss_mb=100,
+        t1_rss_mb=100 + int(perf_gate.BUDGET_MEMORY_GROWTH_MB) + 10,
+        samples_mb=[100, 100, 100],
+    )
+    assert mc.breached is True
+
+
+# ── load_exceptions: toml roundtrip ───────────────────────────────────────
+
+
+def test_load_exceptions_returns_empty_when_file_missing(monkeypatch, tmp_path: Path) -> None:
+    monkeypatch.setattr(perf_gate, "EXCEPTIONS_PATH", tmp_path / "missing.toml")
+    assert perf_gate.load_exceptions() == {}
+
+
+def test_load_exceptions_parses_permanent_and_fix_by_entries(monkeypatch, tmp_path: Path) -> None:
+    toml_path = tmp_path / "exceptions.toml"
+    toml_path.write_text(
+        '[endpoints."/slow#default"]\n'
+        'reason = "legacy endpoint"\n'
+        "permanent = true\n\n"
+        '[endpoints."/scan#large"]\n'
+        'reason = "needs index"\n'
+        'fix_by = "2027-01-01"\n'
+    )
+    monkeypatch.setattr(perf_gate, "EXCEPTIONS_PATH", toml_path)
+    out = perf_gate.load_exceptions()
+    assert set(out.keys()) == {"/slow#default", "/scan#large"}
+    assert out["/slow#default"].permanent is True
+    assert out["/slow#default"].fix_by is None
+    assert out["/scan#large"].permanent is False
+    assert out["/scan#large"].fix_by == dt.date(2027, 1, 1)
+
+
+# ── PerfException.is_active ──────────────────────────────────────────────
+
+
+def test_perf_exception_is_active_before_fix_by() -> None:
+    exc = perf_gate.PerfException(key="/x", reason="r", fix_by=dt.date(2027, 1, 1), permanent=False)
+    assert exc.is_active(dt.date(2026, 12, 31)) is True
+
+
+def test_perf_exception_is_inactive_after_fix_by() -> None:
+    exc = perf_gate.PerfException(key="/x", reason="r", fix_by=dt.date(2026, 1, 1), permanent=False)
+    assert exc.is_active(dt.date(2026, 6, 1)) is False
+
+
+def test_perf_exception_is_active_when_permanent() -> None:
+    exc = perf_gate.PerfException(key="/x", reason="r", fix_by=None, permanent=True)
+    assert exc.is_active(dt.date(2030, 1, 1)) is True
+
+
+def test_perf_exception_no_fix_by_no_permanent_is_inactive() -> None:
+    exc = perf_gate.PerfException(key="/x", reason="r", fix_by=None, permanent=False)
+    assert exc.is_active(dt.date(2026, 1, 1)) is False

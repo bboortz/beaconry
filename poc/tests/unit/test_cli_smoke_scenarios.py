@@ -280,3 +280,125 @@ def test_bad_since_scenario_asserts_exit_2(monkeypatch: pytest.MonkeyPatch) -> N
     scenario = cs.S05AuditBadSinceExitsCleanly()
     with pytest.raises(AssertionError, match="Python traceback"):
         scenario.run()
+
+
+# ── is_hub_running / run_make / assert_contains helpers ──────────────────
+
+
+def test_is_hub_running_returns_false_when_docker_missing(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """BC-044: the harness must gracefully degrade when docker isn't on $PATH
+    (so the gate can be opt-out via BEACONRY_SKIP_CLI_SMOKE on CI)."""
+    import subprocess as _sp
+
+    def _no_docker(*_args: object, **_kwargs: object):
+        raise FileNotFoundError("docker")
+
+    monkeypatch.setattr(_sp, "run", _no_docker)
+    assert cs.is_hub_running() is False
+
+
+def test_is_hub_running_returns_false_when_inspect_fails(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import subprocess as _sp
+
+    class _R:
+        returncode = 1
+        stdout = ""
+
+    monkeypatch.setattr(_sp, "run", lambda *_a, **_k: _R())
+    assert cs.is_hub_running() is False
+
+
+def test_is_hub_running_returns_true_on_live_container(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    import subprocess as _sp
+
+    class _R:
+        returncode = 0
+        stdout = "true\n"
+
+    monkeypatch.setattr(_sp, "run", lambda *_a, **_k: _R())
+    assert cs.is_hub_running() is True
+
+
+def test_assert_contains_bare_passes() -> None:
+    # Bare path (no context) — exercises the no-context branch.
+    cs.assert_contains("KEV NET CVE Severity", "KEV")
+
+
+def test_assert_contains_bare_raises_without_context() -> None:
+    with pytest.raises(AssertionError, match="missing 'KEV'"):
+        cs.assert_contains("no header here", "KEV")
+
+
+# ── main(): SKIP env + no-hub short-circuit + full-run paths ─────────────
+
+
+def test_main_returns_zero_when_skip_env_set(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("BEACONRY_SKIP_CLI_SMOKE", "1")
+    assert cs.main() == 0
+
+
+def test_main_returns_two_when_hub_not_running(
+    monkeypatch: pytest.MonkeyPatch, capsys: pytest.CaptureFixture[str]
+) -> None:
+    monkeypatch.delenv("BEACONRY_SKIP_CLI_SMOKE", raising=False)
+    monkeypatch.setattr(cs, "is_hub_running", lambda: False)
+    assert cs.main() == 2
+    assert "not running" in capsys.readouterr().err
+
+
+def test_main_runs_scenarios_when_hub_is_up(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Replace SCENARIOS with one that always passes; main should return 0."""
+    monkeypatch.delenv("BEACONRY_SKIP_CLI_SMOKE", raising=False)
+    monkeypatch.setattr(cs, "is_hub_running", lambda: True)
+
+    class _AllGreen(cs.CliScenario):
+        order = 1
+        name = "all_green"
+        description = "always passes"
+
+        def run(self) -> None:
+            return None
+
+    monkeypatch.setattr(cs, "SCENARIOS", [_AllGreen()])
+    assert cs.main() == 0
+
+
+def test_main_returns_one_when_any_scenario_fails(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.delenv("BEACONRY_SKIP_CLI_SMOKE", raising=False)
+    monkeypatch.setattr(cs, "is_hub_running", lambda: True)
+
+    class _Boom(cs.CliScenario):
+        order = 1
+        name = "boom"
+        description = "always fails"
+
+        def run(self) -> None:
+            raise AssertionError("intentional")
+
+    monkeypatch.setattr(cs, "SCENARIOS", [_Boom()])
+    assert cs.main() == 1
+
+
+def test_run_one_returns_false_on_unexpected_exception(
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    class _Bang(cs.CliScenario):
+        order = 1
+        name = "bang"
+        description = "raises non-AssertionError"
+
+        def run(self) -> None:
+            raise RuntimeError("non-assertion")
+
+    assert cs._run_one(_Bang()) is False
+    assert "ERROR: RuntimeError" in capsys.readouterr().out
