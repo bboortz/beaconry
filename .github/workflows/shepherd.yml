@@ -1,0 +1,17 @@
+---
+# Shepherd caller (SH-007). Requires .shepherd.yml + ANTHROPIC_API_KEY.
+name: shepherd
+"on":
+  schedule:
+    - cron: "30 5 * * *"
+  workflow_dispatch: {}
+permissions:
+  contents: write
+  pull-requests: write
+jobs:
+  agent:
+    uses: bboortz/shepherd/.github/workflows/reusable-shepherd.yml@762ffecb770629d7461b452594d6e6f70b32b699
+    with:
+      base_branch: dev
+    secrets:
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
