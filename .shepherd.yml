@@ -15,3 +15,9 @@ owner: benni
 dependabot:
   enforce_enabled: true
   auto_merge: true      # patch+minor + ≤50 non-lockfile lines + ≥24h since release
+
+# SH-010 live-test override: shorten the waiting-period gate from the
+# default 24h to 6h so the first auto-merge canary completes within a
+# working day. Restore to 24h after the soak proves the gate works.
+gates:
+  waiting_period_hours: 6
