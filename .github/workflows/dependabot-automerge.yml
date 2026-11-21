@@ -33,6 +33,7 @@ jobs:
       - name: Classify + gate + maybe enable auto-merge
         env:
           GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
           PR_NUMBER: ${{ github.event.pull_request.number }}
           HEAD_REF: ${{ github.event.pull_request.head.ref }}
           TITLE: ${{ github.event.pull_request.title }}
@@ -74,7 +75,7 @@ jobs:
 
           # --- Diff-size gate (lockfile paths exempt, per CAP gate.diff-size) --
           LOCK_RE='(^|/)(package-lock\.json|yarn\.lock|pnpm-lock\.yaml|go\.sum|Cargo\.lock|Pipfile\.lock|poetry\.lock)$'
-          LINES=$(gh pr view "$PR_NUMBER" --json files \
+          LINES=$(gh pr view "$PR_NUMBER" -R "$REPO" --json files \
             --jq "[.files[] | select(.path | test(\"$LOCK_RE\") | not) | (.additions + .deletions)] | add // 0")
           echo "non-lockfile line delta: $LINES"
           if [ "$LINES" -gt 50 ]; then
@@ -123,5 +124,5 @@ jobs:
           # --- All gates green: enable auto-merge ---------------------------
           # GitHub merges when all required status checks pass.
           echo "all gates green — enabling auto-merge"
-          gh pr merge "$PR_NUMBER" --auto --merge
+          gh pr merge "$PR_NUMBER" -R "$REPO" --auto --merge
           echo "::notice::auto-merge decision: enabled for PR #$PR_NUMBER ($NAME $FROM -> $TO, $LEVEL)"
