@@ -14,4 +14,4 @@ owner: benni
 # Dependabot baseline (SH-011). Shepherd-managed repo.
 dependabot:
   enforce_enabled: true
-  auto_merge: false
+  auto_merge: true      # patch+minor + ≤50 non-lockfile lines + ≥24h since release
