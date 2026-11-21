@@ -2459,3 +2459,59 @@ Enforcement: `poc/scripts/verify_traceability.py` runs as part of `make check`. 
 - **supports:** CAP-B023
 - **verified by:**
   - `poc/tests/integration/test_BC_069_release_toolchain.py`
+
+### CAP-S001: Trivy fs scan runs on schedule (shepherd-poc)
+- **type:** technical
+- **status:** active
+- **origin:** BC-145 — second pilot of Shepherd Release 0 (POC) after healthy HC-008.
+- **description:** `.github/workflows/shepherd-poc.yml` runs `trivy fs --severity HIGH,CRITICAL --ignore-unfixed` daily at 05:30 UTC and on `workflow_dispatch`. Trivy is installed from the official release tarball and verified by `cosign verify-blob --new-bundle-format` against the aquasecurity GitHub OIDC identity — not via `aquasecurity/trivy-action`, whose mutable tags were force-pushed to malware during the TeamPCP compromise (CVE-2026-33634).
+- **verified by:**
+  - `poc/tests/integration/test_BC_145_shepherd_poc.py`
+
+### CAP-S002: Shepherd agent step runs with no secrets beyond the Anthropic API key
+- **type:** technical
+- **status:** active
+- **origin:** BC-145.
+- **description:** The `Agent call` step in `shepherd-poc.yml` has `ANTHROPIC_API_KEY` in its `env:` block and nothing else — no `GITHUB_TOKEN`, no deploy keys, no repo secrets. Enforced by a regex over the YAML (no PyYAML dep): any accidental addition to that step's body fails the acceptance.
+- **verified by:**
+  - `poc/tests/integration/test_BC_145_shepherd_poc.py`
+
+### CAP-S003: Shepherd agent output is a diff; a separate trusted step applies it
+- **type:** technical
+- **status:** active
+- **origin:** BC-145.
+- **description:** `scripts/shepherd-poc/agent-call.sh` writes a unified diff to `/tmp/diff.patch`; a separate `Validate diff` step runs `scripts/shepherd-poc/validate.sh`; only on accept does `Open PR` run `open-pr.sh`. The agent never has `GITHUB_TOKEN` and the trusted steps never talk to the model. Separation is enforced by step ordering + per-step `env:` scoping.
+- **verified by:**
+  - `poc/tests/integration/test_BC_145_shepherd_poc.py`
+
+### CAP-S004: Protected-files blocklist blocks diffs that touch workflows, secrets, VERSION, …
+- **type:** technical
+- **status:** active
+- **origin:** BC-145.
+- **description:** `scripts/shepherd-poc/validate.sh` rejects any diff that touches `.github/workflows/**`, `.shepherd.yml`, `scripts/release.sh`, `VERSION`, `*.env`, `*.pem`, `*.key`. Exits 2 with the offending path on stderr. Includes the prompt-injection drill at the validator layer: a diff that an injected agent would produce if told to "modify .shepherd.yml" must be blocked.
+- **verified by:**
+  - `poc/tests/integration/test_BC_145_shepherd_poc.py`
+
+### CAP-S005: Shepherd diff-size cap (50 lines)
+- **type:** technical
+- **status:** active
+- **origin:** BC-145. Matches R0 hard-coded default in bboortz/shepherd DESIGN.md §13.
+- **description:** `validate.sh` counts `+` and `-` lines (excluding `+++`/`---` headers) and rejects any diff above 50 changed lines. The 50-line cap is deliberately low for R0: small-dep bumps only.
+- **verified by:**
+  - `poc/tests/integration/test_BC_145_shepherd_poc.py`
+
+### CAP-S006: Shepherd scope level 1 — dependencies and lockfiles only
+- **type:** technical
+- **status:** active
+- **origin:** BC-145. Mirrors shepherd DESIGN.md §12 scope-level ladder.
+- **description:** The agent prompt in `scripts/shepherd-poc/agent-call.sh` binds the agent to dependency + lockfile changes only. Any fix requiring source edits in beaconry's own code must result in the literal response `NO_FIX_POSSIBLE`. R0 prompt enforcement is weak; the real safety net is CAP-S004 / CAP-S005.
+- **verified by:**
+  - `poc/tests/integration/test_BC_145_shepherd_poc.py`
+
+### CAP-S007: Supply-chain — every `uses:` in shepherd-poc.yml is 40-hex SHA-pinned
+- **type:** technical
+- **status:** active
+- **origin:** BC-145. Matches shepherd SH-001 `supply-chain.sha-pin-all-actions` invariant.
+- **description:** No workflow in `.github/workflows/` uses `aquasecurity/trivy-action`. Every third-party `uses:` line references a 40-hex commit SHA, never a mutable tag. Enforced by regex in the BC-145 acceptance test.
+- **verified by:**
+  - `poc/tests/integration/test_BC_145_shepherd_poc.py`

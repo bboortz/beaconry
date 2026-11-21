@@ -4,6 +4,33 @@ All notable changes to beaconry are recorded here. The format is based
 on [Keep a Changelog](https://keepachangelog.com/), and this project
 follows [Semantic Versioning](https://semver.org/).
 
+## [v0.22.19] — 2026-11-21
+
+### ✨ Features (BC-145) — Shepherd Release 0 POC (second pilot after healthy)
+
+- **ci:** BC-145 `.github/workflows/shepherd-poc.yml` runs daily at 05:30 UTC and on `workflow_dispatch`. Six-step pipeline: checkout → install Trivy (sigstore-verified) → `trivy fs` scan → Claude agent call → `validate.sh` → `open-pr.sh`. Hard-coded R0 defaults: 50-line diff cap, 3 retries, `max_tokens=4096`, scope level 1 (deps + lockfiles).
+- **scripts:** BC-145 `scripts/shepherd-poc/install-trivy.sh` installs Trivy v0.69.3 by downloading the official release and verifying the sigstore bundle with `cosign verify-blob --new-bundle-format`. No `aquasecurity/trivy-action` — CVE-2026-33634 proved that attack class is live.
+- **scripts:** BC-145 `scripts/shepherd-poc/agent-call.sh` calls the Anthropic Messages API with the findings JSON. Prompt binds the agent to deps + lockfiles and names the protected-files blocklist explicitly.
+- **scripts:** BC-145 `scripts/shepherd-poc/validate.sh` rejects any diff that touches `.github/workflows/**`, `.shepherd.yml`, `scripts/release.sh`, `VERSION`, `*.env`, `*.pem`, or `*.key`, or that exceeds 50 changed lines. Exits 2 on violation. The only line of defence in R0 — R1 adds the network sandbox perimeter.
+- **scripts:** BC-145 `scripts/shepherd-poc/open-pr.sh` applies the validated diff on a new branch and opens a PR against `dev` with labels `shepherd-poc` + `needs-review`.
+- **test:** BC-145 `poc/tests/integration/test_BC_145_shepherd_poc.py` — 18 assertions, no network. Covers workflow shape, SHA-pin invariant, script executability, validator behaviour across 4 diff fixtures (one blocked workflow, one blocked `.shepherd.yml` as prompt-injection drill, one oversize, one accepted pyproject.toml bump), prompt wording, and the "no `GITHUB_TOKEN` in agent step" sandbox check.
+- **docs:** BC-145 `docs/CAPABILITIES.md` adds `CAP-S001`–`CAP-S007` covering the shepherd-poc trust envelope.
+
+### 🧪 Drive-by lint
+
+- **docs:** `ruff format` reconciled `docs/plan/BC-108-docker-events-watchdog-plan.md` and `docs/plan/BC-130-diagnose-heartbeat-mismatch-race-plan.md` (pre-existing trailing-whitespace / extra-blank-line drift).
+
+### ⚠ Known gap (R0)
+
+Agent step runs on a stock GitHub-hosted runner — no network perimeter. The validator is the only enforcement line. R1 adds the network lockdown. Documented in `docs/plan/BC-145-shepherd-poc-plan.md`.
+
+### 🔑 Operator setup after merge
+
+```sh
+gh secret set ANTHROPIC_API_KEY -R bboortz/beaconry
+gh workflow run shepherd-poc.yml -R bboortz/beaconry
+```
+
 ## [v0.22.18] — 2026-11-17
 
 ### 🛡️ Reliability
