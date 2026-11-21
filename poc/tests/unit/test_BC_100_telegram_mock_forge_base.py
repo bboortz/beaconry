@@ -34,12 +34,14 @@ def test_syntax_directive_present() -> None:
 
 
 def test_runtime_src_stage_present() -> None:
+    """FG-075: `base/python-scratch-trixie:latest`; pre-FG-075 flat path kept
+    accepted for rollback symmetry."""
     body = MOCK_DF.read_text()
     assert re.search(
-        r"^FROM\s+ghcr\.io/bboortz/python-scratch-trixie:latest\s+AS\s+runtime-src\b",
+        r"^FROM\s+ghcr\.io/bboortz/(?:base/)?python-scratch-trixie:latest\s+AS\s+runtime-src\b",
         body,
         re.MULTILINE,
-    ), "telegram_mock/Dockerfile missing `FROM python-scratch-trixie:latest AS runtime-src`"
+    ), "telegram_mock/Dockerfile missing `FROM base/python-scratch-trixie:latest AS runtime-src`"
 
 
 def test_runtime_stage_from_runtime_src() -> None:
@@ -50,12 +52,15 @@ def test_runtime_stage_from_runtime_src() -> None:
 
 
 def test_builder_stage_is_forge_builder() -> None:
+    """FG-075 renamed the builder base to `base/python-slim-trixie`; pre-FG-075
+    `forge-builder-python-trixie` kept accepted for rollback."""
     body = MOCK_DF.read_text()
     assert re.search(
-        r"^FROM\s+ghcr\.io/bboortz/forge-builder-python-trixie:latest\s+AS\s+builder\b",
+        r"^FROM\s+ghcr\.io/bboortz/(?:base/python-slim-trixie|forge-builder-python-trixie)"
+        r":latest\s+AS\s+builder\b",
         body,
         re.MULTILINE,
-    ), "telegram_mock/Dockerfile builder stage must `FROM forge-builder-python-trixie:latest`"
+    ), "telegram_mock/Dockerfile builder stage must `FROM base/python-slim-trixie:latest` (FG-075)"
 
 
 # ── G3: BC-099 ABI guard RUN step ───────────────────────────────────────────

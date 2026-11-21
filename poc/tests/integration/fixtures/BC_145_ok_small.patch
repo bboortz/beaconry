@@ -1,0 +1,9 @@
+diff --git a/pyproject.toml b/pyproject.toml
+--- a/pyproject.toml
++++ b/pyproject.toml
+@@ -10,5 +10,5 @@
+ dependencies = [
+-    "requests>=2.31.0",
++    "requests>=2.32.3",
+     "pydantic>=2.0.0",
+ ]

@@ -47,22 +47,23 @@ def test_syntax_directive_present() -> None:
 
 
 def test_runtime_src_stage_present() -> None:
-    """Each Dockerfile declares `FROM ghcr.io/bboortz/python-scratch-trixie:latest AS runtime-src`.
+    """Each Dockerfile declares `FROM ghcr.io/bboortz/base/python-scratch-trixie:latest AS runtime-src`.
 
     The name is load-bearing: the ABI guard mounts
     `--mount=from=runtime-src` and the runtime stage FROMs
     `runtime-src` — both resolve to the same digest within one
-    BuildKit resolution context.
+    BuildKit resolution context. FG-075 reshaped the forge path under
+    `base/`; the pre-FG-075 flat path stays accepted here for rollback.
     """
     stage_re = re.compile(
-        r"^FROM\s+ghcr\.io/bboortz/python-scratch-trixie:latest\s+AS\s+runtime-src\b",
+        r"^FROM\s+ghcr\.io/bboortz/(?:base/)?python-scratch-trixie:latest\s+AS\s+runtime-src\b",
         re.MULTILINE,
     )
     for df in _DOCKERFILES:
         body = df.read_text()
         assert stage_re.search(body), (
-            f"{df.name}: missing `FROM ghcr.io/bboortz/python-scratch-trixie:latest AS runtime-src` "
-            f"— BC-099 ABI guard needs this named handle"
+            f"{df.name}: missing `FROM ghcr.io/bboortz/base/python-scratch-trixie:latest "
+            f"AS runtime-src` — BC-099 ABI guard needs this named handle"
         )
 
 

@@ -4,9 +4,11 @@ Covers:
     - CAP-T198: every compose healthcheck across the 5 compose files
       uses `["CMD", "/hc", "-t", "3", "http://localhost:<port>/<path>"]`.
       Zero inline `python3 -c` healthchecks remain.
-    - CAP-T199: both poc/{hub,scout}/Dockerfile runtime FROM
-      `ghcr.io/bboortz/python-scratch-trixie:latest`. No `:3.13`
-      runtime FROM remains. `verify_pinned_versions.py` passes.
+    - CAP-T199: both poc/{hub,scout}/Dockerfile runtime-src stage FROMs
+      `ghcr.io/bboortz/base/python-scratch-trixie:latest` (FG-075 primary;
+      pre-FG-075 flat path still accepted for rollback). The runtime
+      stage itself FROMs `runtime-src` (BC-099). No `:3.13` runtime
+      FROM remains. `verify_pinned_versions.py` passes.
 """
 
 from __future__ import annotations
@@ -74,28 +76,35 @@ def test_probe_count_matches_expectation() -> None:
 
 
 def test_runtime_from_tracks_latest() -> None:
-    """Both Dockerfiles' runtime stage FROM python-scratch-trixie:latest."""
+    """Both Dockerfiles' runtime-src stage FROM base/python-scratch-trixie:latest.
+
+    Post-BC-099 the runtime stage itself is `FROM runtime-src AS runtime`;
+    the actual forge image is pinned on the `runtime-src` alias.
+    FG-075 (2026-11-20) moved it under `base/`.
+    """
     expected = re.compile(
-        r"^FROM\s+ghcr\.io/bboortz/python-scratch-trixie:latest\s+AS\s+runtime\b",
+        r"^FROM\s+ghcr\.io/bboortz/base/python-scratch-trixie:latest\s+AS\s+runtime-src\b",
         re.MULTILINE,
     )
     for df in (HUB_DF, SCOUT_DF):
         body = df.read_text()
         assert expected.search(body), (
-            f"{df}: runtime stage does not FROM ghcr.io/bboortz/python-scratch-trixie:latest"
+            f"{df}: runtime-src stage does not FROM "
+            f"ghcr.io/bboortz/base/python-scratch-trixie:latest"
         )
 
 
 def test_no_colon_3_13_runtime_remains() -> None:
-    """No runtime stage still FROMs the semver-pinned :3.13 tag."""
+    """No runtime stage still FROMs the semver-pinned :3.13 tag (any path)."""
     stale = re.compile(
-        r"^FROM\s+ghcr\.io/bboortz/python-scratch-trixie:3\.13\s+AS\s+runtime\b",
+        r"^FROM\s+ghcr\.io/bboortz/(?:base/)?python-scratch-trixie:3\.13\s+"
+        r"AS\s+(?:runtime|runtime-src)\b",
         re.MULTILINE,
     )
     for df in (HUB_DF, SCOUT_DF):
         body = df.read_text()
         assert not stale.search(body), (
-            f"{df}: stale runtime FROM python-scratch-trixie:3.13 still present"
+            f"{df}: stale python-scratch-trixie:3.13 runtime FROM still present"
         )
 
 
@@ -109,10 +118,10 @@ def test_verify_pinned_versions_passes_on_branch() -> None:
 
 
 def test_runtime_image_re_accepts_latest() -> None:
-    """RUNTIME_IMAGE_RE directly matches the new preferred tag."""
-    sample = "FROM ghcr.io/bboortz/python-scratch-trixie:latest AS runtime"
+    """RUNTIME_IMAGE_RE directly matches the new preferred FG-075 tag."""
+    sample = "FROM ghcr.io/bboortz/base/python-scratch-trixie:latest AS runtime-src"
     assert verify_pinned_versions.RUNTIME_IMAGE_RE.search(sample), (
-        "RUNTIME_IMAGE_RE must accept :latest"
+        "RUNTIME_IMAGE_RE must accept the FG-075 base/python-scratch-trixie:latest form"
     )
 
 
@@ -125,5 +134,5 @@ def test_runtime_image_re_still_accepts_3_13_for_rollback() -> None:
 def test_runtime_image_preferred_names_latest() -> None:
     assert (
         verify_pinned_versions.RUNTIME_IMAGE_PREFERRED
-        == "ghcr.io/bboortz/python-scratch-trixie:latest"
+        == "ghcr.io/bboortz/base/python-scratch-trixie:latest"
     )

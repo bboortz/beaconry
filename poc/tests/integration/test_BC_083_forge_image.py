@@ -24,13 +24,24 @@ SCOUT_DOCKERFILE = REPO_ROOT / "poc" / "scout" / "Dockerfile"
 PLAN_DOC = REPO_ROOT / "docs" / "plan" / "BC-083-forge-base-image-plan.md"
 
 # BC-097 broadened to accept either `:latest` (preferred) or `:3.13`
-# (rollback path). The repo-identity check is the forge path, not the tag.
-FORGE_RUNTIME_REPO = "ghcr.io/bboortz/python-scratch-trixie"
+# (rollback path). FG-075 moved the forge image under `base/`; the pre-FG-075
+# flat path stays accepted here for rollback. Post-BC-099 the runtime stage
+# FROMs the named `runtime-src` alias rather than the image directly, so the
+# regex accepts either stage name.
+FORGE_RUNTIME_REPO = "ghcr.io/bboortz/base/python-scratch-trixie"
+FORGE_RUNTIME_ROLLBACK_REPOS = (
+    "ghcr.io/bboortz/base/python-scratch-trixie",  # FG-075 primary
+    "ghcr.io/bboortz/python-scratch-trixie",  # pre-FG-075 flat path
+)
 FORGE_RUNTIME_TAGS = ("latest", "3.13")
 # Current preferred ref — used by cache-fixture tests below.
 FORGE_RUNTIME = f"{FORGE_RUNTIME_REPO}:{FORGE_RUNTIME_TAGS[0]}"
 _FORGE_RUNTIME_RE = re.compile(
-    rf"^FROM\s+{re.escape(FORGE_RUNTIME_REPO)}:(?:{'|'.join(re.escape(t) for t in FORGE_RUNTIME_TAGS)})\s+AS\s+runtime\b",
+    r"^FROM\s+(?:"
+    + "|".join(re.escape(r) for r in FORGE_RUNTIME_ROLLBACK_REPOS)
+    + r"):(?:"
+    + "|".join(re.escape(t) for t in FORGE_RUNTIME_TAGS)
+    + r")\s+AS\s+(?:runtime|runtime-src)\b",
     re.MULTILINE,
 )
 

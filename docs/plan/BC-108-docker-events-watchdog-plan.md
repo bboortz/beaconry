@@ -18,6 +18,7 @@ def _blocking_consume() -> None:
     except Exception as e:
         log.warning("BC-093 docker events stream ended: %s", e)
 
+
 await loop.run_in_executor(None, _blocking_consume)
 ```
 
