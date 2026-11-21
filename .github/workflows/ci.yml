@@ -33,7 +33,7 @@ jobs:
     outputs:
       docs_only: ${{ steps.check.outputs.docs_only }}
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 2
       - name: Check for non-docs changes
@@ -63,7 +63,7 @@ jobs:
       github.event_name == 'push' &&
       !contains(fromJSON('["refs/heads/dev", "refs/heads/main"]'), github.ref)
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
 
       - name: Set up Python
         uses: actions/setup-python@v5
@@ -93,7 +93,7 @@ jobs:
       (github.event_name == 'push' && github.ref == 'refs/heads/dev') ||
       (github.event_name == 'pull_request' && github.base_ref == 'dev')
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0  # bump_version needs history to walk back
 
@@ -159,7 +159,7 @@ jobs:
     runs-on: ubuntu-latest
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
