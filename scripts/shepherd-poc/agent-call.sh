@@ -3,7 +3,14 @@
 # ask the agent to produce a minimal unified diff (scope: dependencies +
 # lockfiles only). Writes to $DIFF_PATH on success.
 #
-# Required env:
+# Modes:
+#   agent-call.sh                        Live mode (calls Anthropic API).
+#   agent-call.sh --replay <fixture>     Replay mode (SH-005 injection drill).
+#                                        Reads .canned_agent_response from the
+#                                        fixture JSON and writes it to
+#                                        $DIFF_PATH. No API, no secrets.
+#
+# Required env (live mode only):
 #   ANTHROPIC_API_KEY  — set via GitHub secret, not in-tree
 #
 # Optional env:
@@ -18,19 +25,59 @@
 #   1  no findings, nothing to do
 #   2  agent returned NO_FIX_POSSIBLE
 #   3  API error after retries
-#   4  config error (missing key)
+#   4  config error (missing key, bad fixture, unknown arg)
 
 set -eu
 
-: "${ANTHROPIC_API_KEY:?ANTHROPIC_API_KEY is required (GitHub secret)}"
+REPLAY_FILE=""
+while [ "$#" -gt 0 ]; do
+  case "$1" in
+    --replay)
+      [ -n "${2:-}" ] || { echo "--replay needs a fixture path" >&2; exit 4; }
+      REPLAY_FILE=$2; shift 2 ;;
+    --help|-h)
+      sed -n '2,/^$/p' "$0" | sed 's/^# //' | sed 's/^#//'
+      exit 0 ;;
+    *)
+      echo "unknown argument: $1" >&2; exit 4 ;;
+  esac
+done
 
 FINDINGS_PATH="${FINDINGS_PATH:-/tmp/findings.json}"
 DIFF_PATH="${DIFF_PATH:-/tmp/diff.patch}"
+
+command -v jq >/dev/null || { echo "jq missing" >&2; exit 4; }
+
+# ---- Replay mode (SH-005 injection drill) -----------------------------
+# No network, no API key. Reads the canned response from the fixture and
+# writes it to $DIFF_PATH. If the fixture's canned response is the literal
+# string NO_FIX_POSSIBLE, exit 2 to match the live-mode contract.
+if [ -n "$REPLAY_FILE" ]; then
+  if [ ! -f "$REPLAY_FILE" ]; then
+    echo "replay: file not found: $REPLAY_FILE" >&2
+    exit 4
+  fi
+  response=$(jq -r '.canned_agent_response // ""' "$REPLAY_FILE")
+  if [ -z "$response" ]; then
+    echo "replay: fixture has no .canned_agent_response: $REPLAY_FILE" >&2
+    exit 4
+  fi
+  if [ "$response" = "NO_FIX_POSSIBLE" ]; then
+    echo "→ (replay) Agent returned NO_FIX_POSSIBLE"
+    exit 2
+  fi
+  printf '%s\n' "$response" > "$DIFF_PATH"
+  echo "→ (replay) Diff written: $DIFF_PATH ($(wc -l < "$DIFF_PATH") lines)"
+  exit 0
+fi
+
+# ---- Live mode --------------------------------------------------------
+: "${ANTHROPIC_API_KEY:?ANTHROPIC_API_KEY is required (GitHub secret)}"
+
 MODEL="${MODEL:-claude-sonnet-4-6}"
 MAX_TOKENS="${MAX_TOKENS:-4096}"
 MAX_RETRIES="${MAX_RETRIES:-3}"
 
-command -v jq >/dev/null || { echo "jq missing" >&2; exit 4; }
 command -v curl >/dev/null || { echo "curl missing" >&2; exit 4; }
 
 if [ ! -s "$FINDINGS_PATH" ]; then
@@ -109,6 +156,7 @@ You are a careful dependency-fixer running inside a locked sandbox for the Sheph
 - Anything under .github/workflows/
 - .shepherd.yml
 - scripts/release.sh
+- scripts/shepherd-poc/ (these are the enforcement scripts themselves)
 - VERSION
 - Any *.env
 

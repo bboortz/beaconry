@@ -27,7 +27,9 @@ MAX_LINES="${MAX_LINES:-50}"
 #
 # Rule of thumb: these are the files whose change would let shepherd rewrite
 # its own rules. Keep the list narrow and document additions in CHANGELOG.
-PROTECTED_RE='^(\.github/workflows/.*|\.shepherd\.yml|scripts/release\.sh|VERSION|.*\.env|.*\.pem|.*\.key)$'
+# scripts/shepherd-poc/* added by SH-005: these ARE the enforcement scripts;
+# if the agent can touch them, it can disable the blocklist.
+PROTECTED_RE='^(\.github/workflows/.*|\.shepherd\.yml|scripts/(release\.sh|shepherd-poc/.*)|VERSION|.*\.env|.*\.pem|.*\.key)$'
 
 # ---- Scan file headers --------------------------------------------------
 # Unified-diff file lines look like:
