@@ -1,83 +1,17 @@
 ---
-# Shepherd Release 0 POC on beaconry (BC-145).
-# Design: https://github.com/bboortz/shepherd/blob/main/docs/stories/SH-004-r0-poc-on-healthy.md
-# First pilot: https://github.com/bboortz/healthy/blob/main/docs/stories/HC-008-shepherd-poc.md
-# This repo's story: docs/stories/BC-145-shepherd-poc.md
-
-name: shepherd-poc
-
+# Shepherd caller (SH-007 R1-A). Replaced the R0 copied-scripts flow with
+# a thin uses: of bboortz/shepherd's reusable workflow. SHA-pinned to the
+# commit that shipped v0.5.0-rc1.
+name: shepherd
 "on":
-  # 30-minute offset from healthy's 05:00 UTC cron: avoids simultaneous
-  # Anthropic API calls on the same key and makes per-repo workflow runs
-  # easier to tell apart in logs.
   schedule:
     - cron: "30 5 * * *"
   workflow_dispatch: {}
-
 permissions:
   contents: write
   pull-requests: write
-
 jobs:
-  scan-and-fix:
-    runs-on: ubuntu-latest
-    env:
-      FINDINGS_PATH: /tmp/findings.json
-      DIFF_PATH: /tmp/diff.patch
-    steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
-        with:
-          fetch-depth: 0
-
-      - name: Install Trivy (sigstore-verified)
-        run: ./scripts/shepherd-poc/install-trivy.sh
-
-      - name: Trivy fs scan
-        run: |
-          trivy fs \
-            --severity HIGH,CRITICAL \
-            --ignore-unfixed \
-            --format json \
-            --output "$FINDINGS_PATH" \
-            --exit-code 0 \
-            .
-
-      - name: Agent call
-        id: agent
-        env:
-          ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
-        run: |
-          set +e
-          ./scripts/shepherd-poc/agent-call.sh
-          rc=$?
-          echo "rc=$rc" >> "$GITHUB_OUTPUT"
-          case "$rc" in
-            0) echo "→ Diff produced" ;;
-            1) echo "→ No findings. Nothing to do." ;;
-            2) echo "→ Agent said NO_FIX_POSSIBLE" ;;
-            *) echo "::error::agent-call.sh exit $rc"; exit "$rc" ;;
-          esac
-
-      - name: Validate diff (agent output, manifest-only)
-        if: steps.agent.outputs.rc == '0'
-        run: ./scripts/shepherd-poc/validate.sh "$DIFF_PATH"
-
-      - name: Setup Node.js (needed for regen-lockfile → npm install)
-        if: steps.agent.outputs.rc == '0'
-        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1  # v7.1.0
-        with:
-          node-version: "20"
-
-      - name: Regenerate lockfile (deterministic — replaces DIFF_PATH)
-        if: steps.agent.outputs.rc == '0'
-        run: ./scripts/shepherd-poc/regen-lockfile.sh
-
-      - name: Validate combined diff (manifest + regenerated lockfile)
-        if: steps.agent.outputs.rc == '0'
-        run: ./scripts/shepherd-poc/validate.sh "$DIFF_PATH"
-
-      - name: Open PR
-        if: steps.agent.outputs.rc == '0'
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: ./scripts/shepherd-poc/open-pr.sh "$DIFF_PATH"
+  agent:
+    uses: bboortz/shepherd/.github/workflows/reusable-shepherd.yml@3550c80ed15bd8cd9a150dc61dbe2dc9744a90b5
+    secrets:
+      ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
