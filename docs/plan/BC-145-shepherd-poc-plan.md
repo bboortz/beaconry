@@ -70,13 +70,17 @@ via the integration tests below; live-dispatch rows get filled after the first
 | Shepherd scripts are executable (agent-call) | integration | `test_BC_145_shepherd_poc.py::test_script_is_executable[agent-call.sh]` | ✓ |
 | Shepherd scripts are executable (validate) | integration | `test_BC_145_shepherd_poc.py::test_script_is_executable[validate.sh]` | ✓ |
 | Shepherd scripts are executable (open-pr) | integration | `test_BC_145_shepherd_poc.py::test_script_is_executable[open-pr.sh]` | ✓ |
+| Shepherd scripts are executable (regen-lockfile) | integration | `test_BC_145_shepherd_poc.py::test_script_is_executable[regen-lockfile.sh]` | ✓ |
 | Validator blocks edits to `.github/workflows/*` | integration | `test_BC_145_shepherd_poc.py::test_validate_blocks_workflow_touch` | ✓ |
 | Validator blocks edits to `shepherd.yml` | integration | `test_BC_145_shepherd_poc.py::test_validate_blocks_shepherd_yml_touch` | ✓ |
 | Validator blocks oversize diffs | integration | `test_BC_145_shepherd_poc.py::test_validate_blocks_oversize_diff` | ✓ |
 | Validator accepts a small allowed diff | integration | `test_BC_145_shepherd_poc.py::test_validate_accepts_small_allowed_diff` | ✓ |
 | Trivy install uses `cosign verify-blob` | integration | `test_BC_145_shepherd_poc.py::test_install_trivy_dry_run_names_cosign_verify_blob` | ✓ |
-| Agent prompt mentions dependencies + lockfiles | integration | `test_BC_145_shepherd_poc.py::test_prompt_mentions_dependencies_and_lockfiles` | ✓ |
+| Agent prompt declares manifest-only scope (hybrid flow) | integration | `test_BC_145_shepherd_poc.py::test_prompt_declares_manifest_only_scope` | ✓ |
 | Agent prompt names `shepherd.yml` as forbidden | integration | `test_BC_145_shepherd_poc.py::test_prompt_names_shepherd_yml_as_forbidden` | ✓ |
 | Agent prompt specifies the "no fix possible" fallback | integration | `test_BC_145_shepherd_poc.py::test_prompt_specifies_no_fix_possible_fallback` | ✓ |
 | Agent step env is only `ANTHROPIC_API_KEY` | integration | `test_BC_145_shepherd_poc.py::test_agent_step_env_only_has_anthropic_api_key` | ✓ |
+| Workflow wires Setup Node.js step | integration | `test_BC_145_shepherd_poc.py::test_workflow_wires_setup_node_step` | ✓ |
+| Workflow wires Regenerate lockfile step | integration | `test_BC_145_shepherd_poc.py::test_workflow_wires_regen_lockfile_step` | ✓ |
+| Workflow wires second Validate (combined) step | integration | `test_BC_145_shepherd_poc.py::test_workflow_wires_second_validate_step` | ✓ |
 | Live post-dispatch — first run on beaconry | live | first `workflow_dispatch` observed | ❌ pending |

@@ -58,7 +58,21 @@ jobs:
             *) echo "::error::agent-call.sh exit $rc"; exit "$rc" ;;
           esac
 
-      - name: Validate diff
+      - name: Validate diff (agent output, manifest-only)
+        if: steps.agent.outputs.rc == '0'
+        run: ./scripts/shepherd-poc/validate.sh "$DIFF_PATH"
+
+      - name: Setup Node.js (needed for regen-lockfile → npm install)
+        if: steps.agent.outputs.rc == '0'
+        uses: actions/setup-node@39370e3970a6d050c480ffad4ff0ed4d3fdee5af  # v4.1.0
+        with:
+          node-version: "20"
+
+      - name: Regenerate lockfile (deterministic — replaces DIFF_PATH)
+        if: steps.agent.outputs.rc == '0'
+        run: ./scripts/shepherd-poc/regen-lockfile.sh
+
+      - name: Validate combined diff (manifest + regenerated lockfile)
         if: steps.agent.outputs.rc == '0'
         run: ./scripts/shepherd-poc/validate.sh "$DIFF_PATH"
 
