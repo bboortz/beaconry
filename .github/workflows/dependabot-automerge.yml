@@ -125,6 +125,19 @@ jobs:
 
           # --- All gates green: enable auto-merge ---------------------------
           # GitHub merges when all required status checks pass.
+          # `gh pr merge --auto` requires branch protection on the base branch —
+          # without it, the API rejects with "Protected branch rules not configured".
+          # Treat that failure as "leave open, needs setup", not as a crashing
+          # workflow (the step always exits 0; the decision is in the annotation).
           echo "all gates green — enabling auto-merge"
-          gh pr merge "$PR_NUMBER" -R "$REPO" --auto --merge
-          echo "::notice::auto-merge decision: enabled for PR #$PR_NUMBER ($NAME $FROM -> $TO, $LEVEL)"
+          if err=$(gh pr merge "$PR_NUMBER" -R "$REPO" --auto --merge 2>&1); then
+            echo "::notice::auto-merge decision: enabled for PR #$PR_NUMBER ($NAME $FROM -> $TO, $LEVEL)"
+          else
+            case "$err" in
+              *"Protected branch rules not configured"*)
+                decision "auto-merge needs branch protection on base; set a required status check on this branch, then rebase this PR" ;;
+              *)
+                echo "::warning::auto-merge enable failed: $err"
+                decision "auto-merge enable failed; see workflow log" ;;
+            esac
+          fi
