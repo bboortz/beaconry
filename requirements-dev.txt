@@ -2,7 +2,7 @@
 # Runtime deps for scout/hub are in poc/scout/requirements.txt and poc/hub/requirements.txt.
 
 # Linting + formatting
-ruff==0.14.1
+ruff==0.17.5
 
 # Type checking
 pyright==1.1.414
