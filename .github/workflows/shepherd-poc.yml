@@ -12,6 +12,6 @@ permissions:
   pull-requests: write
 jobs:
   agent:
-    uses: bboortz/shepherd/.github/workflows/reusable-shepherd.yml@3550c80ed15bd8cd9a150dc61dbe2dc9744a90b5
+    uses: bboortz/shepherd/.github/workflows/reusable-shepherd.yml@7304593d5504f4cdfd0a63816cddc066999ed419
     secrets:
       ANTHROPIC_API_KEY: ${{ secrets.ANTHROPIC_API_KEY }}
