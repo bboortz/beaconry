@@ -16,8 +16,8 @@ normal operation. Current ordering in `_ingest_candidates`
 (hub.py:5457-5462):
 
 ```python
-_last_scan_integrity_per_host[host] = {...}   # in-memory first
-_persist_integrity_state(host, ...)            # SQLite second
+_last_scan_integrity_per_host[host] = {...}  # in-memory first
+_persist_integrity_state(host, ...)  # SQLite second
 ```
 
 If uvicorn gets SIGTERM between these two statements (cheap, ~µs

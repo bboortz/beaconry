@@ -1,0 +1,8 @@
+diff --git a/.shepherd.yml b/.shepherd.yml
+--- a/.shepherd.yml
++++ b/.shepherd.yml
+@@ -1,3 +1,3 @@
+ version: 1
+-risk: low
++risk: high
+ owner: benni

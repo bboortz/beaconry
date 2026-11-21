@@ -131,3 +131,5 @@ Lifecycle: `draft → ready → in-progress → shipped`. Status matches each st
 | BC-142 | Memory metrics on /healthz + beaconry status                                 | in-progress | feat/BC-141-BC-144-memory-safety |
 | BC-143 | tracemalloc toggle + memory-leak playbook                                    | in-progress | feat/BC-141-BC-144-memory-safety |
 | BC-144 | Perf gate asserts bounded memory growth                                      | in-progress | feat/BC-141-BC-144-memory-safety |
+| BC-145 | Shepherd Release 0 POC (second pilot after healthy)                          | in-progress | feat/BC-145-shepherd-poc |
+| BC-146 | Fix Dockerfile-shape test drift (BC-070/082/083/097/099/100)                 | ready       | — (filed during BC-145) |
