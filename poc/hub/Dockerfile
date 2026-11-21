@@ -13,20 +13,37 @@
 # Forge's own CI made the same pivot for syft/grype/cosign/hadolint.
 FROM anchore/grype:latest AS grype-src
 
+# ── Stage 0 (added by FG-075 migration): syft via forge mirror ─────────────
+# base/python-slim-trixie no longer ships syft (forge FG-075 moved it to
+# base/* as a runtime foundation, not a builder-stage image). Pull syft
+# from the forge-signed mirror/syft passthrough instead — same digest,
+# same cosign identity as what forge-builder-python-trixie bundled.
+FROM ghcr.io/bboortz/mirror/syft:latest AS syft-src
+
 # ── Stage 0b: runtime base reference (BC-099 ABI guard source) ─────────────
 # Named FROM so the ABI guard's `--mount=from=runtime-src` resolves to the
 # same digest BuildKit will use for the Stage 2 runtime FROM. Without
 # this named handle, BuildKit could theoretically re-resolve the
 # `:latest` tag between the mount and the FROM — rare but possible,
 # and exactly the race class BC-099 is defending against.
-FROM ghcr.io/bboortz/base/python-trixie:latest AS runtime-src
+FROM ghcr.io/bboortz/base/python-scratch-trixie:latest AS runtime-src
 
 # ── Stage 1: builder ────────────────────────────────────────────────────────
 # BC-095: forge-builder-python-trixie ships Python + pip + syft + CA certs + tar.
 # Python minor is detected at build time (BC-098) and matches runtime by
 # forge contract (both images bumped as a pair). Extends BC-083's runtime
 # migration one stage up.
-FROM ghcr.io/bboortz/forge-builder-python-trixie:latest AS builder
+FROM ghcr.io/bboortz/base/python-slim-trixie:latest AS builder
+
+# FG-075 migration: base/python-slim-trixie defaults USER 65532. Pip
+# install writes to /install (and hub's apt-get install curl needs
+# root) so flip back to root for the builder stage. The runtime stage
+# FROMs scratch-shape base which already runs as 65532.
+USER 0
+
+# FG-075 migration: pull syft from the forge-signed mirror stage.
+COPY --from=syft-src /syft /usr/local/bin/syft
+
 
 # grype — pulled from the stage above, no GitHub release CDN dependency.
 COPY --from=grype-src /grype /usr/local/bin/grype
@@ -83,15 +100,15 @@ RUN --mount=from=runtime-src,source=/usr/local/lib,target=/runtime-lib \
     BUILDER_PY_VER="$(python3 -c 'import sys; print(f"{sys.version_info.major}.{sys.version_info.minor}")')" \
  && RUNTIME_PY_DIR_COUNT="$(ls /runtime-lib | grep -cE '^python3\.[0-9]+$')" \
  && if [ "$RUNTIME_PY_DIR_COUNT" != "1" ]; then \
-      echo "BC-099: expected exactly one python3.X dir in python-scratch-trixie:latest, found $RUNTIME_PY_DIR_COUNT" >&2; \
+      echo "BC-099: expected exactly one python3.X dir in base/python-scratch-trixie:latest, found $RUNTIME_PY_DIR_COUNT" >&2; \
       ls -la /runtime-lib >&2; exit 1; \
     fi \
  && RUNTIME_PY_VER="$(ls /runtime-lib | grep -E '^python3\.[0-9]+$' | sed 's/^python//')" \
  && if [ "$BUILDER_PY_VER" != "$RUNTIME_PY_VER" ]; then \
       echo "" >&2; \
       echo "BC-099 ABI guard tripped: forge base Python minors disagree." >&2; \
-      echo "  forge-builder-python-trixie:latest  -> Python ${BUILDER_PY_VER}" >&2; \
-      echo "  python-scratch-trixie:latest -> Python ${RUNTIME_PY_VER}" >&2; \
+      echo "  base/python-slim-trixie:latest  -> Python ${BUILDER_PY_VER}" >&2; \
+      echo "  base/python-scratch-trixie:latest -> Python ${RUNTIME_PY_VER}" >&2; \
       echo "" >&2; \
       echo "Cause: forge republished one base's :latest tag before the other" >&2; \
       echo "during a Python minor bump. Proceeding would ship wheels at" >&2; \
@@ -101,8 +118,8 @@ RUN --mount=from=runtime-src,source=/usr/local/lib,target=/runtime-lib \
       echo "" >&2; \
       echo "Remedy: wait for forge's next cron rebuild to republish the lagging" >&2; \
       echo "base, then:" >&2; \
-      echo "  docker pull ghcr.io/bboortz/forge-builder-python-trixie:latest" >&2; \
-      echo "  docker pull ghcr.io/bboortz/python-scratch-trixie:latest" >&2; \
+      echo "  docker pull ghcr.io/bboortz/base/python-slim-trixie:latest" >&2; \
+      echo "  docker pull ghcr.io/bboortz/base/python-scratch-trixie:latest" >&2; \
       echo "  <re-run the build>" >&2; \
       echo "" >&2; \
       echo "See docs/stories/BC-099-base-abi-guard.md." >&2; \
@@ -113,7 +130,7 @@ RUN --mount=from=runtime-src,source=/usr/local/lib,target=/runtime-lib \
        "/stage/usr/local/lib/python${BUILDER_PY_VER}/site-packages"
 
 # ── Stage 2: runtime (forge) ────────────────────────────────────────────────
-# ghcr.io/bboortz/python-scratch-trixie:latest — self-owned forge image.
+# ghcr.io/bboortz/base/python-scratch-trixie:latest — self-owned forge image.
 # PATH=/usr/local/bin, baked USER 65532:65532 + ENTRYPOINT
 # /usr/local/bin/python3 + SSL_CERT_FILE + /etc/passwd entry for nonroot.
 # No shell, no apt, no coreutils. BC-083 pre-flight #2 verified.
