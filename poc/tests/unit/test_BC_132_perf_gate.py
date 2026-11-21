@@ -347,3 +347,45 @@ def test_query_audit_index_newest_first(hub_env: Path) -> None:
     # Assert the RESULT COUNT matches and the SET matches — the order
     # test is covered separately when ts differs.
     assert len(result) == 5
+
+
+# ── BC-132: perf_seeder.main() CLI wrapper ──────────────────────────────
+
+
+def test_perf_seeder_main_writes_fixture_and_returns_zero(tmp_path: Path) -> None:
+    """main() exercises the argparse wrapper around seed_perf_fixture."""
+    rc = perf_seeder.main(
+        [
+            "--out",
+            str(tmp_path),
+            "--seed",
+            "42",
+            "--findings",
+            "20",
+            "--audit-events",
+            "100",
+        ],
+    )
+    assert rc == 0
+    # Both artefacts the wrapper summarises must exist on disk.
+    assert (tmp_path / "audit.log").is_file()
+    assert (tmp_path / "beaconry.db").is_file()
+
+
+def test_perf_seeder_main_falls_back_to_env_out_dir(tmp_path: Path, monkeypatch) -> None:
+    """When --out is omitted, main() uses $DATA_DIR."""
+    monkeypatch.setenv("DATA_DIR", str(tmp_path))
+    assert (
+        perf_seeder.main(
+            [
+                "--seed",
+                "7",
+                "--findings",
+                "10",
+                "--audit-events",
+                "50",
+            ],
+        )
+        == 0
+    )
+    assert (tmp_path / "beaconry.db").is_file()

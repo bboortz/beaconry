@@ -98,3 +98,61 @@ def test_check_service_is_empty_when_no_env_reads(tmp_path: Path) -> None:
     )
     errors = lint.check_service(poc, "scout")
     assert errors == []
+
+
+def test_check_service_short_circuits_when_service_dir_missing(tmp_path: Path) -> None:
+    # No service directory → the lint silently returns [] (nothing to check).
+    poc = tmp_path / "poc"
+    poc.mkdir()
+    assert lint.check_service(poc, "hub") == []
+
+
+def test_check_service_short_circuits_when_compose_missing(tmp_path: Path) -> None:
+    # Service directory exists but no compose file → no violations to report.
+    poc = tmp_path / "poc"
+    _write(poc / "hub" / "hub.py", "x = 1\n")
+    assert lint.check_service(poc, "hub") == []
+
+
+def test_propagated_env_vars_handles_dict_form_environment(tmp_path: Path) -> None:
+    # compose supports `environment: { NAME: value }` dict form alongside the
+    # list form. The lint must recognise both.
+    compose = tmp_path / "docker-compose.yml"
+    compose.write_text(
+        dedent(
+            """\
+            services:
+              hub:
+                environment:
+                  BEACONRY_A: x
+                  BEACONRY_B: y
+                  OTHER: skip
+            """
+        )
+    )
+    propagated = lint.propagated_env_vars_for_service(compose, "hub")
+    assert propagated == {"BEACONRY_A", "BEACONRY_B"}
+
+
+def test_propagated_env_vars_regex_fallback_when_yaml_unavailable(
+    tmp_path: Path, monkeypatch
+) -> None:
+    # Simulate PyYAML not being installed: lint falls back to a regex scan.
+    monkeypatch.setattr(lint, "yaml", None)
+    compose = tmp_path / "docker-compose.yml"
+    compose.write_text(
+        dedent(
+            """\
+            services:
+              hub:
+                environment:
+                  - BEACONRY_FOO=${BEACONRY_FOO:-}
+                  - BEACONRY_BAR
+                  - OTHER=skip
+                image: hub:latest
+            """
+        )
+    )
+    propagated = lint.propagated_env_vars_for_service(compose, "hub")
+    # Only BEACONRY_-prefixed names survive the filter; "OTHER" is dropped.
+    assert propagated == {"BEACONRY_FOO", "BEACONRY_BAR"}
