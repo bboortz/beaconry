@@ -1,0 +1,17 @@
+---
+version: 1
+risk: low            # low | medium | high
+build: make build
+test: make test
+auto_merge:
+  patch: true
+  minor: true
+  major: false
+security_fix: pr-only
+notify: ntfy
+owner: benni
+
+# Dependabot baseline (SH-011). Shepherd-managed repo.
+dependabot:
+  enforce_enabled: true
+  auto_merge: false
