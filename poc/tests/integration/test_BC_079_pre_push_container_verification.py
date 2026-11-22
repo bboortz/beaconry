@@ -1,7 +1,10 @@
-"""BC-079 — pre-push hook invokes make check-full.
+"""BC-079 (updated by BC-148) — pre-push hook shape.
 
 Covers:
-    - CAP-T162: Pre-push hook invokes `make check-full` with CLI-smoke skipped
+    - CAP-T162 (updated): pre-push runs `make check` (fast tier) after BC-148.
+      Container-level gates (compose + real_tools + test-e2e + test-scenarios)
+      moved to CI; they no longer block pushes. See
+      `docs/stories/BC-148-prepush-check-fast.md` for rationale.
 """
 
 from __future__ import annotations
@@ -27,39 +30,38 @@ def _hooks() -> list[dict]:
 # ── Pre-push config ─────────────────────────────────────────────────────────
 
 
-def test_pre_push_hook_runs_make_check_full() -> None:
-    """CAP-T162: pre-push must invoke `make check-full` so container-level
-    gates (compose + real_tools + test-e2e + test-scenarios) block pushes."""
+def test_pre_push_hook_runs_make_check() -> None:
+    """CAP-T162 (BC-148): pre-push must invoke `make check` (fast tier).
+    Container gates (compose + real_tools + e2e + scenarios) moved to CI."""
     hooks = _hooks()
     pre_push_hooks = [h for h in hooks if "pre-push" in h.get("stages", [])]
     assert pre_push_hooks, "pre-push stage has no hooks configured"
     entries = " ".join(str(h.get("entry", "")) for h in pre_push_hooks)
-    assert "check-full" in entries, (
-        "no pre-push hook calls `make check-full`; container gates do not block pushes"
+    assert "make check" in entries, (
+        "no pre-push hook calls `make check`; fast tier does not block pushes"
     )
 
 
-def test_pre_push_skips_cli_smoke() -> None:
-    """CAP-T162: test-cli needs a live operator stack; pre-push can't assume
-    one is running. Hook must set BEACONRY_SKIP_CLI_SMOKE=1 so test-cli
-    skips cleanly instead of failing on a missing hub."""
+def test_pre_push_does_not_run_check_full() -> None:
+    """BC-148 regression guard: pre-push must NOT run `make check-full` —
+    its Docker-based compose + real_tools tests hit Hub rate limits and
+    forced routine --no-verify. CI covers check-full on dev push."""
     hooks = _hooks()
     pre_push_hooks = [h for h in hooks if "pre-push" in h.get("stages", [])]
     entries = " ".join(str(h.get("entry", "")) for h in pre_push_hooks)
-    assert "BEACONRY_SKIP_CLI_SMOKE" in entries, (
-        "pre-push must set BEACONRY_SKIP_CLI_SMOKE=1 so test-cli doesn't block "
-        "developers without a live stack"
+    assert "check-full" not in entries, (
+        "pre-push must not run `make check-full` (BC-148 — moved to CI)"
     )
 
 
 def test_pre_push_no_standalone_pytest() -> None:
-    """CAP-T162: `make check-full` includes pytest. The standalone
-    pytest-pre-push hook is now redundant — remove it to keep the hook
+    """CAP-T162: `make check` includes pytest (fast tier). The standalone
+    pytest-pre-push hook is redundant — remove it to keep the hook
     chain minimal and the semantics unambiguous."""
     hooks = _hooks()
     pre_push_hook_names = {h.get("id", "") for h in _hooks() if "pre-push" in h.get("stages", [])}
     assert "pytest-pre-push" not in pre_push_hook_names, (
-        "standalone pytest-pre-push hook is redundant with `make check-full`; remove it"
+        "standalone pytest-pre-push hook is redundant with `make check`; remove it"
     )
     assert hooks, "pre-commit config lost all hooks"
 

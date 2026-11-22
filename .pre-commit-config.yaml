@@ -2,9 +2,16 @@
 # Install both hook types with:  make install-hooks
 #
 # On commit  (staged files, fast): ruff + ruff format + pyright
-# On push    (full repo):          make check-full (BC-079 — container verification)
+# On push    (full repo):          make check (fast tier — BC-148 2026-11-22)
 #                                  + verify-version-bumped + verify-changelog
 #                                  + verify-feature-complete
+#
+# BC-148: pre-push swapped from `check-full` → `check` after 2026-11-22
+# observation that Docker-based compose tests inside check-full hit
+# Docker Hub rate limits during active sessions. `check` covers lint +
+# types + unit tests + all verify-* (BC-016/019/021/040/056/062/069/074).
+# The compose + real_tools marker-only suite from `check-full` runs in CI
+# (`make check-full` still invoked by workflow on dev push + nightly).
 
 repos:
   - repo: https://github.com/astral-sh/ruff-pre-commit
@@ -21,14 +28,16 @@ repos:
 
   - repo: local
     hooks:
-      # BC-079: full container verification on pre-push. Includes pytest
-      # (fast tier) + compose + real_tools + test-e2e + test-scenarios.
-      # CLI-smoke is skipped because it requires a live operator stack the
-      # developer may not have running. Takes ~2:30 locally; bypass with
-      # --no-verify only in emergencies.
-      - id: make-check-full-pre-push
-        name: make check-full (pre-push)
-        entry: bash -c 'source .venv/bin/activate && BEACONRY_SKIP_CLI_SMOKE=1 make check-full'
+      # BC-148 (2026-11-22): pre-push runs `make check` (fast tier).
+      # Covers lint + types + unit + 15+ verify-* scripts + smoke. ~45s
+      # typical. Full-tier (`check-full` with compose + real_tools +
+      # test-e2e + test-scenarios) stays in CI + nightly — pre-push
+      # should be fast enough that developers don't reach for
+      # --no-verify routinely. Earlier shape was check-full; replaced
+      # after Docker Hub rate-limit observations on 2026-11-22.
+      - id: make-check-pre-push
+        name: make check (pre-push)
+        entry: bash -c 'source .venv/bin/activate && make check'
         language: system
         pass_filenames: false
         stages: [pre-push]
