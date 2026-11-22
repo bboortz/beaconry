@@ -27,7 +27,11 @@ MAKE_TARGET_RE = re.compile(r"\bmake\s+([a-z][a-z0-9_-]*)\b")
 MAKE_TARGET_BACKTICK_RE = re.compile(r"`make\s+([a-z][a-z0-9_-]*)`")
 STATUS_ENUM_RE = re.compile(r"STATUS=([a-z_][a-z0-9_]*(?:\|[a-z_][a-z0-9_]*)+)")
 BEACONRY_ENV_RE = re.compile(r"\bBEACONRY_[A-Z0-9_]+\b")
-PHONY_RE = re.compile(r"^\.PHONY:\s*(.+)$", re.MULTILINE)
+# GNU make allows `\`-at-end-of-line to continue a logical line onto the next
+# physical line. We join those before splitting on whitespace so multi-line
+# `.PHONY:` declarations are read as one list (otherwise the trailing `\` gets
+# captured as a target name and continuation lines are silently invisible).
+PHONY_RE = re.compile(r"^\.PHONY:\s*((?:.*\\\n)*.+)$", re.MULTILINE)
 HELP_BLOCK_RE = re.compile(r"^help:\n((?:\t.*\n)+)", re.MULTILINE)
 STATUS_ORDER_RE = re.compile(
     r"STATUS_ORDER\s*=\s*\(([\s\S]+?)\)",
@@ -46,7 +50,8 @@ class Violation:
 def parse_phony(makefile_text: str) -> set[str]:
     out: set[str] = set()
     for m in PHONY_RE.finditer(makefile_text):
-        out.update(m.group(1).split())
+        logical = m.group(1).replace("\\\n", " ")
+        out.update(tok for tok in logical.split() if tok != "\\")
     return out
 
 
