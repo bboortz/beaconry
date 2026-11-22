@@ -3,7 +3,7 @@
 CVE scanning + auto-remediation for self-hosted operators.
 Goal: compress "CVE published → infrastructure patched and verified" from days to minutes.
 
-- **Full design**: [`DESIGN.md`](DESIGN.md)
+- **Full design**: [`docs/specs/DESIGN.md`](docs/specs/DESIGN.md)
 - **Development process**: [`CLAUDE.md`](CLAUDE.md), [`memory/workflow.md`](memory/workflow.md)
 - **Stories (operator scenarios)**: [`docs/stories/`](docs/stories/)
 
@@ -190,7 +190,6 @@ See `memory/health-checks.md` for the full convention and the new-container chec
 ## Repository layout
 
 ```
-DESIGN.md               full product design (vision, architecture, business model)
 Makefile                local gates — "make check"
 pyproject.toml          ruff + pyright + pytest config
 .pre-commit-config.yaml fast hooks on commit + pytest on push
@@ -199,8 +198,10 @@ poc/                    Docker Compose POC: hub + scout + executors
   hub/                  CVE matcher (grype) + Telegram bot + executors
   hub/executor/         pluggable remediation adapters
   tests/                pytest pyramid (unit, integration, e2e, fixtures)
-docs/                   user-facing documentation lands here
+docs/                   three-folder layout (BC-147): one class per subdir
+  specs/                specifications + _template + INDEX (DESIGN, CAPABILITIES, …)
   stories/              operator scenarios (BC-NNN-<slug>.md) + INDEX + _template
   plan/                 per-feature plan docs (BC-NNN-<slug>-plan.md) + _template
+  operations/           runbooks (step-by-step playbooks, distinct from specs)
 memory/                 persistent context for development sessions
 ```

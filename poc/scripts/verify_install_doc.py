@@ -1,9 +1,9 @@
-"""BC-056 — docs/INSTALL.md drift lint (short-name reshape of BC-054).
+"""BC-056 — docs/specs/INSTALL.md drift lint (short-name reshape of BC-054).
 
-Three checks on `docs/INSTALL.md`:
+Three checks on `docs/specs/INSTALL.md`:
 
 1. **Env vars** — every uppercase identifier referenced in INSTALL.md
-   must appear as a row in `docs/VARIABLES.md`. Catches stale env-var
+   must appear as a row in `docs/specs/VARIABLES.md`. Catches stale env-var
    names that got renamed.
 
 2. **Make targets** — every `make <target>` reference must appear in
@@ -25,8 +25,8 @@ import re
 import sys
 from pathlib import Path
 
-INSTALL_RELPATH = Path("docs") / "INSTALL.md"
-VARIABLES_RELPATH = Path("docs") / "VARIABLES.md"
+INSTALL_RELPATH = Path("docs") / "specs" / "INSTALL.md"
+VARIABLES_RELPATH = Path("docs") / "specs" / "VARIABLES.md"
 MAKEFILE_RELPATH = Path("Makefile")
 
 # Backticked uppercase identifiers in INSTALL.md. We only enforce on
@@ -100,8 +100,8 @@ def check_env_vars(install_text: str, variables_text: str) -> list[str]:
         if "_" not in match and len(match) < 6:
             continue
         violations.append(
-            f"`{match}` referenced in docs/INSTALL.md but not documented in "
-            f"docs/VARIABLES.md. Add a row OR rename the reference."
+            f"`{match}` referenced in docs/specs/INSTALL.md but not documented in "
+            f"docs/specs/VARIABLES.md. Add a row OR rename the reference."
         )
     return violations
 
@@ -114,7 +114,7 @@ def check_make_targets(install_text: str, makefile_text: str) -> list[str]:
         if target in _MAKE_TARGET_IGNORE or target in phony:
             continue
         violations.append(
-            f"`make {target}` referenced in docs/INSTALL.md but not in "
+            f"`make {target}` referenced in docs/specs/INSTALL.md but not in "
             f"Makefile's `.PHONY:` list. Add the target OR rename the reference."
         )
     return violations
@@ -128,7 +128,7 @@ def check_file_paths(install_text: str, repo_root: Path) -> list[str]:
         if (repo_root / candidate).exists():
             continue
         violations.append(
-            f"`{candidate}` referenced in docs/INSTALL.md but does not exist "
+            f"`{candidate}` referenced in docs/specs/INSTALL.md but does not exist "
             f"in the repo. Create the file OR rename the reference."
         )
     return violations
@@ -157,7 +157,7 @@ def main() -> int:
         for v in violations:
             print(f"    ✗ {v}")
         return 1
-    print("✓ verify-install-doc: docs/INSTALL.md in sync with repo")
+    print("✓ verify-install-doc: docs/specs/INSTALL.md in sync with repo")
     return 0
 
 

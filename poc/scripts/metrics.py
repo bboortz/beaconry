@@ -398,7 +398,7 @@ def _load_remote_events(since_ts: int) -> tuple[list[dict], bool]:
     if not cfg.hub_url:
         raise RuntimeError(
             "hub_url not configured in ~/.config/beaconry/cli.yml — "
-            "run `beaconry status` or see docs/INSTALL.md § Operator CLI setup"
+            "run `beaconry status` or see docs/specs/INSTALL.md § Operator CLI setup"
         )
     events = fetch_remote_audit_events(cfg.hub_url, cfg.hub_token, since_ts=since_ts)
     return events, len(events) >= REMOTE_AUDIT_CAP

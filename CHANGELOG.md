@@ -4,6 +4,26 @@ All notable changes to beaconry are recorded here. The format is based
 on [Keep a Changelog](https://keepachangelog.com/), and this project
 follows [Semantic Versioning](https://semver.org/).
 
+## [v0.22.21] — 2026-11-21
+
+### 📦 Changed (BC-147) — docs/ three-folder layout
+
+Every doc under `docs/` now belongs to exactly one of three classes with a dedicated subdirectory. Pre-BC-147 the five top-level specs shared a directory with no label; new contributors couldn't guess where the next one should go, and nothing gated drift.
+
+- **New layout:**
+  - `docs/specs/` — specifications (`DESIGN.md`, `CAPABILITIES.md`, `LIFECYCLE.md`, `METRICS.md`, `VARIABLES.md`, `INSTALL.md`) + `_template.md` + `INDEX.md`.
+  - `docs/plan/` + `docs/stories/` — unchanged.
+  - `docs/operations/` — runbook class, distinct from specs by design.
+- **DESIGN.md** moved from repo root to `docs/specs/DESIGN.md` for symmetry.
+- **New lint** `make verify-docs-layout` (wired into `make check`) refuses stray `.md` at `docs/` top-level and asserts `_template.md` + `INDEX.md` are present under `docs/specs/`.
+- **CAP-D001** registered. 26 integration tests (`test_BC_147_docs_specs_layout.py`) encode the Gherkin; one test walks every tracked code/Makefile/memory file and asserts no live-wired reference still names the old path.
+- **Live-wired updates** (so runtime code resolves correctly):
+  - CLAUDE.md, README.md, Makefile, `memory/workflow.md`
+  - Scripts: `verify_traceability.py` (resolves bare `DESIGN.md` under `docs/specs/` first), `verify_variables_documented.py`, `verify_install_doc.py`, `metrics.py`
+  - Tests: `test_BC_004_traceability.py` fixtures now mount CAPABILITIES.md under tmp `docs/specs/`; `test_BC_056`, `test_BC_008`, `test_BC_094`, `test_BC_101`, `test_lifecycle_doc`, `test_verify_variables_documented`
+- **Historical prose preserved**: existing plans + stories still reference the old `docs/<name>.md` paths; the reference-stability test allowlists `docs/plan/*` + `docs/stories/*` since those are time-stamped narrative.
+- **Operator impact**: external bookmarks to `docs/CAPABILITIES.md` etc. need to flip to `docs/specs/CAPABILITIES.md`.
+
 ## [v0.22.20] — 2026-11-21
 
 ### 🔧 Changed (BC-147) — shepherd-poc back-port from ham-radio-compass

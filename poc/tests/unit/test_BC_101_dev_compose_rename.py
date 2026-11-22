@@ -19,7 +19,7 @@ REPO = Path(__file__).resolve().parents[3]
 DEV_COMPOSE = REPO / "poc" / "docker-compose.yml"
 SCOUT_ONLY_COMPOSE = REPO / "poc" / "docker-compose.scout-only.yml"
 MAKEFILE = REPO / "Makefile"
-VARIABLES_MD = REPO / "docs" / "VARIABLES.md"
+VARIABLES_MD = REPO / "docs" / "specs" / "VARIABLES.md"
 ENV_EXAMPLE = REPO / "poc" / ".env.example"
 
 
@@ -87,10 +87,10 @@ def test_cli_scripts_default_to_dev_scout() -> None:
 def test_variables_md_has_scout_container() -> None:
     body = VARIABLES_MD.read_text()
     assert "`BEACONRY_SCOUT_CONTAINER`" in body, (
-        "docs/VARIABLES.md must document BEACONRY_SCOUT_CONTAINER (BC-101)"
+        "docs/specs/VARIABLES.md must document BEACONRY_SCOUT_CONTAINER (BC-101)"
     )
     assert "beaconry-dev-scout" in body, (
-        "docs/VARIABLES.md must mention the beaconry-dev-scout default"
+        "docs/specs/VARIABLES.md must mention the beaconry-dev-scout default"
     )
 
 

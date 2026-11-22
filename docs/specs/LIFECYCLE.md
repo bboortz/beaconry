@@ -412,7 +412,7 @@ returns three empty lists immediately.
 | Tier 2 (CVSS 7–8 or LAN-only) target | **1 h** | confirm button |
 | Tier 3 (CVSS<7) target | **24 h** | nightly batch digest |
 
-Every var is also documented in `docs/VARIABLES.md` with "where read"
+Every var is also documented in `VARIABLES.md` with "where read"
 pointers.
 
 ---
@@ -706,8 +706,8 @@ monitor-verified.
 - `memory/design-decisions.md` — locked 2026-10-29. The design source
   of truth; this doc is the code source of truth. §15–§17 cross-
   reference them.
-- `docs/VARIABLES.md` — every env var in §10 has a full row there.
-- `docs/CAPABILITIES.md` — CAP-T176 through T181 are the most
+- `VARIABLES.md` — every env var in §10 has a full row there.
+- `CAPABILITIES.md` — CAP-T176 through T181 are the most
   recent lifecycle-adjacent caps. This doc is CAP-T182.
 - `docs/plan/IDEAS.md` — pre-BC backlog; BC-088 formalises the subset
   of IDEAS that's lifecycle-shaped.
