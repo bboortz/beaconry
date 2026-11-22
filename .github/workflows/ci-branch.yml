@@ -1,5 +1,7 @@
 ---
-name: CI
+# Dev-cycle contract (SH-014) — tier 1: feature-branch / PR gate.
+# Renamed from ci.yml → ci-branch.yml via SH-035 (workflow filename convergence).
+name: ci-branch
 
 # Speed is key — stratified by branch:
 #   feat/fix/docs push  → ~20s  (ruff + pyright only; local pre-push already ran check)

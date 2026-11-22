@@ -2,7 +2,7 @@
 # BC-074: Gated auto-promotion of dev → main.
 #
 # Trigger: workflow_dispatch (manual button in GitHub Actions tab).
-# The validation half lives in ci.yml; this workflow only runs the
+# The validation half lives in ci-branch.yml; this workflow only runs the
 # promotion when the operator clicks "Run workflow" — the review
 # step that CAP-T147 preserved.
 #
@@ -53,7 +53,7 @@ jobs:
           GH_TOKEN: ${{ github.token }}
         run: |
           # The source-of-truth check-run name is "Full check (make check-full)"
-          # per ci.yml. Poll for up to RELEASE_CI_WAIT_S seconds (default 20 min),
+          # per ci-branch.yml. Poll for up to RELEASE_CI_WAIT_S seconds (default 20 min),
           # polling every POLL_S (default 20s). The previous snap-check was
           # racy: operators (or auto-triggered workflow_run dispatches) could
           # fire release.yml before CI even started, and "not-yet-run"
