@@ -83,8 +83,8 @@ Yes, developer-visible:
 |---|---|---|---|
 | Runtime probe replaces source-scan test | e2e | `test_BC_011_probe_flow.py::test_hub_container_has_no_test_mode_code` (rewritten) | ✓ |
 | test-e2e failures propagate exit code | integration | `test_BC_079_pre_push_container_verification.py::test_test_e2e_does_not_swallow_failures` | ✓ |
-| Pre-push config invokes make check-full | integration | `test_BC_079_pre_push_container_verification.py::test_pre_push_hook_runs_make_check_full` | ✓ |
-| Pre-push config sets BEACONRY_SKIP_CLI_SMOKE | integration | `test_BC_079_pre_push_container_verification.py::test_pre_push_skips_cli_smoke` | ✓ |
+| Pre-push config invokes make check (fast tier) — BC-148 flipped from check-full | integration | `test_BC_079_pre_push_container_verification.py::test_pre_push_hook_runs_make_check` | ✓ |
+| Pre-push config does NOT run make check-full — BC-148 regression guard | integration | `test_BC_079_pre_push_container_verification.py::test_pre_push_does_not_run_check_full` | ✓ |
 | Pre-push config removes standalone pytest hook | integration | `test_BC_079_pre_push_container_verification.py::test_pre_push_no_standalone_pytest` | ✓ |
 | No swallowing `-` prefix in check/test-* recipes | integration | `test_BC_079_pre_push_container_verification.py::test_no_dash_prefix_on_check_subcommands` | ✓ |
 | CAPs registered | verify-traceability | `docs/CAPABILITIES.md` | ✓ |
