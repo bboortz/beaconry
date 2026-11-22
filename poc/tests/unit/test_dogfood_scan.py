@@ -1,9 +1,7 @@
 """BC-082 — dogfood grype gate unit tests.
 
 Covers:
-    - CAP-S014: dogfood-scan severity-floor / fixable-only filter on parse_findings
-    - CAP-S015: dogfood-scan main() short-circuits + error paths
-    - CAP-S016: dogfood-scan docker-gid resolution ladder
+    - CAP-T167: Dogfood grype gate — rescan beaconry's own images
 """
 
 from __future__ import annotations

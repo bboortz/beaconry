@@ -1,14 +1,10 @@
-"""BC-083 CAP-T171 — unit tests for the base-image anonymous-pullable lint.
+"""Unit tests for the base-image anonymous-pullable lint (BC-083).
+
+Pure-function coverage: `_split_ref` ref-normalisation, cache roundtrip,
+`check` cache-hit / stale-TTL / failure paths, and `main()` short-circuits.
 
 Covers:
-    - CAP-T171a: `_split_ref` canonicalises Docker Hub shorthand, GHCR, and
-      bare names consistently
-    - CAP-T171b: `_load_cache` / `_save_cache` roundtrip; corrupt or missing
-      cache files degrade gracefully
-    - CAP-T171c: `check` honours cache hits (no live probe) and reports
-      violations for failed probes
-    - CAP-T171d: `main` short-circuits on BEACONRY_SKIP_BASE_IMAGES and when
-      no FROM refs are present
+    - CAP-T171: `make verify-base-images` — standing anonymous-pull preflight
 """
 
 from __future__ import annotations

@@ -4,17 +4,18 @@ R1 rewrite: the R0 inline-script POC migrated to the shepherd reusable
 workflow (SH-007). The R0 scripts/shepherd-poc/ tree and the Agent call /
 Setup Node / Regenerate lockfile / Validate combined diff workflow steps
 are retired from this repo — they run inside bboortz/shepherd's reusable
-workflow now, and are tested there. This file asserts the caller WIRING:
-shepherd.yml + shepherd-gates.yml pin the reusable workflow at an SHA.
+workflow now, and are tested there. The sandbox-no-secrets,
+diff-only-apply, protected-files blocklist, diff-size cap and
+scope-level-1 invariants live in shepherd's own test suite.
+
+This file asserts the caller WIRING: shepherd.yml + shepherd-gates.yml
+pin the reusable workflow at an SHA.
+
+No network required.
 
 Covers:
     - CAP-S001: shepherd caller is scheduled + dispatch-triggerable
-    - CAP-S004: Protected-files blocklist — validate.sh rejects protected paths
-    - CAP-S005: Shepherd diff-size cap — validate.sh rejects > 50 changed lines
-    - CAP-S006: Shepherd scope level 1 — agent prompt binds to deps + lockfiles
     - CAP-S007: Supply-chain — every uses: line is 40-hex SHA-pinned
-
-No network required. Mirrors bboortz/healthy HC-008 shell acceptance.
 """
 
 from __future__ import annotations
