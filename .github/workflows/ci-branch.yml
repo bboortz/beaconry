@@ -60,6 +60,7 @@ jobs:
   fast-check:
     name: Fast check (lint + type)
     runs-on: ubuntu-latest
+    timeout-minutes: 5    # SH-039: contract budget for ci-branch tier
     # Runs on feature-branch pushes only. dev + main run the full tier instead.
     if: >
       github.event_name == 'push' &&
@@ -90,6 +91,7 @@ jobs:
   full-check:
     name: Full check (make check-full)
     runs-on: ubuntu-latest
+    timeout-minutes: 5    # SH-039: contract budget for ci-branch tier
     needs: detect
     if: >
       (github.event_name == 'push' && github.ref == 'refs/heads/dev') ||
@@ -159,6 +161,7 @@ jobs:
   release-check:
     name: Release check (CHANGELOG + VERSION sync + tag)
     runs-on: ubuntu-latest
+    timeout-minutes: 5    # SH-039: fits ci-branch tier (quick CHANGELOG check)
     if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1

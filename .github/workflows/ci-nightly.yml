@@ -1,0 +1,33 @@
+---
+# Dev-cycle contract (SH-014) — tier 4: slow lane.
+# Budget: 120 min soft cap. Runs `make ci-nightly` (full integration suite).
+name: ci-nightly
+
+"on":
+  schedule:
+    - cron: "30 2 * * *"    # 02:30 UTC daily
+  workflow_dispatch: {}
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  nightly:
+    runs-on: ubuntu-latest
+    timeout-minutes: 120    # SH-039: contract budget for nightly tier
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1  # v7.0.1
+
+      - name: Set up Python
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0  # v7.1.0
+        with:
+          python-version: "3.12"
+
+      - name: Install dependencies
+        run: |
+          python3 -m pip install --upgrade pip
+          pip install -r requirements-dev.txt
+
+      - name: Run nightly slow lane
+        run: make ci-nightly
