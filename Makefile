@@ -118,7 +118,8 @@ help:
 	@echo "  make release-artifacts          no-op (release flow is bump-* + CD pipeline)"
 	@echo "  make ci-branch                  5-min PR gate: lint + test"
 	@echo "  make ci-patch                   post-merge smoke"
-	@echo "  make ci-release                 release-flow placeholder (prints note)"
+	@echo "  make ci-release                 FF dev → main + tag (SH-029); existing bump-* unchanged"
+	@echo "  make ci-release-promote         shared FF-promote target (invoked by ci-release)"
 	@echo "  make ci-nightly                 nightly full gate (alias for check)"
 	@echo "  make ci-nightly-body            nightly tier body (invoked by ci-nightly)"
 	@echo ""
@@ -473,7 +474,27 @@ release-artifacts: ; @true
 # Tier bodies.
 ci-branch:  lint test      # 5-min PR gate: lint + test
 ci-patch:   smoke           # post-merge smoke
-ci-release:
-	@echo "ci-release: beaconry's release flow is the existing bump-* + CD pipeline"
+
+# ci-release-promote: fast-forward main to dev + tag from VERSION (SH-029).
+# Must run on `dev` branch. Mutates the working tree; CI only.
+# Mirrors shepherd's shared contract shape.
+.PHONY: ci-release-promote
+ci-release-promote:
+	@current=$$(git branch --show-current); \
+	 [ "$$current" = "dev" ] || { echo "ci-release-promote must run on 'dev', got '$$current'"; exit 1; }
+	@[ -f VERSION ] || { echo "VERSION file missing — cannot determine tag"; exit 1; }
+	@version=$$(cat VERSION | tr -d '[:space:]'); \
+	 echo "SH-029 promote: dev → main as v$$version"; \
+	 git fetch origin main && \
+	 git checkout main && \
+	 git merge --ff-only origin/dev && \
+	 git tag "v$$version" HEAD && \
+	 git push origin main && \
+	 git push origin "v$$version" && \
+	 git checkout dev
+
+ci-release: ci-release-promote
+	@echo "ci-release: beaconry's additional release flow (bump-* + CD pipeline) stays as-is"
+
 ci-nightly: ci-nightly-body
 ci-nightly-body: check      # nightly: full gate (lint + type + 15+ verify scripts + smoke)
