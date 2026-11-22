@@ -4,6 +4,16 @@ All notable changes to beaconry are recorded here. The format is based
 on [Keep a Changelog](https://keepachangelog.com/), and this project
 follows [Semantic Versioning](https://semver.org/).
 
+## [v0.22.23] — 2026-11-22
+
+### Added
+- **SH-029:** adopt shared ci-release-promote + prep for default=dev
+- **BC-148:** swap pre-push hook from check-full → check (fast tier)
+
+### Fixed
+- **BC-148:** update BC-079 pre-push tests to match the new shape
+- **BC-148:** update BC-079 plan evidence rows for renamed tests
+
 ## [v0.22.22] — 2026-11-22
 
 ### Added

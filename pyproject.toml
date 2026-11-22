@@ -3,7 +3,7 @@ name = "beaconry"
 # BC-062: VERSION file is the single source of truth; this literal is only
 # a build-time placeholder (setuptools-dynamic would rebuild on every bump,
 # which is more friction than value). verify-version-sync lint catches drift.
-version = "0.22.22"
+version = "0.22.23"
 description = "CVE scanning + auto-remediation for self-hosted operators"
 # BC-078: distroless runtime image ships Python 3.11 (debian-12 default).
 # Local dev + CI can still use 3.12; the floor just permits the runtime.
@@ -120,6 +120,12 @@ addopts = [
     "--cov-report=json:coverage.json",
     "--cov-config=pyproject.toml",
     "-m", "not real_tools and not compose and not e2e and not cold_start",
+    # BC-149 / SH-023: pytest-xdist parallel workers.
+    # `-n auto` uses nproc; `--dist loadgroup` keeps tests marked with
+    # xdist_group together (important for shared DB/compose fixtures).
+    # pytest-cov combines coverage from workers on exit.
+    "-n", "auto",
+    "--dist", "loadgroup",
 ]
 filterwarnings = [
     "ignore::DeprecationWarning:pytest_asyncio.*",
