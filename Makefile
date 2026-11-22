@@ -429,3 +429,31 @@ live-status:
 	     echo "$$CONTAINER: ✓ FRESH — container is $$(( -DELTA ))s newer than source."; \
 	   fi; \
 	 done
+
+##@ Shepherd dev-cycle contract (SH-014 / SH-019)
+#
+# Spec: https://github.com/bboortz/shepherd/blob/main/docs/specs/dev-cycle-contract.md
+#
+# Dev-cycle doc (2026-11-22) prescription for beaconry: "add `make build`
+# (image or no-op)". Done here as a no-op — beaconry is a Python service
+# with no compiled artifact. No affected-only mechanism yet; SH-023 will
+# add pytest-xdist + check-fast split.
+
+.PHONY: build test-affected release-artifacts \
+        ci-branch ci-patch ci-release ci-nightly ci-nightly-body
+
+# Dev-cycle-doc prescription: `make build` was missing.
+build: ; @true
+
+# Contract entry points — anchor on beaconry's native idioms.
+test-affected: test       # no affected-only yet (SH-023 upgrades with pytest-xdist)
+# `smoke` already exists at the top of this Makefile; no override needed.
+release-artifacts: ; @true
+
+# Tier bodies.
+ci-branch:  lint test      # 5-min PR gate: lint + test
+ci-patch:   smoke           # post-merge smoke
+ci-release:
+	@echo "ci-release: beaconry's release flow is the existing bump-* + CD pipeline"
+ci-nightly: ci-nightly-body
+ci-nightly-body: check      # nightly: full gate (lint + type + 15+ verify scripts + smoke)
