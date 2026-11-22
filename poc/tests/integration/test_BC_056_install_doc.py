@@ -1,4 +1,4 @@
-"""BC-056 — docs/INSTALL.md structure + drift lint (short-name reshape).
+"""BC-056 — docs/specs/INSTALL.md structure + drift lint (short-name reshape).
 
 Covers:
     - CAP-T112: verify-install-doc lint
@@ -13,14 +13,14 @@ from pathlib import Path
 from poc.scripts import verify_install_doc as vid
 
 REPO_ROOT = Path(__file__).resolve().parents[3]
-INSTALL_MD = REPO_ROOT / "docs" / "INSTALL.md"
+INSTALL_MD = REPO_ROOT / "docs" / "specs" / "INSTALL.md"
 
 
 # ── INSTALL.md shape ────────────────────────────────────────────────────────
 
 
 def test_install_md_exists() -> None:
-    assert INSTALL_MD.exists(), "docs/INSTALL.md must exist"
+    assert INSTALL_MD.exists(), "docs/specs/INSTALL.md must exist"
 
 
 def test_install_md_sections_present() -> None:

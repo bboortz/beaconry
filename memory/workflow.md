@@ -37,7 +37,7 @@ Per feature (BC-NNN):
                            Every test file carries a top-of-file `Covers:` docstring
                            block naming the CAPs it exercises.
 
-5a. Register capabilities  docs/CAPABILITIES.md
+5a. Register capabilities  docs/specs/CAPABILITIES.md
                            Add or extend capability entries so bidirectional links to
                            tests are complete. verify-traceability enforces this on
                            every make check.
@@ -53,7 +53,7 @@ Per feature (BC-NNN):
                              - self-consistency (story applies its own new conventions)
                            Any ⚠️ or ❌ row blocks shipping — cycle back to step 5.
 
-7. Update DESIGN.md        Only if architecture changed. Final shape only — not the delta.
+7. Update docs/specs/DESIGN.md  Only if architecture changed. Final shape only — not the delta.
 
 8. PR to dev               Claude writes body from branch diff; links story + plan doc.
                            Claude pings user to run /ultrareview, then Claude runs /code-review.
@@ -69,8 +69,25 @@ Per feature (BC-NNN):
 - [ ] Acceptance criteria pass
 - [ ] Red integration test went green via implementation
 - [ ] All blocking gates pass
-- [ ] DESIGN.md updated if architecture changed
+- [ ] docs/specs/DESIGN.md updated if architecture changed
 - [ ] Demo scenario added to `demo.sh` if user-facing
+
+## Docs — three-folder layout (BC-147)
+
+Every doc under `docs/` belongs to exactly one of three classes:
+
+```
+docs/
+  specs/       — specifications (DESIGN, CAPABILITIES, LIFECYCLE, METRICS, VARIABLES, INSTALL)
+                 + _template.md + INDEX.md. Reference docs, always current.
+  plan/        — per-feature plans (BC-NNN-<slug>-plan.md) + _template.md.
+  stories/     — operator-scenario stories (BC-NNN-<slug>.md) + _template.md + INDEX.md.
+  operations/  — runbooks (step-by-step playbooks, distinct from specs).
+```
+
+New top-level `.md` in `docs/` is rejected by `verify-docs-layout` on
+every `make check`. DESIGN.md lives at `docs/specs/DESIGN.md` (not repo
+root).
 
 ## Stories — layout, format, lifecycle
 

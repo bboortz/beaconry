@@ -358,7 +358,7 @@ Enforcement: `poc/scripts/verify_traceability.py` runs as part of `make check`. 
 - **type:** technical
 - **status:** active
 - **origin:** BC-004
-- **description:** `poc/scripts/verify_traceability.py` parses `docs/CAPABILITIES.md` and `poc/tests/**/test_*.py` and errors on: missing Covers block, dangling CAP id, missing test file, unverified active CAP, bidirectional inconsistency. Exits 0 only when the matrix is clean.
+- **description:** `poc/scripts/verify_traceability.py` parses `docs/specs/CAPABILITIES.md` and `poc/tests/**/test_*.py` and errors on: missing Covers block, dangling CAP id, missing test file, unverified active CAP, bidirectional inconsistency. Exits 0 only when the matrix is clean.
 - **supports:** CAP-B006
 - **verified by:**
   - `poc/tests/integration/test_BC_004_traceability.py`
@@ -1022,12 +1022,12 @@ Enforcement: `poc/scripts/verify_traceability.py` runs as part of `make check`. 
 - **type:** business
 - **status:** active
 - **origin:** BC-039 — developer 2026-10-31: ~30 env vars shipped in two weeks, unmanageable without a single source of truth
-- **description:** `docs/VARIABLES.md` is the one authoritative index of every env variable beaconry reads at runtime. Grouped by concern (Telegram, Scanning, Fix execution, Reconcile, Heartbeat, Digest, Notification adapters, Feeds, Paths, Dev-mode, CLI scripts, Scenario harness). Each row carries name, default, type, where-read, reason (the WHY, not just WHAT), and BC origin.
+- **description:** `docs/specs/VARIABLES.md` is the one authoritative index of every env variable beaconry reads at runtime. Grouped by concern (Telegram, Scanning, Fix execution, Reconcile, Heartbeat, Digest, Notification adapters, Feeds, Paths, Dev-mode, CLI scripts, Scenario harness). Each row carries name, default, type, where-read, reason (the WHY, not just WHAT), and BC origin.
 - **supports:** CAP-B018
 - **verified by:**
   - `poc/tests/unit/test_verify_variables_documented.py`
 
-### CAP-T084: `docs/VARIABLES.md` — single source of truth for runtime env variables
+### CAP-T084: `docs/specs/VARIABLES.md` — single source of truth for runtime env variables
 - **type:** technical
 - **status:** active
 - **origin:** BC-039
@@ -1233,7 +1233,7 @@ Enforcement: `poc/scripts/verify_traceability.py` runs as part of `make check`. 
 - **type:** business
 - **status:** active
 - **origin:** BC-056 — homelab key user asked for an authoritative install guide covering Ansible + credentials guidance, built on BC-055's short-name + split-token conventions.
-- **description:** `docs/INSTALL.md` is the authoritative install guide: Prerequisites → Quick-start single-host → Multi-host (Tailscale) → Operator CLI → Ansible → Credentials → Verification → Troubleshooting. The Ansible section ships a copyable role tree (`beaconry_hub` + `beaconry_scout`), a complete playbook using `community.docker`, and a Vault example that scopes the three secret tokens (`telegram_bot_token`, `hub_scout_token`, `hub_cli_token`). The Credentials section enumerates three safe places (`.env` 0600, Ansible Vault, systemd `EnvironmentFile=`) and explicitly says tokens must never be committed to git. The up-front banner repeats the rule so operators who skim see it before any step.
+- **description:** `docs/specs/INSTALL.md` is the authoritative install guide: Prerequisites → Quick-start single-host → Multi-host (Tailscale) → Operator CLI → Ansible → Credentials → Verification → Troubleshooting. The Ansible section ships a copyable role tree (`beaconry_hub` + `beaconry_scout`), a complete playbook using `community.docker`, and a Vault example that scopes the three secret tokens (`telegram_bot_token`, `hub_scout_token`, `hub_cli_token`). The Credentials section enumerates three safe places (`.env` 0600, Ansible Vault, systemd `EnvironmentFile=`) and explicitly says tokens must never be committed to git. The up-front banner repeats the rule so operators who skim see it before any step.
 - **supports:** CAP-B023
 - **verified by:**
   - `poc/tests/integration/test_BC_056_install_doc.py`
@@ -1242,7 +1242,7 @@ Enforcement: `poc/scripts/verify_traceability.py` runs as part of `make check`. 
 - **type:** technical
 - **status:** active
 - **origin:** BC-056
-- **description:** `poc/scripts/verify_install_doc.py` runs three checks against `docs/INSTALL.md`: (1) every backticked uppercase-identifier shaped like an env var must have a row in `docs/VARIABLES.md`; (2) every `make <target>` referenced must appear in Makefile `.PHONY:`; (3) every `poc/…` or `docs/…` path mentioned must exist on disk. Install-destination paths (`/etc/…`, `~/…`) and `roles/…` Ansible-example paths are definitionally not in the repo and are ignored. Wired into `make check`.
+- **description:** `poc/scripts/verify_install_doc.py` runs three checks against `docs/specs/INSTALL.md`: (1) every backticked uppercase-identifier shaped like an env var must have a row in `docs/specs/VARIABLES.md`; (2) every `make <target>` referenced must appear in Makefile `.PHONY:`; (3) every `poc/…` or `docs/…` path mentioned must exist on disk. Install-destination paths (`/etc/…`, `~/…`) and `roles/…` Ansible-example paths are definitionally not in the repo and are ignored. Wired into `make check`.
 - **supports:** CAP-B039
 - **verified by:**
   - `poc/tests/integration/test_BC_056_install_doc.py`
@@ -1720,11 +1720,11 @@ Enforcement: `poc/scripts/verify_traceability.py` runs as part of `make check`. 
 - **verified by:**
   - `poc/tests/integration/test_BC_087_last_seen_and_log_level.py`
 
-### CAP-T182: `docs/LIFECYCLE.md` — single source of truth for finding lifecycle
+### CAP-T182: `docs/specs/LIFECYCLE.md` — single source of truth for finding lifecycle
 - **type:** technical
 - **status:** active
 - **origin:** BC-088 — the finding lifecycle (states, transitions, timers, notifications, buttons) was fully implemented but scattered across `memory/design-decisions.md`, fifteen plan docs, and `poc/hub/hub.py`. Onboarding required an afternoon per fresh question; the authoring exercise also surfaced the auto-fix-regression body wire-up bug (hub.py:1589) that nobody had noticed because nobody had read the lifecycle top-to-bottom.
-- **description:** `docs/LIFECYCLE.md` is the authoritative reference. Twelve descriptive sections (state diagram, ingest path, row timestamps, notifications, buttons+handlers, fix pipeline, health waterfall, reconcile scope, isolation, timers, audit events, precedence) plus five known-flaw inventories (Unclearities, Necessary improvements, Contradictions/inconsistencies, Missing implementation, Known bugs). Each flaw entry carries a code-grep pointer or a `memory/design-decisions.md` pointer. Soft convention: future BCs that materially change a state transition, timer, or notification path update LIFECYCLE.md as part of Definition of Done (honour system; no `verify-lifecycle-drift` lint today).
+- **description:** `docs/specs/LIFECYCLE.md` is the authoritative reference. Twelve descriptive sections (state diagram, ingest path, row timestamps, notifications, buttons+handlers, fix pipeline, health waterfall, reconcile scope, isolation, timers, audit events, precedence) plus five known-flaw inventories (Unclearities, Necessary improvements, Contradictions/inconsistencies, Missing implementation, Known bugs). Each flaw entry carries a code-grep pointer or a `memory/design-decisions.md` pointer. Soft convention: future BCs that materially change a state transition, timer, or notification path update LIFECYCLE.md as part of Definition of Done (honour system; no `verify-lifecycle-drift` lint today).
 - **supports:** CAP-B023
 - **verified by:**
   - `poc/tests/unit/test_lifecycle_doc.py`
@@ -1733,7 +1733,7 @@ Enforcement: `poc/scripts/verify_traceability.py` runs as part of `make check`. 
 - **type:** technical
 - **status:** active
 - **origin:** BC-087 — BC-086's reconcile diagnostic was shipped at `log.info` to prove natural counter progression. Once proven, ~20 lines/scan/host of hub noise remained permanent until another ship cycle. Needed a knob the operator can toggle in `.env` without rebuilding.
-- **description:** Hub + scout both read `BEACONRY_LOG_LEVEL` at import time (default `INFO`). Accepted values: `DEBUG`, `INFO`, `WARNING`, `ERROR`, `CRITICAL`. Invalid values silently fall back to INFO with a `log.warning` describing the bad value. BC-086's `bump_last_seen` + `reconcile_scan` diagnostic lines downgraded from `log.info` to `log.debug` — operator opts in via `BEACONRY_LOG_LEVEL=DEBUG`. Documented in `docs/VARIABLES.md` and surfaced in `docker-compose.yml` + `.env.example`.
+- **description:** Hub + scout both read `BEACONRY_LOG_LEVEL` at import time (default `INFO`). Accepted values: `DEBUG`, `INFO`, `WARNING`, `ERROR`, `CRITICAL`. Invalid values silently fall back to INFO with a `log.warning` describing the bad value. BC-086's `bump_last_seen` + `reconcile_scan` diagnostic lines downgraded from `log.info` to `log.debug` — operator opts in via `BEACONRY_LOG_LEVEL=DEBUG`. Documented in `docs/specs/VARIABLES.md` and surfaced in `docker-compose.yml` + `.env.example`.
 - **supports:** CAP-B023
 - **verified by:**
   - `poc/tests/integration/test_BC_087_last_seen_and_log_level.py`
@@ -2228,7 +2228,7 @@ Enforcement: `poc/scripts/verify_traceability.py` runs as part of `make check`. 
 - **type:** technical
 - **status:** active
 - **origin:** BC-102 — BC-086's reconcile only fires on scout POST. When scout stops POSTing, findings freeze forever (as seen in the 54-min dark window). Hub needed a time-driven complement.
-- **description:** `poc/hub/hub.py` adds a pure function `scout_offline_sweep(now_ts, threshold_s, sweep_interval_s, auto_close, threshold_ticks) -> {offline_alerts, online_alerts, findings_auto_closed}` that scans the `scouts` table and (edge-triggered via `last_offline_alert_ts`) stamps offline transitions, clears them on recovery, and (when `auto_close=True`) bumps `absent_count` on the scout's `open`/`regressed`/`snoozed`/`accepted` findings until `BEACONRY_AUTO_FIX_THRESHOLD` ticks flip them to `auto_fixed` with the distinct `finding_auto_fixed_stale_scout` audit (separate from BC-086's `finding_auto_fixed` so forensics can filter). Background task `_scout_offline_sweep_loop_forever` registered in lifespan alongside the heartbeat + snooze loops; cadence `BEACONRY_SCOUT_OFFLINE_SWEEP_INTERVAL_S` (default 60s). Three new env vars documented in `docs/VARIABLES.md`. Schema v7 → v8 adds `scouts.last_offline_alert_ts` via idempotent ALTER.
+- **description:** `poc/hub/hub.py` adds a pure function `scout_offline_sweep(now_ts, threshold_s, sweep_interval_s, auto_close, threshold_ticks) -> {offline_alerts, online_alerts, findings_auto_closed}` that scans the `scouts` table and (edge-triggered via `last_offline_alert_ts`) stamps offline transitions, clears them on recovery, and (when `auto_close=True`) bumps `absent_count` on the scout's `open`/`regressed`/`snoozed`/`accepted` findings until `BEACONRY_AUTO_FIX_THRESHOLD` ticks flip them to `auto_fixed` with the distinct `finding_auto_fixed_stale_scout` audit (separate from BC-086's `finding_auto_fixed` so forensics can filter). Background task `_scout_offline_sweep_loop_forever` registered in lifespan alongside the heartbeat + snooze loops; cadence `BEACONRY_SCOUT_OFFLINE_SWEEP_INTERVAL_S` (default 60s). Three new env vars documented in `docs/specs/VARIABLES.md`. Schema v7 → v8 adds `scouts.last_offline_alert_ts` via idempotent ALTER.
 - **supports:** CAP-B050, CAP-T148, CAP-T044
 - **verified by:**
   - `poc/tests/unit/test_BC_102_scout_offline_sweep.py`
@@ -2246,7 +2246,7 @@ Enforcement: `poc/scripts/verify_traceability.py` runs as part of `make check`. 
 - **type:** technical
 - **status:** active
 - **origin:** BC-094 — operators need to pin the forge image tag for rollback muscle (`BEACONRY_IMAGE_TAG=v0.16.1` on a bad `latest`). The var is substituted by `docker compose` at config time, not read by any Python module, which would otherwise trip `verify_variables_documented.py`'s orphan check.
-- **description:** `BEACONRY_IMAGE_TAG` documented in `docs/VARIABLES.md` + `poc/.env.example` with default `latest`. `verify_variables_documented.py` gains a new `DEPLOY_ONLY_ALLOWLIST` category that excludes compose-substituted vars from the orphan check. The var only matters when one of the `*-ghcr.yml` overrides is on the compose `-f` chain — otherwise unused.
+- **description:** `BEACONRY_IMAGE_TAG` documented in `docs/specs/VARIABLES.md` + `poc/.env.example` with default `latest`. `verify_variables_documented.py` gains a new `DEPLOY_ONLY_ALLOWLIST` category that excludes compose-substituted vars from the orphan check. The var only matters when one of the `*-ghcr.yml` overrides is on the compose `-f` chain — otherwise unused.
 - **supports:** CAP-T194, CAP-B023
 - **verified by:**
   - `poc/tests/unit/test_BC_094_ghcr_image_overrides.py`
@@ -2517,3 +2517,11 @@ Enforcement: `poc/scripts/verify_traceability.py` runs as part of `make check`. 
 - **description:** No workflow in `.github/workflows/` uses `aquasecurity/trivy-action`. Every third-party `uses:` line references a 40-hex commit SHA, never a mutable tag. Enforced by regex in the BC-145 acceptance test.
 - **verified by:**
   - `poc/tests/integration/test_BC_145_shepherd_poc.py`
+
+### CAP-D001: docs/ three-folder layout — specs / plan / stories
+- **type:** technical
+- **status:** active
+- **origin:** BC-147. Every doc under `docs/` belongs to exactly one of three classes (spec/plan/story) with a dedicated subdirectory. `docs/operations/` is a separate class for runbooks.
+- **description:** `docs/specs/` holds specifications (`DESIGN.md`, `CAPABILITIES.md`, `LIFECYCLE.md`, `METRICS.md`, `VARIABLES.md`, `INSTALL.md`) + `_template.md` + `INDEX.md`. `docs/plan/` + `docs/stories/` carry per-feature plans and operator-scenario stories (unchanged). `docs/operations/` is kept distinct — runbooks are do-this-when-X, not reference. `verify-docs-layout` refuses any `.md` at `docs/` top-level other than `README.md`, and asserts `docs/specs/_template.md` + `docs/specs/INDEX.md` are present. DESIGN.md was moved from repo root into `docs/specs/DESIGN.md` for symmetry.
+- **verified by:**
+  - `poc/tests/integration/test_BC_147_docs_specs_layout.py`

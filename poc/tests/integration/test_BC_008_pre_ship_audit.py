@@ -54,6 +54,6 @@ def test_readme_mentions_pre_ship_audit() -> None:
 
 
 def test_shipping_evidence_rows_mentioned_in_cap_t026() -> None:
-    text = _read("docs/CAPABILITIES.md")
+    text = _read("docs/specs/CAPABILITIES.md")
     assert "CAP-T026" in text
     assert "Shipping evidence" in text

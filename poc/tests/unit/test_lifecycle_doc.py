@@ -1,7 +1,7 @@
-"""BC-088 — docs/LIFECYCLE.md structure invariants.
+"""BC-088 — docs/specs/LIFECYCLE.md structure invariants.
 
 Covers:
-    - CAP-T182: docs/LIFECYCLE.md — single source of truth for finding
+    - CAP-T182: docs/specs/LIFECYCLE.md — single source of truth for finding
       lifecycle. Structure assertions mirror the Gherkin scenarios in
       the BC-088 story (every status named, every timer var named, each
       known-flaw section populated).
@@ -18,12 +18,12 @@ from pathlib import Path
 
 import pytest
 
-LIFECYCLE = Path(__file__).resolve().parents[3] / "docs" / "LIFECYCLE.md"
+LIFECYCLE = Path(__file__).resolve().parents[3] / "docs" / "specs" / "LIFECYCLE.md"
 
 
 @pytest.fixture(scope="module")
 def doc_text() -> str:
-    assert LIFECYCLE.exists(), f"docs/LIFECYCLE.md missing at {LIFECYCLE}"
+    assert LIFECYCLE.exists(), f"docs/specs/LIFECYCLE.md missing at {LIFECYCLE}"
     return LIFECYCLE.read_text(encoding="utf-8")
 
 
@@ -46,7 +46,7 @@ STATUSES = [
 def test_every_status_mentioned(doc_text: str, status: str) -> None:
     """Every finding status is referenced somewhere in the lifecycle doc."""
     assert status in doc_text, (
-        f"status '{status}' missing from docs/LIFECYCLE.md — a status enum "
+        f"status '{status}' missing from docs/specs/LIFECYCLE.md — a status enum "
         f"may have been added/renamed without updating the doc"
     )
 
@@ -85,7 +85,7 @@ TIMERS = [
 def test_every_timer_var_mentioned(doc_text: str, var: str) -> None:
     """Every timer env var the lifecycle depends on is in the doc."""
     assert var in doc_text, (
-        f"timer env var '{var}' missing from docs/LIFECYCLE.md — a new "
+        f"timer env var '{var}' missing from docs/specs/LIFECYCLE.md — a new "
         f"timer was wired without documenting it, or a rename is unsynced"
     )
 
@@ -122,13 +122,15 @@ def test_known_flaw_section_populated(doc_text: str, header: str) -> None:
 
 
 def test_cap_t182_registered_in_capabilities() -> None:
-    """CAP-T182 entry exists and names docs/LIFECYCLE.md."""
+    """CAP-T182 entry exists and names docs/specs/LIFECYCLE.md."""
     caps_path = LIFECYCLE.parent / "CAPABILITIES.md"
     assert caps_path.exists()
     caps = caps_path.read_text(encoding="utf-8")
     assert "### CAP-T182:" in caps, "CAP-T182 header missing"
     # The CAP's description must name the doc verbatim.
-    assert "docs/LIFECYCLE.md" in caps, "CAP-T182 description must name docs/LIFECYCLE.md verbatim"
+    assert "docs/specs/LIFECYCLE.md" in caps, (
+        "CAP-T182 description must name docs/specs/LIFECYCLE.md verbatim"
+    )
 
 
 # ── Structural sanity: doc has the 12 descriptive + 5 flaw sections ─────────

@@ -3,7 +3,7 @@
 Beaconry is a CVE scanning + auto-remediation tool for self-hosted operators.
 Goal: compress "CVE published → infrastructure patched and verified" from days to minutes.
 
-Full design: `DESIGN.md`
+Full design: `docs/specs/DESIGN.md`
 
 @memory/design-decisions.md
 @memory/docker-standard.md
@@ -17,7 +17,6 @@ Full design: `DESIGN.md`
 ## Repository layout
 
 ```
-DESIGN.md          — full product design (vision, architecture, business model)
 Makefile           — local gates: make lint / test / type / check / smoke
 pyproject.toml     — ruff + pyright + pytest config
 .pre-commit-config.yaml — ruff + pyright on commit, pytest on push
@@ -26,9 +25,11 @@ poc/               — Docker Compose POC: hub + scout containers
   hub/             — CVE matcher (grype) + Telegram bot + executor plugins
   hub/executor/    — pluggable remediation adapters (docker, manual, ...)
   tests/           — pytest pyramid (unit, integration, e2e, fixtures)
-docs/              — user-facing documentation lands here
+docs/              — three-folder layout (BC-147): one class per subdirectory
+  specs/           — specifications (DESIGN, CAPABILITIES, LIFECYCLE, METRICS, VARIABLES, INSTALL) + _template + INDEX
   stories/         — operator-scenario stories (BC-NNN-<slug>.md) + INDEX + _template + _8-questions
   plan/            — per-feature plan docs (BC-NNN-<slug>-plan.md) + _template
+  operations/      — runbooks (step-by-step playbooks, distinct from specs)
 memory/            — persistent context for Claude sessions
 ```
 
@@ -78,10 +79,10 @@ Design-Driven, Test-Guarded Development. Per feature:
 3. Red integration test under `poc/tests/integration/` encoding the Gherkin (top docstring includes a `Covers:` block)
 4. Implementation to turn test green
 5. Refactor + unit tests for non-trivial helpers (every test file needs a `Covers:` block)
-5a. **Register capabilities** — add or extend entries in `docs/CAPABILITIES.md`; ensure bidirectional links. `make verify-traceability` must pass.
+5a. **Register capabilities** — add or extend entries in `docs/specs/CAPABILITIES.md`; ensure bidirectional links. `make verify-traceability` must pass.
 6. **Fast tier** `make check` passes (lint, type, test, coverage ≥ 60%, verify-traceability, smoke). Before pushing or opening a PR, run **full tier** `make check-full` (adds opt-in `compose` + `real_tools` markers).
 6a. **Pre-ship audit** — fill the "Shipping evidence" table in the plan doc with a pointer for every Gherkin scenario + plan goal. Three lenses: **Gherkin coverage** (every Scenario has a pointer), **data-model symmetry** (every write has a mirror read, and vice versa), **self-consistency** (if the story introduces a convention — new template field, new CAP, new rule — the story's own artifacts apply it). Any row left at ⚠️ or ❌ blocks shipping; cycle back to step 5.
-7. DESIGN.md updated only if architecture changed
+7. `docs/specs/DESIGN.md` updated only if architecture changed
 8. PR to `dev` → user runs `/ultrareview` → Claude runs `/code-review` → user merges
 
 Exceptions (no story required): `fix/*` (with repro), `refactor/*` (no behavior change), `chore/*` (tooling/deps).

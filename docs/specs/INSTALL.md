@@ -459,6 +459,6 @@ TLS + auth at a reverse proxy. The warning is non-fatal.
 
 ## Related docs
 
-* `docs/VARIABLES.md` — every env var, with defaults + where each is read.
+* `VARIABLES.md` — every env var, with defaults + where each is read.
 * `README.md` — product overview + demo recipe.
 * `DESIGN.md` — architecture + urgency tiers + health checks.

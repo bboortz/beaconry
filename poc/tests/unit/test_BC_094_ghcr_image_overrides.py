@@ -112,7 +112,7 @@ def test_deploy_only_allowlist_covers_image_tag() -> None:
 
 def test_image_tag_documented_in_variables_md() -> None:
     """VARIABLES.md has a row for BEACONRY_IMAGE_TAG."""
-    body = (REPO_ROOT / "docs" / "VARIABLES.md").read_text()
+    body = (REPO_ROOT / "docs" / "specs" / "VARIABLES.md").read_text()
     assert "`BEACONRY_IMAGE_TAG`" in body
     assert "ghcr.io/bboortz/beaconry" in body  # the row names the registry
     assert "BC-094" in body

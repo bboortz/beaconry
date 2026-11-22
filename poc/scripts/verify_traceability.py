@@ -1,7 +1,7 @@
 """Bidirectional traceability enforcement between CAPABILITIES.md and tests.
 
 Parses two sources:
-  1. docs/CAPABILITIES.md — one block per capability with id, type, status,
+  1. docs/specs/CAPABILITIES.md — one block per capability with id, type, status,
      origin, verified-by list.
   2. poc/tests/**/test_*.py — top-of-file docstring with a `Covers:` block
      listing CAP ids.
@@ -326,7 +326,7 @@ def _check_dangling_cap_refs(
 ) -> list[str]:
     """Covers block references a cap id that doesn't exist in CAPABILITIES.md."""
     return [
-        f"{_rel(test_path, tests)}: references {cap_id} but it is not in docs/CAPABILITIES.md"
+        f"{_rel(test_path, tests)}: references {cap_id} but it is not in docs/specs/CAPABILITIES.md"
         for test_path, cap_ids in test_covers.items()
         for cap_id in cap_ids
         if cap_id not in caps
@@ -445,6 +445,22 @@ def _check_origin_story_exists(caps: dict[str, Capability], docs: Path) -> list[
     return errors
 
 
+def _resolve_design_ref(file_ref: str, repo_root: Path, docs: Path) -> Path | None:
+    """Resolve a design-field file ref. BC-147: bare `DESIGN.md` is tried
+    against `docs/specs/` first (its post-BC-147 home), then repo root, then
+    `docs/`. All other refs resolve relative to repo root."""
+    candidates: list[Path]
+    bare = Path(file_ref).name == file_ref
+    if bare:
+        candidates = [docs / "specs" / file_ref, repo_root / file_ref, docs / file_ref]
+    else:
+        candidates = [repo_root / file_ref]
+    for c in candidates:
+        if c.exists():
+            return c
+    return None
+
+
 def _check_design_links(caps: dict[str, Capability], docs: Path) -> list[str]:
     """Design field file-refs must exist; '§ Heading' refs must match a real heading."""
     errors: list[str] = []
@@ -453,11 +469,11 @@ def _check_design_links(caps: dict[str, Capability], docs: Path) -> list[str]:
         if not cap.design:
             continue
         for file_ref, section in parse_design_refs(cap.design):
-            target = repo_root / file_ref
-            if not target.exists():
+            target = _resolve_design_ref(file_ref, repo_root, docs)
+            if target is None:
                 errors.append(
                     f"CAPABILITIES.md § {cap.cap_id}: design references '{file_ref}' "
-                    f"but the file does not exist (resolved to {target})"
+                    f"but the file does not exist"
                 )
                 continue
             if section is not None and section not in extract_headings(target):
@@ -480,7 +496,7 @@ def run(docs: Path, tests: Path, *, branch: str | None = None) -> int:
     the registry below.
     """
     resolved_branch = branch if branch is not None else get_current_branch()
-    caps = parse_capabilities(docs / "CAPABILITIES.md")
+    caps = parse_capabilities(docs / "specs" / "CAPABILITIES.md")
     test_covers, orphan_errors = _collect_test_covers(tests)
 
     errors: list[str] = []

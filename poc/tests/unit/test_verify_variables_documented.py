@@ -2,7 +2,7 @@
 BC-040 — three-way sync (VARIABLES.md ↔ .env.example ↔ docker-compose.yml).
 
 Covers:
-    - CAP-T084: `docs/VARIABLES.md` — single source of truth for runtime env variables
+    - CAP-T084: `docs/specs/VARIABLES.md` — single source of truth for runtime env variables
     - CAP-T085: `verify-variables` lint catches code↔doc drift bidirectionally
     - CAP-B023: Developer can review the entire variable surface without greping
     - CAP-T086: Rewritten `.env.example` as the full operator catalog
@@ -266,7 +266,7 @@ def test_shipped_repo_passes() -> None:
     the full three-way sync (code ↔ VARIABLES.md ↔ .env.example ↔ compose)."""
     repo_root = Path(__file__).resolve().parents[3]
     poc_root = repo_root / "poc"
-    variables_md = repo_root / "docs" / "VARIABLES.md"
+    variables_md = repo_root / "docs" / "specs" / "VARIABLES.md"
     env_example = repo_root / vv.ENV_EXAMPLE_RELPATH
     compose_file = repo_root / vv.COMPOSE_FILE_RELPATH
     violations = vv.check(

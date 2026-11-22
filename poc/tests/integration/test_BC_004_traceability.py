@@ -35,6 +35,7 @@ def tmp_docs_and_tests(tmp_path: Path) -> tuple[Path, Path]:
     """
     docs = tmp_path / "docs"
     (docs / "stories").mkdir(parents=True)
+    (docs / "specs").mkdir()
     (docs / "stories" / "BC-999-fake.md").write_text("# BC-999\n")
     tests = tmp_path / "tests"
     tests.mkdir()
@@ -42,7 +43,9 @@ def tmp_docs_and_tests(tmp_path: Path) -> tuple[Path, Path]:
 
 
 def _write_capabilities(docs: Path, body: str) -> None:
-    (docs / "CAPABILITIES.md").write_text(body)
+    # BC-147: CAPABILITIES.md lives under docs/specs/.
+    (docs / "specs").mkdir(exist_ok=True)
+    (docs / "specs" / "CAPABILITIES.md").write_text(body)
 
 
 def _write_test(tests: Path, name: str, body: str) -> Path:
@@ -437,7 +440,8 @@ def test_design_multiple_refs_comma_separated(tmp_docs_and_tests: tuple[Path, Pa
 
 def _happy_minimal_setup(docs: Path, tests: Path) -> None:
     """Minimum capability + test that keeps the rest of verify-traceability happy."""
-    (docs / "CAPABILITIES.md").write_text(
+    (docs / "specs").mkdir(exist_ok=True)
+    (docs / "specs" / "CAPABILITIES.md").write_text(
         """
 ### CAP-B001: Example
 - **type:** business

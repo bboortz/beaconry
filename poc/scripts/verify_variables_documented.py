@@ -1,8 +1,8 @@
 """BC-039 — environment-variable documentation drift lint.
 
 Every `os.environ.get("X")` or `os.environ["X"]` in `poc/<non-tests>/`
-must appear as a row in `docs/VARIABLES.md`. Likewise, every row in
-`docs/VARIABLES.md` must correspond to at least one code read.
+must appear as a row in `docs/specs/VARIABLES.md`. Likewise, every row in
+`docs/specs/VARIABLES.md` must correspond to at least one code read.
 
 Rationale: ~30 env variables shipped in two weeks; developer / operator
 cannot audit configuration surface without greping four files. VARIABLES.md
@@ -539,7 +539,7 @@ def _check_compose_env(rows: dict[str, list[str]], compose_file: Path) -> list[s
 def main() -> int:
     repo_root = Path(__file__).resolve().parent.parent.parent
     poc_root = repo_root / "poc"
-    variables_md = repo_root / "docs" / "VARIABLES.md"
+    variables_md = repo_root / "docs" / "specs" / "VARIABLES.md"
     env_example = repo_root / ENV_EXAMPLE_RELPATH
     compose_file = repo_root / COMPOSE_FILE_RELPATH
     if not variables_md.exists():
