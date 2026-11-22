@@ -4,6 +4,11 @@ All notable changes to beaconry are recorded here. The format is based
 on [Keep a Changelog](https://keepachangelog.com/), and this project
 follows [Semantic Versioning](https://semver.org/).
 
+## [v0.22.22] — 2026-11-22
+
+### Added
+- **SH-019:** adopt shepherd dev-cycle contract — Makefile aliases
+
 ## [v0.22.21] — 2026-11-21
 
 ### 📦 Changed (BC-147) — docs/ three-folder layout

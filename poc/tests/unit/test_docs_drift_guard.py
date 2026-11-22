@@ -30,6 +30,16 @@ def test_parse_phony_multiple_declarations() -> None:
     assert guard.parse_phony(text) == {"a", "b", "c", "d"}
 
 
+def test_parse_phony_follows_backslash_line_continuations() -> None:
+    # Introduced by SH-019 (shepherd contract .PHONY). The parser must join
+    # continuation lines so trailing `\` isn't captured as a target and the
+    # continuation names aren't silently invisible.
+    text = ".PHONY: build test-affected release-artifacts \\\n        ci-branch ci-nightly\n"
+    phony = guard.parse_phony(text)
+    assert "\\" not in phony
+    assert phony == {"build", "test-affected", "release-artifacts", "ci-branch", "ci-nightly"}
+
+
 def test_extract_help_block_captures_help_recipe() -> None:
     text = '.PHONY: help lint\n\nhelp:\n\t@echo "line 1"\n\t@echo "line 2"\n\nlint:\n\truff check\n'
     block = guard.extract_help_block(text)

@@ -1,6 +1,16 @@
 .PHONY: help lint format type test check check-full demo smoke clean cleanup install-hooks verify-traceability verify-dockerfile-health-copy verify-dockerfile-sources verify-pinned-versions verify-base-images verify-memory-drift verify-compose-env-propagation verify-compose-memory-limits verify-docs-drift verify-docs-layout verify-evidence-pointers verify-per-file-coverage verify-variables verify-install-doc verify-version-sync verify-version-bumped verify-changelog verify-feature-complete bump-patch bump-minor bump-major bump-auto changelog findings status audit soak metrics verify-integrity test-e2e live-rebuild live-status scan set-status test-scenarios test-cli dogfood-scan dogfood-sbom test-cold-start perf perf-seed
 
-PYTHON ?= python3
+# Prefer the project venv (`python -m venv .venv`) when it exists so `make
+# test` / `make check` work without the user having to `source .venv/bin/activate`
+# first. CI uses actions/setup-python which installs deps into the system
+# interpreter — no .venv, so this transparently falls back to python3/pytest.
+# Running without the venv and without CI's install step is the failure mode
+# this guards against (bare `pytest` → system interpreter → ModuleNotFoundError
+# for telegram/docker/pytest-asyncio).
+PYTHON ?= $(if $(wildcard .venv/bin/python),.venv/bin/python,python3)
+PYTEST ?= $(if $(wildcard .venv/bin/pytest),.venv/bin/pytest,pytest)
+RUFF ?= $(if $(wildcard .venv/bin/ruff),.venv/bin/ruff,ruff)
+PYRIGHT ?= $(if $(wildcard .venv/bin/pyright),.venv/bin/pyright,pyright)
 PYTEST_ARGS ?=
 ARGS ?=
 
@@ -102,24 +112,34 @@ help:
 	@echo "  make live-status                compare running image build-time to source mtime"
 	@echo "                                  (hint when rebuild is overdue)"
 	@echo ""
+	@echo "Shepherd dev-cycle contract (SH-014 / SH-019):"
+	@echo "  make build                      no-op (Python service — no compiled artifact)"
+	@echo "  make test-affected              alias → test (SH-023 will add pytest-xdist affected-only)"
+	@echo "  make release-artifacts          no-op (release flow is bump-* + CD pipeline)"
+	@echo "  make ci-branch                  5-min PR gate: lint + test"
+	@echo "  make ci-patch                   post-merge smoke"
+	@echo "  make ci-release                 release-flow placeholder (prints note)"
+	@echo "  make ci-nightly                 nightly full gate (alias for check)"
+	@echo "  make ci-nightly-body            nightly tier body (invoked by ci-nightly)"
+	@echo ""
 	@echo "Housekeeping:"
 	@echo "  make install-hooks              pre-commit install + pre-push"
 	@echo "  make clean                      remove caches"
 	@echo "  make cleanup                    tear down beaconry test stacks + remove leaked test images (BC-080)"
 
 lint:
-	ruff check .
-	ruff format --check .
+	$(RUFF) check .
+	$(RUFF) format --check .
 
 format:
-	ruff format .
-	ruff check --fix .
+	$(RUFF) format .
+	$(RUFF) check --fix .
 
 type:
-	pyright
+	$(PYRIGHT)
 
 test:
-	pytest $(PYTEST_ARGS)
+	$(PYTEST) $(PYTEST_ARGS)
 
 verify-traceability:
 	$(PYTHON) -m poc.scripts.verify_traceability
@@ -249,7 +269,7 @@ check: lint type test verify-per-file-coverage verify-traceability verify-docker
 check-full: check
 	@echo ""
 	@echo "==> Full tier: running opt-in markers (compose + real_tools)"
-	pytest -m "compose or real_tools" --no-cov
+	$(PYTEST) -m "compose or real_tools" --no-cov
 	@echo ""
 	@echo "==> Full tier: running e2e stack (BC-017; brings up isolated compose project)"
 	$(MAKE) test-e2e
