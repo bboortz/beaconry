@@ -421,18 +421,22 @@ def test_memory_check_monotonic_growth_detected() -> None:
     assert mc.monotonic_growth is True
 
 
-def test_memory_check_monotonic_growth_not_detected_on_wobble() -> None:
+def test_memory_check_monotonic_growth_not_detected_when_run_breaks_early() -> None:
+    # Every second step decreases, keeping the strictly-increasing run at 2
+    # — below MONOTONIC_GROWTH_SAMPLES (default 3). No slow-leak signature.
     mc = perf_gate.MemoryCheck(
         t0_rss_mb=100,
         t1_rss_mb=200,
-        samples_mb=[100, 110, 105, 115, 120, 125, 130, 128, 140],
+        samples_mb=[100, 110, 105, 115, 110, 120, 115, 125],
     )
-    # Wobbles reset the run counter → no monotonic signature.
     assert mc.monotonic_growth is False
 
 
 def test_memory_check_too_few_samples_for_monotonic() -> None:
-    mc = perf_gate.MemoryCheck(t0_rss_mb=100, t1_rss_mb=150, samples_mb=[100, 110, 120])
+    # Fewer samples than the window → short-circuits to False regardless
+    # of direction.
+    few = [100 for _ in range(max(1, perf_gate.MONOTONIC_GROWTH_SAMPLES - 1))]
+    mc = perf_gate.MemoryCheck(t0_rss_mb=100, t1_rss_mb=150, samples_mb=few)
     assert mc.monotonic_growth is False
 
 
