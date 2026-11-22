@@ -59,28 +59,21 @@ Mirrors HC-008's. Workflow-shape invariants are enforced at every `make check`
 via the integration tests below; live-dispatch rows get filled after the first
 `workflow_dispatch` run.
 
+R1 rewrite: the R0 inline-script POC migrated to bboortz/shepherd's
+reusable workflow (SH-007). The agent-step sandbox invariants, hybrid-flow
+steps (Setup Node.js / Regenerate lockfile / Validate combined diff) and
+validate.sh / install-trivy.sh / agent-call.sh behaviours now live in
+shepherd's own test suite, not on beaconry. What remains here is the
+caller-wiring contract.
+
 | Scenario / goal | Evidence type | Pointer | Status |
 |---|---|---|---|
-| Workflow file present at `.github/workflows/shepherd.yml` | integration | `test_BC_145_shepherd_poc.py::test_workflow_file_exists` | ✓ |
-| Workflow has daily cron trigger | integration | `test_BC_145_shepherd_poc.py::test_workflow_has_cron` | ✓ |
-| Workflow exposes `workflow_dispatch` | integration | `test_BC_145_shepherd_poc.py::test_workflow_has_workflow_dispatch` | ✓ |
-| No third-party Trivy Action wrapper | integration | `test_BC_145_shepherd_poc.py::test_no_trivy_action_wrapper` | ✓ |
-| Every `uses:` pinned to a commit SHA | integration | `test_BC_145_shepherd_poc.py::test_every_uses_is_sha_pinned` | ✓ |
-| Shepherd scripts are executable | integration | `test_BC_145_shepherd_poc.py::test_script_is_executable[install-trivy.sh]` | ✓ |
-| Shepherd scripts are executable (agent-call) | integration | `test_BC_145_shepherd_poc.py::test_script_is_executable[agent-call.sh]` | ✓ |
-| Shepherd scripts are executable (validate) | integration | `test_BC_145_shepherd_poc.py::test_script_is_executable[validate.sh]` | ✓ |
-| Shepherd scripts are executable (open-pr) | integration | `test_BC_145_shepherd_poc.py::test_script_is_executable[open-pr.sh]` | ✓ |
-| Shepherd scripts are executable (regen-lockfile) | integration | `test_BC_145_shepherd_poc.py::test_script_is_executable[regen-lockfile.sh]` | ✓ |
-| Validator blocks edits to `.github/workflows/*` | integration | `test_BC_145_shepherd_poc.py::test_validate_blocks_workflow_touch` | ✓ |
-| Validator blocks edits to `shepherd.yml` | integration | `test_BC_145_shepherd_poc.py::test_validate_blocks_shepherd_yml_touch` | ✓ |
-| Validator blocks oversize diffs | integration | `test_BC_145_shepherd_poc.py::test_validate_blocks_oversize_diff` | ✓ |
-| Validator accepts a small allowed diff | integration | `test_BC_145_shepherd_poc.py::test_validate_accepts_small_allowed_diff` | ✓ |
-| Trivy install uses `cosign verify-blob` | integration | `test_BC_145_shepherd_poc.py::test_install_trivy_dry_run_names_cosign_verify_blob` | ✓ |
-| Agent prompt declares manifest-only scope (hybrid flow) | integration | `test_BC_145_shepherd_poc.py::test_prompt_declares_manifest_only_scope` | ✓ |
-| Agent prompt names `shepherd.yml` as forbidden | integration | `test_BC_145_shepherd_poc.py::test_prompt_names_shepherd_yml_as_forbidden` | ✓ |
-| Agent prompt specifies the "no fix possible" fallback | integration | `test_BC_145_shepherd_poc.py::test_prompt_specifies_no_fix_possible_fallback` | ✓ |
-| Agent step env is only `ANTHROPIC_API_KEY` | integration | `test_BC_145_shepherd_poc.py::test_agent_step_env_only_has_anthropic_api_key` | ✓ |
-| Workflow wires Setup Node.js step | integration | `test_BC_145_shepherd_poc.py::test_workflow_wires_setup_node_step` | ✓ |
-| Workflow wires Regenerate lockfile step | integration | `test_BC_145_shepherd_poc.py::test_workflow_wires_regen_lockfile_step` | ✓ |
-| Workflow wires second Validate (combined) step | integration | `test_BC_145_shepherd_poc.py::test_workflow_wires_second_validate_step` | ✓ |
+| Shepherd caller workflow file present | integration | `test_BC_145_shepherd_poc.py::test_workflow_file_exists` | ✓ |
+| Gates caller workflow file present | integration | `test_BC_145_shepherd_poc.py::test_gates_workflow_file_exists` | ✓ |
+| Caller has daily cron trigger | integration | `test_BC_145_shepherd_poc.py::test_workflow_has_cron` | ✓ |
+| Caller exposes `workflow_dispatch` | integration | `test_BC_145_shepherd_poc.py::test_workflow_has_workflow_dispatch` | ✓ |
+| Caller pins `reusable-shepherd.yml` at an SHA | integration | `test_BC_145_shepherd_poc.py::test_workflow_pins_reusable_shepherd` | ✓ |
+| Gates caller pins `reusable-shepherd-gates.yml` at an SHA | integration | `test_BC_145_shepherd_poc.py::test_gates_pins_reusable_shepherd_gates` | ✓ |
+| No third-party Trivy Action wrapper (SH-001) | integration | `test_BC_145_shepherd_poc.py::test_no_trivy_action_wrapper` | ✓ |
+| Every `uses:` pinned to a commit SHA (SH-001) | integration | `test_BC_145_shepherd_poc.py::test_every_uses_is_sha_pinned` | ✓ |
 | Live post-dispatch — first run on beaconry | live | first `workflow_dispatch` observed | ❌ pending |
