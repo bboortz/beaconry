@@ -114,7 +114,8 @@ help:
 	@echo ""
 	@echo "Shepherd dev-cycle contract (SH-014 / SH-019):"
 	@echo "  make build                      no-op (Python service — no compiled artifact)"
-	@echo "  make test-affected              alias → test (SH-023 will add pytest-xdist affected-only)"
+	@echo "  make test-affected              scoped pytest by changed module (BC-149 / SH-023)"
+	@echo "  make test-updates               alias of test-affected (local naming parity with homelab)"
 	@echo "  make release-artifacts          no-op (release flow is bump-* + CD pipeline)"
 	@echo "  make ci-branch                  5-min PR gate: lint + test"
 	@echo "  make ci-patch                   post-merge smoke"
@@ -467,7 +468,13 @@ live-status:
 build: ; @true
 
 # Contract entry points — anchor on beaconry's native idioms.
-test-affected: test       # no affected-only yet (SH-023 upgrades with pytest-xdist)
+# BC-149 / SH-023: test-affected runs scripts/test-updates.sh which scopes
+# pytest to tests covering changed modules (hub / scout / scripts /
+# beaconry_health / telegram_mock / tests/). Falls back to full suite on
+# tooling/config touches or >4 modules affected.
+.PHONY: test-updates
+test-affected: test-updates
+test-updates: ; @bash scripts/test-updates.sh
 # `smoke` already exists at the top of this Makefile; no override needed.
 release-artifacts: ; @true
 
