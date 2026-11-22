@@ -95,7 +95,7 @@ def test_soak_window_override_still_works(tmp_path: Path, monkeypatch: pytest.Mo
 
 
 def _load_release_yaml() -> dict:
-    with open(REPO_ROOT / ".github" / "workflows" / "release.yml") as f:
+    with open(REPO_ROOT / ".github" / "workflows" / "ci-release.yml") as f:
         return yaml.safe_load(f)
 
 
