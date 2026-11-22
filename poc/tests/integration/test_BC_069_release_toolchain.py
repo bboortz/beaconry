@@ -346,7 +346,7 @@ def test_ci_yaml_parses() -> None:
     import yaml
 
     repo_root = Path(__file__).resolve().parents[3]
-    with open(repo_root / ".github" / "workflows" / "ci.yml") as f:
+    with open(repo_root / ".github" / "workflows" / "ci-branch.yml") as f:
         doc = yaml.safe_load(f)
     assert "jobs" in doc
     expected_jobs = {"detect", "fast-check", "full-check", "release-check", "notify-failure"}
@@ -359,6 +359,6 @@ def test_ci_yaml_uses_concurrency_cancellation() -> None:
     import yaml
 
     repo_root = Path(__file__).resolve().parents[3]
-    with open(repo_root / ".github" / "workflows" / "ci.yml") as f:
+    with open(repo_root / ".github" / "workflows" / "ci-branch.yml") as f:
         doc = yaml.safe_load(f)
     assert doc["concurrency"]["cancel-in-progress"] is True
