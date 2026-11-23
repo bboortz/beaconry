@@ -505,3 +505,20 @@ ci-release: ci-release-promote
 
 ci-nightly: ci-nightly-body
 ci-nightly-body: check      # nightly: full gate (lint + type + 15+ verify scripts + smoke)
+
+# ---------------------------------------------------------------------------
+# SH-042 — fleet-wide hook-commit / hook-push tier wrappers.
+# See shepherd docs/plan/IDEAS-dev-workflow-contract-v3.md for the mapping.
+# Budgets: hook-commit ~15 s, hook-push ~2 min.
+#
+# `check-fast` is an alias for beaconry's existing `check` target (which
+# beaconry treats as its fast tier per BC-148 / its own echo on line 267).
+# SH-023 will later split `check-fast` into a smaller subset (pytest-xdist
+# + fast-only verify-*); when that lands, this alias becomes an override.
+# ---------------------------------------------------------------------------
+.PHONY: hook-commit hook-push check-fast
+check-fast: check
+COMMIT_STEPS ?= lint type
+PUSH_STEPS   ?= check-fast verify-version-bumped verify-changelog verify-feature-complete
+hook-commit: $(COMMIT_STEPS)
+hook-push:   $(PUSH_STEPS)

@@ -4,6 +4,13 @@ All notable changes to beaconry are recorded here. The format is based
 on [Keep a Changelog](https://keepachangelog.com/), and this project
 follows [Semantic Versioning](https://semver.org/).
 
+## [v0.22.24] — 2026-11-23
+
+### Added
+- **SH-042:** `hook-commit` + `hook-push` fleet-tier wrappers (COMMIT_STEPS=lint type; PUSH_STEPS=check-fast verify-version-bumped verify-changelog verify-feature-complete).
+- `check-fast` forward-compat alias (currently `check-fast: check`); SH-023 will tighten it to a pytest-xdist subset.
+- **BC-150:** `poc/tests/integration/test_BC_150_hook_tiers.py` (5 assertions).
+
 ## [v0.22.23] — 2026-11-22
 
 ### Added
