@@ -4,6 +4,11 @@ All notable changes to beaconry are recorded here. The format is based
 on [Keep a Changelog](https://keepachangelog.com/), and this project
 follows [Semantic Versioning](https://semver.org/).
 
+## [v0.22.25] — 2026-11-23
+
+### Fixed
+- **ci-patch:** install Python deps (`setup-python` + `pip install -e .`) before `make ci-patch` so `make smoke` (which runs `python demo.py`) finds `uvicorn`. Mirrors the pattern already used by `ci-nightly`.
+
 ## [v0.22.24] — 2026-11-23
 
 ### Added
