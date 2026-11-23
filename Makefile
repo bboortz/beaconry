@@ -68,7 +68,10 @@ help:
 	@echo ""
 	@echo "Tiers:"
 	@echo "  make check         FAST TIER — all gates above (~7s)"
+	@echo "  make check-fast    SH-042 alias for check (forward-compat; SH-023 will tighten it)"
 	@echo "  make check-full    FULL TIER — check + opt-in markers + make test-e2e + make test-scenarios + make test-cli (~1-2m)"
+	@echo "  make hook-commit   SH-042 fleet tier — commit-stage gate (~15s)"
+	@echo "  make hook-push     SH-042 fleet tier — push-stage gate (~2min)"
 	@echo ""
 	@echo "Operator CLIs:"
 	@: # BC-044 BEGIN OPERATOR_CLI_TARGETS — authoritative list the live-smoke harness autodetects.
@@ -505,3 +508,20 @@ ci-release: ci-release-promote
 
 ci-nightly: ci-nightly-body
 ci-nightly-body: check      # nightly: full gate (lint + type + 15+ verify scripts + smoke)
+
+# ---------------------------------------------------------------------------
+# SH-042 — fleet-wide hook-commit / hook-push tier wrappers.
+# See shepherd docs/plan/IDEAS-dev-workflow-contract-v3.md for the mapping.
+# Budgets: hook-commit ~15 s, hook-push ~2 min.
+#
+# `check-fast` is an alias for beaconry's existing `check` target (which
+# beaconry treats as its fast tier per BC-148 / its own echo on line 267).
+# SH-023 will later split `check-fast` into a smaller subset (pytest-xdist
+# + fast-only verify-*); when that lands, this alias becomes an override.
+# ---------------------------------------------------------------------------
+.PHONY: hook-commit hook-push check-fast
+check-fast: check
+COMMIT_STEPS ?= lint type
+PUSH_STEPS   ?= check-fast verify-version-bumped verify-changelog verify-feature-complete
+hook-commit: $(COMMIT_STEPS)
+hook-push:   $(PUSH_STEPS)
