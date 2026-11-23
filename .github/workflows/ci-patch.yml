@@ -32,8 +32,14 @@ jobs:
         run: |
           python3 -m pip install --upgrade pip
           pip install -r requirements-dev.txt
-          # Also install the package itself so runtime deps (uvicorn, fastapi)
-          # are available to `make smoke` which runs `python demo.py`.
+          # `make smoke` runs `python -m poc.demo` which imports `hub` →
+          # `uvicorn`/`fastapi` (hub requirements) and `scout` modules too.
+          # Install both component requirements files so the mock smoke run
+          # can import them on the host.
+          pip install -r poc/hub/requirements.txt
+          pip install -r poc/scout/requirements.txt
+          # Also install the package itself so operator-CLI entry points
+          # (poc.scripts.*) + pyproject deps (pyyaml, requests) resolve.
           pip install -e .
 
       # Build-once-promote (SH-014): download the artifact produced by
