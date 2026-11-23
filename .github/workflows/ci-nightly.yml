@@ -28,6 +28,9 @@ jobs:
         run: |
           python3 -m pip install --upgrade pip
           pip install -r requirements-dev.txt
+          # Also install the package itself so runtime deps (requests, pyyaml)
+          # are available to tests that import beaconry modules.
+          pip install -e .
 
       - name: Run nightly slow lane
         run: make ci-nightly
