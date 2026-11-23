@@ -6,7 +6,7 @@ introduced by shepherd SH-042:
     - `hook-push`   — push-stage gate (~2 min budget)
 
 Covers:
-    - CAP-SH-042: fleet-wide hook-commit / hook-push tier naming
+    - CAP-S008: Fleet-tier hook-commit + hook-push wrappers (shepherd SH-042)
 """
 
 from __future__ import annotations

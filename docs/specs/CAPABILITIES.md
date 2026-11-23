@@ -2518,6 +2518,14 @@ Enforcement: `poc/scripts/verify_traceability.py` runs as part of `make check`. 
 - **verified by:**
   - `poc/tests/integration/test_BC_145_shepherd_poc.py`
 
+### CAP-S008: Fleet-tier hook-commit + hook-push wrappers (shepherd SH-042)
+- **type:** technical
+- **status:** active
+- **origin:** BC-150 mirrors shepherd SH-042. Fleet-wide local-gate tier naming — agents + humans run `make hook-commit` / `make hook-push` on any managed repo and get the right local gate.
+- **description:** `Makefile` declares `.PHONY: hook-commit hook-push` as thin wrappers over beaconry's native `COMMIT_STEPS` (`lint type`) and `PUSH_STEPS` (`check-fast verify-version-bumped verify-changelog verify-feature-complete`). `check-fast` is a forward-compat alias (currently `check-fast: check`) that SH-023 will later tighten to a pytest-xdist subset. No step renames; beaconry keeps its native vocabulary.
+- **verified by:**
+  - `poc/tests/integration/test_BC_150_hook_tiers.py`
+
 ### CAP-D001: docs/ three-folder layout — specs / plan / stories
 - **type:** technical
 - **status:** active
