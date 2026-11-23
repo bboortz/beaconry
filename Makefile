@@ -1,4 +1,4 @@
-.PHONY: help lint format type test check check-full demo smoke clean cleanup install-hooks verify-traceability verify-dockerfile-health-copy verify-dockerfile-sources verify-pinned-versions verify-base-images verify-memory-drift verify-compose-env-propagation verify-compose-memory-limits verify-docs-drift verify-docs-layout verify-evidence-pointers verify-per-file-coverage verify-variables verify-install-doc verify-version-sync verify-version-bumped verify-changelog verify-feature-complete bump-patch bump-minor bump-major bump-auto changelog findings status audit soak metrics verify-integrity test-e2e live-rebuild live-status scan set-status test-scenarios test-cli dogfood-scan dogfood-sbom test-cold-start perf perf-seed
+.PHONY: help lint format type test check check-docs check-full demo smoke clean cleanup install-hooks verify-traceability verify-dockerfile-health-copy verify-dockerfile-sources verify-pinned-versions verify-base-images verify-memory-drift verify-compose-env-propagation verify-compose-memory-limits verify-docs-drift verify-docs-layout verify-evidence-pointers verify-per-file-coverage verify-variables verify-install-doc verify-version-sync verify-version-bumped verify-changelog verify-feature-complete bump-patch bump-minor bump-major bump-auto changelog findings status audit soak metrics verify-integrity test-e2e live-rebuild live-status scan set-status test-scenarios test-cli dogfood-scan dogfood-sbom test-cold-start perf perf-seed
 
 # Prefer the project venv (`python -m venv .venv`) when it exists so `make
 # test` / `make check` work without the user having to `source .venv/bin/activate`
@@ -69,6 +69,7 @@ help:
 	@echo "Tiers:"
 	@echo "  make check         FAST TIER — all gates above (~7s)"
 	@echo "  make check-fast    SH-042 alias for check (forward-compat; SH-023 will tighten it)"
+	@echo "  make check-docs    SH-055 fleet-wide docs/version drift wrapper (delegates to verify-* targets)"
 	@echo "  make check-full    FULL TIER — check + opt-in markers + make test-e2e + make test-scenarios + make test-cli (~1-2m)"
 	@echo "  make hook-commit   SH-042 fleet tier — commit-stage gate (~15s)"
 	@echo "  make hook-push     SH-042 fleet tier — push-stage gate (~2min)"
@@ -482,7 +483,11 @@ test-updates: ; @bash scripts/test-updates.sh
 release-artifacts: ; @true
 
 # Tier bodies.
-ci-branch:  lint test      # 5-min PR gate: lint + test
+# SH-055: BRANCH_STEPS sourced from the fleet-tier block below (see
+# hook-push / PUSH_STEPS). Declared here with its default so the
+# `ci-branch:` prereq expansion sees a non-empty value at parse time.
+BRANCH_STEPS ?= lint test check-docs
+ci-branch:  $(BRANCH_STEPS)      # 5-min PR gate: lint + test + check-docs
 ci-patch:   smoke           # post-merge smoke
 
 # ci-release-promote: fast-forward main to dev + tag from VERSION (SH-029).
@@ -522,6 +527,14 @@ ci-nightly-body: check      # nightly: full gate (lint + type + 15+ verify scrip
 .PHONY: hook-commit hook-push check-fast
 check-fast: check
 COMMIT_STEPS ?= lint type
-PUSH_STEPS   ?= check-fast verify-version-bumped verify-changelog verify-feature-complete
+PUSH_STEPS   ?= check-fast check-docs verify-version-bumped verify-changelog verify-feature-complete
+# BRANCH_STEPS is declared earlier (next to `ci-branch:`) so its default
+# is visible when the rule's prereqs are expanded at parse time.
 hook-commit: $(COMMIT_STEPS)
 hook-push:   $(PUSH_STEPS)
+
+# SH-055 — fleet-wide check-docs wrapper (shepherd ref: PR #58).
+# Thin delegate over beaconry's existing doc/version drift gates. Wired into
+# PUSH_STEPS + BRANCH_STEPS so stale docs are caught before a push lands and
+# again in CI on PR.
+check-docs: verify-docs-drift verify-docs-layout verify-version-sync verify-evidence-pointers verify-traceability verify-install-doc
