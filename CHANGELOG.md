@@ -4,6 +4,13 @@ All notable changes to beaconry are recorded here. The format is based
 on [Keep a Changelog](https://keepachangelog.com/), and this project
 follows [Semantic Versioning](https://semver.org/).
 
+## [v0.22.27] — 2026-11-23
+
+### Added
+- **SH-055 / BC-151:** `check-docs` fleet-tier wrapper — thin delegate over `verify-docs-drift verify-docs-layout verify-version-sync verify-evidence-pointers verify-traceability verify-install-doc`. Wired into `PUSH_STEPS` (pre-push hook) and new `BRANCH_STEPS` (sourced by `ci-branch`, CI on PR). Catches doc/version drift before it reaches `dev`. Mirrors shepherd PR #58.
+- `BRANCH_STEPS` Makefile variable (default: `lint test check-docs`) — `ci-branch` now sources its prereqs from it; matches shepherd's shape.
+- **BC-151:** `poc/tests/integration/test_BC_151_check_docs.py` (8 assertions).
+
 ## [v0.22.26] — 2026-11-23
 
 ### Fixed

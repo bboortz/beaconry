@@ -2526,6 +2526,14 @@ Enforcement: `poc/scripts/verify_traceability.py` runs as part of `make check`. 
 - **verified by:**
   - `poc/tests/integration/test_BC_150_hook_tiers.py`
 
+### CAP-S009: Fleet-tier check-docs wrapper (shepherd SH-055)
+- **type:** technical
+- **status:** active
+- **origin:** BC-151 mirrors shepherd SH-055. Fleet-wide `make check-docs` entry point so agents + humans get the same answer to "are my docs consistent with the code I'm about to ship?" on every managed repo. Wired into the pre-push gate + CI on PR so doc staleness (INDEX ↔ frontmatter drift, VERSION-sync drift, missing plan/story for a `feat/*` branch) is caught before it reaches the remote.
+- **description:** `Makefile` declares `.PHONY: check-docs` as a thin delegate over beaconry's existing drift targets: `verify-docs-drift verify-docs-layout verify-version-sync verify-evidence-pointers verify-traceability verify-install-doc`. The wrapper also lands in `PUSH_STEPS` (pre-push hook) and `BRANCH_STEPS` (sourced by `ci-branch`, CI-on-PR). No new verification logic — only unifies the entry point. Shepherd PR #58 ships the shepherd-side equivalent.
+- **verified by:**
+  - `poc/tests/integration/test_BC_151_check_docs.py`
+
 ### CAP-D001: docs/ three-folder layout — specs / plan / stories
 - **type:** technical
 - **status:** active
