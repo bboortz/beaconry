@@ -26,7 +26,7 @@ def _phony_targets() -> set[str]:
     for line in text.splitlines():
         # Fold logical continuation into one line.
         if line.startswith(".PHONY:"):
-            targets.update(line[len(".PHONY:"):].split())
+            targets.update(line[len(".PHONY:") :].split())
     return targets
 
 
@@ -44,15 +44,11 @@ def _dry_run(target: str) -> str:
 
 
 def test_hook_commit_declared_phony() -> None:
-    assert "hook-commit" in _phony_targets(), (
-        ".PHONY: hook-commit missing from Makefile"
-    )
+    assert "hook-commit" in _phony_targets(), ".PHONY: hook-commit missing from Makefile"
 
 
 def test_hook_push_declared_phony() -> None:
-    assert "hook-push" in _phony_targets(), (
-        ".PHONY: hook-push missing from Makefile"
-    )
+    assert "hook-push" in _phony_targets(), ".PHONY: hook-push missing from Makefile"
 
 
 def test_hook_commit_dry_run_resolves() -> None:
@@ -70,9 +66,7 @@ def test_hook_push_dry_run_resolves() -> None:
     # Beaconry's verify-* targets invoke `python -m poc.scripts.verify_<name>`
     # (underscores), so match on the module form.
     for marker in ("verify_version_bumped", "verify_changelog", "verify_feature_complete"):
-        assert marker in out, (
-            f"hook-push dry-run missing step marker '{marker}':\n{out}"
-        )
+        assert marker in out, f"hook-push dry-run missing step marker '{marker}':\n{out}"
 
 
 def test_check_fast_alias_target_exists() -> None:
