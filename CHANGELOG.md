@@ -4,6 +4,11 @@ All notable changes to beaconry are recorded here. The format is based
 on [Keep a Changelog](https://keepachangelog.com/), and this project
 follows [Semantic Versioning](https://semver.org/).
 
+## [v0.22.26] — 2026-11-23
+
+### Fixed
+- **ci-patch:** also install `poc/hub/requirements.txt` + `poc/scout/requirements.txt` before `make smoke`. The v0.22.25 fix mirrored ci-nightly's `pip install -e .` block, but that only pulls pyproject deps (`pyyaml`, `requests`). `make smoke` runs `python -m poc.demo` → `import hub` → `import uvicorn`, and uvicorn lives in the hub component requirements.
+
 ## [v0.22.25] — 2026-11-23
 
 ### Fixed
