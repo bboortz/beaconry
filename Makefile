@@ -1,4 +1,4 @@
-.PHONY: help lint format type test check check-docs check-full demo smoke clean cleanup install-hooks verify-traceability verify-dockerfile-health-copy verify-dockerfile-sources verify-pinned-versions verify-base-images verify-memory-drift verify-compose-env-propagation verify-compose-memory-limits verify-docs-drift verify-docs-layout verify-evidence-pointers verify-per-file-coverage verify-variables verify-install-doc verify-version-sync verify-version-bumped verify-changelog verify-feature-complete bump-patch bump-minor bump-major bump-auto changelog findings status audit soak metrics verify-integrity test-e2e live-rebuild live-status scan set-status test-scenarios test-cli dogfood-scan dogfood-sbom test-cold-start perf perf-seed
+.PHONY: help lint format type test check check-docs check-full demo smoke clean cleanup install-hooks verify-traceability verify-dockerfile-health-copy verify-dockerfile-sources verify-pinned-versions verify-base-images verify-memory-drift verify-compose-env-propagation verify-compose-memory-limits verify-docs-drift verify-docs-layout verify-evidence-pointers verify-per-file-coverage verify-variables verify-install-doc verify-index-status verify-version-sync verify-version-bumped verify-changelog verify-feature-complete bump-patch bump-minor bump-major bump-auto changelog findings status audit soak metrics verify-integrity test-e2e live-rebuild live-status scan set-status test-scenarios test-cli dogfood-scan dogfood-sbom test-cold-start perf perf-seed
 
 # Prefer the project venv (`python -m venv .venv`) when it exists so `make
 # test` / `make check` work without the user having to `source .venv/bin/activate`
@@ -43,6 +43,7 @@ help:
 	@echo "  make verify-per-file-coverage   every file ≥ 65% coverage (or allowlisted with reason)"
 	@echo "  make verify-variables           VARIABLES.md ↔ code ↔ .env.example ↔ docker-compose.yml drift (BC-039 + BC-040)"
 	@echo "  make verify-install-doc         docs/specs/INSTALL.md env vars + .PHONY entries + file paths exist (BC-056)"
+	@echo "  make verify-index-status        docs/stories/INDEX.md status column matches each story's frontmatter (BC-152 / SH-056)"
 	@echo "  make verify-version-sync        /VERSION ↔ /poc/VERSION + hardcoded-literal drift (BC-062)"
 	@echo "  make verify-version-bumped      pre-push: VERSION must bump relative to origin/dev (BC-062)"
 	@echo "  make verify-changelog           pre-push: CHANGELOG.md has entry for current VERSION (BC-069)"
@@ -537,4 +538,9 @@ hook-push:   $(PUSH_STEPS)
 # Thin delegate over beaconry's existing doc/version drift gates. Wired into
 # PUSH_STEPS + BRANCH_STEPS so stale docs are caught before a push lands and
 # again in CI on PR.
-check-docs: verify-docs-drift verify-docs-layout verify-version-sync verify-evidence-pointers verify-traceability verify-install-doc
+check-docs: verify-docs-drift verify-docs-layout verify-version-sync verify-evidence-pointers verify-traceability verify-install-doc verify-index-status
+
+# SH-056 — INDEX.md status column must match each story's frontmatter.
+# Shepherd-equivalent script, byte-identical copy (scripts/verify-index-status.sh).
+verify-index-status:
+	@scripts/verify-index-status.sh

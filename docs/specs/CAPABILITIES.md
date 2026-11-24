@@ -2530,9 +2530,17 @@ Enforcement: `poc/scripts/verify_traceability.py` runs as part of `make check`. 
 - **type:** technical
 - **status:** active
 - **origin:** BC-151 mirrors shepherd SH-055. Fleet-wide `make check-docs` entry point so agents + humans get the same answer to "are my docs consistent with the code I'm about to ship?" on every managed repo. Wired into the pre-push gate + CI on PR so doc staleness (INDEX ↔ frontmatter drift, VERSION-sync drift, missing plan/story for a `feat/*` branch) is caught before it reaches the remote.
-- **description:** `Makefile` declares `.PHONY: check-docs` as a thin delegate over beaconry's existing drift targets: `verify-docs-drift verify-docs-layout verify-version-sync verify-evidence-pointers verify-traceability verify-install-doc`. The wrapper also lands in `PUSH_STEPS` (pre-push hook) and `BRANCH_STEPS` (sourced by `ci-branch`, CI-on-PR). No new verification logic — only unifies the entry point. Shepherd PR #58 ships the shepherd-side equivalent.
+- **description:** `Makefile` declares `.PHONY: check-docs` as a thin delegate over beaconry's existing drift targets: `verify-docs-drift verify-docs-layout verify-version-sync verify-evidence-pointers verify-traceability verify-install-doc verify-index-status`. The wrapper also lands in `PUSH_STEPS` (pre-push hook) and `BRANCH_STEPS` (sourced by `ci-branch`, CI-on-PR). No new verification logic — only unifies the entry point. Shepherd PR #58 ships the shepherd-side equivalent.
 - **verified by:**
   - `poc/tests/integration/test_BC_151_check_docs.py`
+
+### CAP-S010: Fleet-tier verify-index-status drift check (shepherd SH-056)
+- **type:** technical
+- **status:** active
+- **origin:** BC-152 mirrors shepherd SH-056. PR #55 landed with 6 shipped stories still showing `draft` / `in-progress` in `docs/stories/INDEX.md` — a drift class `verify-traceability` doesn't catch because it reads status from frontmatter only, never the INDEX row. Shepherd authored `scripts/verify-index-status.sh` to close the gap; beaconry mirrors it byte-identical.
+- **description:** `scripts/verify-index-status.sh` — byte-identical copy of shepherd's reference — walks every `docs/stories/BC-NNN-<slug>.md` file, extracts `status:` from frontmatter, and compares to the status column of the matching row in `docs/stories/INDEX.md`. Mismatch, missing INDEX row, or missing frontmatter status fails rc=1 with a specific diagnostic. `make verify-index-status` invokes the script; `check-docs` lists it as a prereq (so it runs on every `hook-push` and `ci-branch`). The INDEX.md column order is now `ID | Status | Title | Branch` (status in pipe-field 3) to match the shepherd-reference script. Shepherd PR #59 ships the shepherd-side equivalent.
+- **verified by:**
+  - `poc/tests/integration/test_BC_152_verify_index_status.py`
 
 ### CAP-D001: docs/ three-folder layout — specs / plan / stories
 - **type:** technical

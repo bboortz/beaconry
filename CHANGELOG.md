@@ -4,6 +4,16 @@ All notable changes to beaconry are recorded here. The format is based
 on [Keep a Changelog](https://keepachangelog.com/), and this project
 follows [Semantic Versioning](https://semver.org/).
 
+## [v0.22.28] — 2026-11-24
+
+### Added
+- **SH-056 / BC-152:** `verify-index-status` drift check — `scripts/verify-index-status.sh` (byte-identical to shepherd's reference) compares every `docs/stories/BC-NNN-<slug>.md` frontmatter `status:` against its row in `docs/stories/INDEX.md` and fails on any mismatch or missing INDEX row for shipped+ stories. Closes the gap `verify-traceability` doesn't catch (frontmatter-only). Wired into `check-docs` → `PUSH_STEPS` + `BRANCH_STEPS`. Mirrors shepherd PR #59.
+- **BC-152:** `poc/tests/integration/test_BC_152_verify_index_status.py` (8 assertions) — asserts existence, executable bit, sha256-byte-identity to shepherd, Makefile shape, help-line echo, live pass on clean tree, live drift trips rc=1 with specific diagnostic.
+- **CAP-S010:** Fleet-tier verify-index-status drift check (shepherd SH-056).
+
+### Changed
+- **docs/stories/INDEX.md:** column order reshaped from `ID | Title | Status | Branch` to `ID | Status | Title | Branch` so the fleet-shared `verify-index-status.sh` parses correctly (status in pipe-field 3). Duplicate BC-055 row removed. Missing rows added for BC-147..BC-152. Stale rows resynced to match each story's frontmatter (the drift the new gate catches).
+
 ## [v0.22.27] — 2026-11-23
 
 ### Added
