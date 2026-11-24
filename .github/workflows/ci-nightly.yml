@@ -28,8 +28,13 @@ jobs:
         run: |
           python3 -m pip install --upgrade pip
           pip install -r requirements-dev.txt
-          # Also install the package itself so runtime deps (requests, pyyaml)
-          # are available to tests that import beaconry modules.
+          # Component-local requirements. pyproject.toml only lists CLI deps
+          # (pyyaml, requests); hub has fastapi/uvicorn/sqlalchemy and scout
+          # has docker — needed by test modules that import them. Same fix
+          # as ci-patch (PRs #112, #113).
+          pip install -r poc/hub/requirements.txt
+          pip install -r poc/scout/requirements.txt
+          # Package itself so entry points + relative imports resolve.
           pip install -e .
 
       - name: Run nightly slow lane
