@@ -4,6 +4,11 @@ All notable changes to beaconry are recorded here. The format is based
 on [Keep a Changelog](https://keepachangelog.com/), and this project
 follows [Semantic Versioning](https://semver.org/).
 
+## [v0.22.29] — 2026-11-24
+
+### Fixed
+- **ci-nightly**: `ModuleNotFoundError: docker / uvicorn / fastapi` on nightly test collection. `.github/workflows/ci-nightly.yml` only installed `pyproject.toml` deps (pyyaml, requests) — hub/scout component requirements were missing. Added `pip install -r poc/hub/requirements.txt` + `pip install -r poc/scout/requirements.txt` before `pip install -e .`. Same fix landed for ci-patch earlier via PRs #112 + #113; ci-nightly had the same gap.
+
 ## [v0.22.28] — 2026-11-24
 
 ### Added
