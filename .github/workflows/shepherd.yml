@@ -14,7 +14,7 @@ permissions:
   issues: write
 jobs:
   agent:
-    uses: bboortz/shepherd/.github/workflows/reusable-shepherd.yml@a0733f789845723b17afa5181d23c1f1fbcce058
+    uses: bboortz/shepherd/.github/workflows/reusable-shepherd.yml@4b32deb5945db1ded925b632995a8d683964e6ad
     with:
       base_branch: dev
     secrets:
