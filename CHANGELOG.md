@@ -4,6 +4,11 @@ All notable changes to beaconry are recorded here. The format is based
 on [Keep a Changelog](https://keepachangelog.com/), and this project
 follows [Semantic Versioning](https://semver.org/).
 
+## [v0.22.30] — 2026-11-28
+
+### Changed
+- **chore: re-pin shepherd caller to v0.12.0-rc1.** `shepherd.yml` + `shepherd-gates.yml` reusable-workflow refs moved from `a0733f7` to `4b32deb` (shepherd v0.12.0-rc1). Fleet-audit pin-freshness drift; brings beaconry in line with homelab/kernel-test/forge.
+
 ## [v0.22.29] — 2026-11-24
 
 ### Fixed
