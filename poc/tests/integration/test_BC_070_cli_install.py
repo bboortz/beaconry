@@ -114,14 +114,17 @@ def test_pyproject_declares_entry_point() -> None:
 
 
 def test_pyproject_version_matches_version_file() -> None:
-    """CAP-T150 regression guard: a bump that forgets the pyproject literal
-    would ship a wheel with the wrong metadata version. verify-version-sync
-    doesn't check pyproject today — this covers it."""
+    """CAP-T150 regression guard: version is single-sourced. pyproject declares
+    it dynamic and reads it from the VERSION file, so the wheel metadata can
+    never drift from VERSION and a bump touches exactly one file."""
     repo_root = Path(__file__).resolve().parents[3]
     with (repo_root / "pyproject.toml").open("rb") as f:
         pyproject = tomllib.load(f)
-    live = (repo_root / "VERSION").read_text().strip()
-    assert pyproject["project"]["version"] == live
+    project = pyproject["project"]
+    assert "version" in project.get("dynamic", []), "version must be dynamic"
+    assert "version" not in project, "no hardcoded version literal allowed"
+    src = pyproject["tool"]["setuptools"]["dynamic"]["version"]["file"]
+    assert src == "VERSION", f"version must derive from VERSION, got {src!r}"
 
 
 def test_pyproject_declares_runtime_dependencies() -> None:

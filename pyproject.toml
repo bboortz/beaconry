@@ -1,9 +1,10 @@
 [project]
 name = "beaconry"
-# BC-062: VERSION file is the single source of truth; this literal is only
-# a build-time placeholder (setuptools-dynamic would rebuild on every bump,
-# which is more friction than value). verify-version-sync lint catches drift.
-version = "0.22.30"
+# BC-062 / single-source: the root VERSION file is the ONLY place the version
+# is edited. pyproject reads it dynamically so wheel metadata can never drift
+# from VERSION (see [tool.setuptools.dynamic]). poc/VERSION is a Docker-context
+# mirror written by `make bump-*` and lint-checked by verify-version-sync.
+dynamic = ["version"]
 description = "CVE scanning + auto-remediation for self-hosted operators"
 # BC-078: distroless runtime image ships Python 3.11 (debian-12 default).
 # Local dev + CI can still use 3.12; the floor just permits the runtime.
@@ -28,6 +29,9 @@ build-backend = "setuptools.build_meta"
 # multiple top-level dirs exist — poc/ + memory/) before the include filter
 # is applied. This is equivalent to the old find with include=["poc*"] minus
 # test/scenario packages.
+[tool.setuptools.dynamic]
+version = { file = "VERSION" }
+
 [tool.setuptools]
 packages = [
     "poc",
